@@ -10,6 +10,7 @@ import {
   type OperatorHostPage,
   type OperatorHostView
 } from "@planweave-ai/agent-host-protocol";
+import { remoteEventReplaySchema } from "@planweave-ai/collaboration-protocol/remote-run";
 import {
   remoteAgentEndpointListSchema,
   type RemoteAgentEndpointList
@@ -179,7 +180,21 @@ export class OperatorControlClient {
     const { operatorObservationToRemoteRun } = await import("./operatorRemoteOperations.js");
     const id = opaqueIdentifierSchema.parse(operationId);
     return operatorObservationToRemoteRun(
-      await this.json("GET", `/api/v1/remote-operations/${encodeURIComponent(id)}`, z.object({}).passthrough())
+      await this.json(
+        "GET",
+        `/api/v1/remote-operations/${encodeURIComponent(id)}`,
+        z.object({}).passthrough()
+      )
+    );
+  }
+
+  async replayRemoteOperationEvents(operationId: string, afterCursor: number) {
+    const id = opaqueIdentifierSchema.parse(operationId);
+    const params = new URLSearchParams({ afterCursor: String(afterCursor) });
+    return this.json(
+      "GET",
+      `/api/v1/remote-operations/${encodeURIComponent(id)}/events?${params.toString()}`,
+      remoteEventReplaySchema
     );
   }
 
@@ -313,7 +328,10 @@ export class OperatorControlClient {
       }
       chunks.push(value);
     }
-    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), totalBytes).toString("utf8");
+    return Buffer.concat(
+      chunks.map((chunk) => Buffer.from(chunk)),
+      totalBytes
+    ).toString("utf8");
   }
 }
 

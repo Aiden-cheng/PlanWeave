@@ -437,6 +437,7 @@ export function ProjectWorkspaceProvider({
     agentEndpointCatalog: agentEndpointCatalog.endpoints,
     agentEndpointPreferences: settings.execution.agentEndpointPreferences,
     history: appHistory,
+    operatorProfileId: ownerControlPlane.operatorProfileId,
     saveAgentEndpointPreference: agentEndpointCatalog.savePreference,
     sharedCanvas: sharedCanvasCommands
   });
@@ -1024,8 +1025,7 @@ export function ProjectWorkspaceProvider({
     updateGlobalPrompt,
     updateSettingsAndWait,
     updateSettings,
-    updateCollaborationScopeLayout: (patch) =>
-      updateLayoutSettings({ collaborationScope: patch }),
+    updateCollaborationScopeLayout: (patch) => updateLayoutSettings({ collaborationScope: patch }),
     onContentMaterialized: () =>
       refreshProjectDerivedState({
         requireCurrentCanvas: true,

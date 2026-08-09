@@ -167,10 +167,11 @@ export function useWorkspaceAgentEndpointRun(
         Boolean(input.ownerFleetDispatchEnabled) &&
         Boolean(input.operatorProfileId) &&
         Boolean(operatorControlBridge);
+      const usesOwnerFleetDispatch = usesRemoteEndpoint && ownerFleetReady;
       const collaborationReady = Boolean(
         input.collaborationController && api && input.activeProjectId
       );
-      if (usesRemoteEndpoint && !ownerFleetReady && !collaborationReady) {
+      if (usesRemoteEndpoint && !usesOwnerFleetDispatch && !collaborationReady) {
         input.setError("owner_fleet_dispatch_unavailable");
         return;
       }
@@ -228,7 +229,7 @@ export function useWorkspaceAgentEndpointRun(
             return detail.remoteExecution;
           });
         const ownerFleetApi =
-          ownerFleetReady && input.operatorProfileId
+          usesOwnerFleetDispatch && input.operatorProfileId
             ? wrapOwnerFleetApiForOperationTracking(
                 createOwnerFleetRemoteDispatchApi({
                   operatorProfileId: input.operatorProfileId,
@@ -238,13 +239,15 @@ export function useWorkspaceAgentEndpointRun(
               )
             : null;
         const executeBlock = createAgentEndpointBlockExecutor({
-          activeProjectId: input.activeProjectId ?? selectedProject.projectId,
+          activeProjectId: usesOwnerFleetDispatch
+            ? selectedProject.projectId
+            : (input.activeProjectId ?? selectedProject.projectId),
           canvasId: selectedCanvasId,
           selectionByBlockRef,
           collaborationController: input.collaborationController,
-          api: ownerFleetReady ? null : api,
+          api: usesOwnerFleetDispatch ? null : api,
           ownerFleetApi,
-          resolveRemoteWorkAuthority: ownerFleetReady
+          resolveRemoteWorkAuthority: usesOwnerFleetDispatch
             ? async () => ({ revisions: { responsibilityRevision: 0, reviewerRevision: 0 } })
             : undefined,
           resolveLiveRemoteBinding,
@@ -331,7 +334,7 @@ export function useWorkspaceAgentEndpointRun(
           },
           completion: {
             isSatisfied: async (options) => {
-              if (ownerFleetReady && !collaborationReady) {
+              if (usesOwnerFleetDispatch) {
                 return isOwnerFleetScopeSatisfied(options);
               }
               const readStatus = async () => {

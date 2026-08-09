@@ -5,14 +5,12 @@ import type {
   RemoteOperationObservation
 } from "@planweave-ai/collaboration-protocol/remote-run";
 import { useEffect, useMemo, useState } from "react";
-import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 
-type RemoteConversationApi = Pick<
-  PlanWeaveCollaborationApi,
-  | "observeCollaborationRemoteOperation"
-  | "onCollaborationObserverSignal"
-  | "replayCollaborationRemoteOperationEvents"
->;
+export type RemoteTaskWorkspaceConversationApi = {
+  observe(operationId: string): Promise<RemoteOperationObservation>;
+  replay(operationId: string, afterCursor: number): Promise<RemoteEventReplay>;
+  subscribe?(refresh: () => void): () => void;
+};
 
 export type RemoteTaskWorkspaceConversation = {
   blockRef: string;
@@ -29,16 +27,13 @@ const terminalStates = new Set<RemoteOperationObservation["state"]>([
 ]);
 
 async function replayAll(
-  api: RemoteConversationApi,
+  api: RemoteTaskWorkspaceConversationApi,
   operationId: string
 ): Promise<RemoteEventReplay["events"]> {
   const events: RemoteEventReplay["events"] = [];
   let afterCursor = 0;
   for (;;) {
-    const replay = await api.replayCollaborationRemoteOperationEvents({
-      operationId,
-      query: { afterCursor }
-    });
+    const replay = await api.replay(operationId, afterCursor);
     events.push(...replay.events);
     if (!replay.hasMore || replay.cursor <= afterCursor) return events;
     afterCursor = replay.cursor;
@@ -46,7 +41,7 @@ async function replayAll(
 }
 
 export function useRemoteTaskWorkspaceConversation(input: {
-  api: RemoteConversationApi | null;
+  api: RemoteTaskWorkspaceConversationApi | null;
   blockRef: string | null;
   operationId: string | null;
   onTerminal: () => void;
@@ -79,10 +74,21 @@ export function useRemoteTaskWorkspaceConversation(input: {
       if (timer) clearTimeout(timer);
       timer = null;
       try {
-        const [observation, events] = await Promise.all([
-          api.observeCollaborationRemoteOperation({ operationId }),
-          replayAll(api, operationId)
-        ]);
+        const observation = await api.observe(operationId);
+        if (disposed) return;
+        if (terminalStates.has(observation.state)) {
+          setSnapshot({
+            key,
+            error: observation.failure
+              ? `${observation.failure.message} (${observation.failure.code})`
+              : null,
+            events: [],
+            state: observation.state
+          });
+          input.onTerminal();
+          return;
+        }
+        const events = await replayAll(api, operationId);
         if (disposed) return;
         setSnapshot({
           key,
@@ -92,8 +98,7 @@ export function useRemoteTaskWorkspaceConversation(input: {
           events,
           state: observation.state
         });
-        if (terminalStates.has(observation.state)) input.onTerminal();
-        else schedule();
+        schedule();
       } catch (error) {
         if (disposed) return;
         setSnapshot({
@@ -108,11 +113,7 @@ export function useRemoteTaskWorkspaceConversation(input: {
       }
     };
     setSnapshot({ key, error: null, events: [], state: "loading" });
-    const unsubscribe = api.onCollaborationObserverSignal((signal) => {
-      if (signal.type === "human.observer.event" && signal.event.kind === "remote_run") {
-        void refresh();
-      }
-    });
+    const unsubscribe = api.subscribe?.(() => void refresh()) ?? (() => undefined);
     void refresh();
     return () => {
       disposed = true;

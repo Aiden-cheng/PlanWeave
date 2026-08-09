@@ -21,6 +21,7 @@ import {
   operatorRevokeHostInputSchema,
   operatorDispatchOwnerFleetRemoteOperationInputSchema,
   operatorObserveOwnerFleetRemoteOperationInputSchema,
+  operatorReplayOwnerFleetRemoteOperationEventsInputSchema,
   operatorExecuteOwnerFleetRemoteOperationActionInputSchema,
   OperatorControlError,
   type OperatorControlProfile,
@@ -387,9 +388,7 @@ export class OperatorControlService {
   ): Promise<Awaited<ReturnType<OperatorControlClient["listAgentEndpoints"]>>> {
     assertNoSmuggledOperatorSecrets(input, "listAgentEndpoints");
     const parsed = operatorListAgentEndpointsInputSchema.parse(input);
-    return this.enqueue(() =>
-      this.withProfile(parsed, (client) => client.listAgentEndpoints())
-    );
+    return this.enqueue(() => this.withProfile(parsed, (client) => client.listAgentEndpoints()));
   }
 
   async createEnrollmentGrant(
@@ -542,7 +541,9 @@ export class OperatorControlService {
   }
 
   async dispatchOwnerFleetRemoteOperation(input: unknown) {
-    assertNoSmuggledOperatorSecrets(input, "dispatchOwnerFleetRemoteOperation");
+    assertNoSmuggledOperatorSecrets(input, "dispatchOwnerFleetRemoteOperation", {
+      allowedRootFields: ["command"]
+    });
     const parsed = operatorDispatchOwnerFleetRemoteOperationInputSchema.parse(input);
     return this.enqueue(() =>
       this.withProfile(parsed, (client, value) => client.dispatchRemoteOperation(value.command))
@@ -554,6 +555,16 @@ export class OperatorControlService {
     const parsed = operatorObserveOwnerFleetRemoteOperationInputSchema.parse(input);
     return this.enqueue(() =>
       this.withProfile(parsed, (client, value) => client.observeRemoteOperation(value.operationId))
+    );
+  }
+
+  async replayOwnerFleetRemoteOperationEvents(input: unknown) {
+    assertNoSmuggledOperatorSecrets(input, "replayOwnerFleetRemoteOperationEvents");
+    const parsed = operatorReplayOwnerFleetRemoteOperationEventsInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, (client, value) =>
+        client.replayRemoteOperationEvents(value.operationId, value.query.afterCursor)
+      )
     );
   }
 
@@ -584,9 +595,7 @@ export class OperatorControlService {
         serverBaseUrl: profile.serverBaseUrl,
         allowInsecureTransport: profile.allowInsecureTransport
       },
-      ...(this.localOperatorBackend !== undefined
-        ? { backend: this.localOperatorBackend }
-        : {})
+      ...(this.localOperatorBackend !== undefined ? { backend: this.localOperatorBackend } : {})
     });
     const client = this.createClient({
       profile: operatorControlProfileSchema.parse({
@@ -595,8 +604,7 @@ export class OperatorControlService {
         serverBaseUrl: effective.serverBaseUrl,
         allowInsecureTransport: effective.allowInsecureTransport,
         ...(profile.endpoint &&
-        new URL(profile.endpoint.serverOrigin).origin ===
-          new URL(effective.serverBaseUrl).origin
+        new URL(profile.endpoint.serverOrigin).origin === new URL(effective.serverBaseUrl).origin
           ? { endpoint: profile.endpoint }
           : {}),
         ...(profile.operatorId ? { operatorId: profile.operatorId } : {})

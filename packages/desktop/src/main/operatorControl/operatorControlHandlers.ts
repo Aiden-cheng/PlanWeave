@@ -131,6 +131,10 @@ export function registerOperatorControlHandlers(
     (_event, input: unknown) => active.observeOwnerFleetRemoteOperation(input)
   );
   ipcMain.handle(
+    operatorControlInvokeChannels.replayOwnerFleetRemoteOperationEvents,
+    (_event, input: unknown) => active.replayOwnerFleetRemoteOperationEvents(input)
+  );
+  ipcMain.handle(
     operatorControlInvokeChannels.executeOwnerFleetRemoteOperationAction,
     (_event, input: unknown) => active.executeOwnerFleetRemoteOperationAction(input)
   );

@@ -355,6 +355,7 @@ function renderOwnerFleetRun(input?: {
   previewClaimNext?: ReturnType<typeof vi.fn>;
   waitForTerminal?: ReturnType<typeof vi.fn>;
   getBlockDetail?: ReturnType<typeof vi.fn>;
+  withCollaborationRuntime?: boolean;
 }) {
   const setError = vi.fn();
   const lifecycle = {
@@ -379,6 +380,11 @@ function renderOwnerFleetRun(input?: {
       status: "ready" as const,
       remoteExecution: null
     }));
+  const readCollaborationCanvasRuntimeStatus = vi.fn(async () => {
+    throw new Error("collaboration_runtime_status_unavailable");
+  });
+  const dispatchCollaborationRemoteOperation = vi.fn();
+  const ensureWorkAuthority = vi.fn();
   bridgeMock.getBlockDetail.mockImplementation(getBlockDetail);
   operatorControlBridgeMock.dispatchOwnerFleetRemoteOperation.mockResolvedValue(
     operation("running")
@@ -388,9 +394,9 @@ function renderOwnerFleetRun(input?: {
   );
   const hook = renderHook(() => {
     const startWithEndpoint = useWorkspaceAgentEndpointRun({
-      activeProjectId: null,
+      activeProjectId: input?.withCollaborationRuntime ? "project-server" : null,
       agentEndpoints: [remoteEndpoint],
-      collaborationController: null,
+      collaborationController: input?.withCollaborationRuntime ? { ensureWorkAuthority } : null,
       graph,
       preferences: {
         [taskPreferenceKey]: {
@@ -403,6 +409,15 @@ function renderOwnerFleetRun(input?: {
       operatorProfileId: "profile-a",
       ownerFleetDispatchEnabled: true,
       setError,
+      api: input?.withCollaborationRuntime
+        ? {
+            dispatchCollaborationRemoteOperation,
+            observeCollaborationRemoteOperation: vi.fn(),
+            executeCollaborationRemoteOperationAction: vi.fn(),
+            onCollaborationObserverSignal: vi.fn(() => () => undefined),
+            readCollaborationCanvasRuntimeStatus
+          }
+        : null,
       createId: () => "operation-fleet-1",
       localAutoRunApi: {
         getAutoRunState: vi.fn(async () =>
@@ -424,7 +439,10 @@ function renderOwnerFleetRun(input?: {
     startLocal,
     previewClaimNext,
     waitForTerminal,
-    getBlockDetail
+    getBlockDetail,
+    readCollaborationCanvasRuntimeStatus,
+    dispatchCollaborationRemoteOperation,
+    ensureWorkAuthority
   };
 }
 
@@ -1240,6 +1258,35 @@ describe("workspace Agent Endpoint routing", () => {
       })
     });
     expect(lifecycle.onCompleted).toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("keeps owner fleet authority when a legacy collaboration runtime is also present", async () => {
+    const {
+      result,
+      lifecycle,
+      setError,
+      readCollaborationCanvasRuntimeStatus,
+      dispatchCollaborationRemoteOperation,
+      ensureWorkAuthority
+    } = renderOwnerFleetRun({ withCollaborationRuntime: true });
+
+    await act(() => result.current({ kind: "project" }));
+
+    expect(operatorControlBridgeMock.dispatchOwnerFleetRemoteOperation).toHaveBeenCalledWith({
+      profileId: "profile-a",
+      command: expect.objectContaining({
+        projectId: "project-local",
+        canvasId: "canvas-main",
+        blockRef: "T-001#B-001",
+        agentEndpointId: "endpoint-windows"
+      })
+    });
+    expect(dispatchCollaborationRemoteOperation).not.toHaveBeenCalled();
+    expect(readCollaborationCanvasRuntimeStatus).not.toHaveBeenCalled();
+    expect(ensureWorkAuthority).not.toHaveBeenCalled();
+    expect(lifecycle.onCompleted).toHaveBeenCalledTimes(1);
+    expect(lifecycle.onFailed).not.toHaveBeenCalled();
     expect(setError).not.toHaveBeenCalled();
   });
 

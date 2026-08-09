@@ -545,6 +545,8 @@ const operatorControlApi: PlanWeaveOperatorControlApi = {
     ipcRenderer.invoke(operatorControlInvokeChannels.dispatchOwnerFleetRemoteOperation, input),
   observeOwnerFleetRemoteOperation: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.observeOwnerFleetRemoteOperation, input),
+  replayOwnerFleetRemoteOperationEvents: async (input) =>
+    ipcRenderer.invoke(operatorControlInvokeChannels.replayOwnerFleetRemoteOperationEvents, input),
   executeOwnerFleetRemoteOperationAction: async (input) =>
     ipcRenderer.invoke(operatorControlInvokeChannels.executeOwnerFleetRemoteOperationAction, input),
   onOperatorControlStatusChanged: (callback) => {

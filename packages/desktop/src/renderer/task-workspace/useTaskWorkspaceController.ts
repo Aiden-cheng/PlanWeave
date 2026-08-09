@@ -12,7 +12,8 @@ import type {
 } from "@planweave-ai/runtime";
 import type { DesktopAgentEndpointPreference } from "../../shared/desktopSettings";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
-import { bridge, collaborationBridge } from "../bridge";
+import type { PlanWeaveOperatorControlApi } from "../../shared/operatorControl";
+import { bridge, collaborationBridge, operatorControlBridge } from "../bridge";
 import {
   agentEndpointPreferenceKey,
   agentEndpointSelectionId,
@@ -44,6 +45,7 @@ import {
 } from "./taskWorkspaceSharedProjection";
 import { useTaskWorkspaceExecutorActions } from "./useTaskWorkspaceExecutorActions";
 import { useRemoteTaskWorkspaceConversation } from "./useRemoteTaskWorkspaceConversation";
+import { remoteTaskWorkspaceConversationSource } from "./remoteTaskWorkspaceConversationSource";
 import {
   agentFamilyFromExecutorName,
   diskSelectedRecordId,
@@ -212,6 +214,11 @@ export function useTaskWorkspaceController(options: {
     | "onCollaborationObserverSignal"
     | "replayCollaborationRemoteOperationEvents"
   > | null;
+  operatorApi?: Pick<
+    PlanWeaveOperatorControlApi,
+    "observeOwnerFleetRemoteOperation" | "replayOwnerFleetRemoteOperationEvents"
+  > | null;
+  operatorProfileId?: string | null;
   history: AppViewHistoryController;
   saveAgentEndpointPreference: (
     key: string,
@@ -225,6 +232,8 @@ export function useTaskWorkspaceController(options: {
     agentEndpointPreferences,
     api = bridge,
     collaborationApi = collaborationBridge,
+    operatorApi = operatorControlBridge,
+    operatorProfileId = null,
     history,
     saveAgentEndpointPreference,
     sharedCanvas = null
@@ -358,7 +367,8 @@ export function useTaskWorkspaceController(options: {
           });
           return;
         }
-        const selectedHint = diskSelectedRecordId(currentNavigation.recordId) ?? header.selectedRecordId;
+        const selectedHint =
+          diskSelectedRecordId(currentNavigation.recordId) ?? header.selectedRecordId;
         const pageItems: TaskWorkspaceRunListItem[] = runsPage.items.map((item) => ({
           ...item,
           selected: selectedHint !== null && item.run.record.recordId === selectedHint
@@ -386,10 +396,7 @@ export function useTaskWorkspaceController(options: {
         setLoadingMoreRuns(false);
         loadingMoreRef.current = false;
         const selected = initialRunForNavigation(workspace, currentNavigation);
-        const liveSelection = preferredRemoteLiveSelection(
-          workspace,
-          currentNavigation.blockRef
-        );
+        const liveSelection = preferredRemoteLiveSelection(workspace, currentNavigation.blockRef);
         // Prefer the live remote attempt over a stale historical record while remote is active.
         if (
           liveSelection &&
@@ -537,8 +544,23 @@ export function useTaskWorkspaceController(options: {
   const selectedRemoteExecution = workspace?.blocks.find(
     (block) => block.ref === selectedBlockRef
   )?.remoteExecution;
+  const remoteExecutionVersion =
+    workspace?.blocks.map((block) => block.remoteExecution?.identity.operationId).join("|") ?? "";
+  const selectedRemoteControlPlane = selectedRemoteExecution?.controlPlane ?? null;
+  const remoteConversationApi = useMemo(
+    () =>
+      selectedRemoteControlPlane
+        ? remoteTaskWorkspaceConversationSource({
+            controlPlane: selectedRemoteControlPlane,
+            collaborationApi,
+            operatorApi,
+            operatorProfileId
+          })
+        : null,
+    [collaborationApi, operatorApi, operatorProfileId, selectedRemoteControlPlane]
+  );
   const remoteConversation = useRemoteTaskWorkspaceConversation({
-    api: collaborationApi,
+    api: remoteConversationApi,
     blockRef: selectedBlockRef || null,
     operationId:
       selectedRemoteExecution &&
@@ -549,6 +571,8 @@ export function useTaskWorkspaceController(options: {
   });
 
   useEffect(() => {
+    // Synthetic remote-live rows are projected from workspace state rather than disk records.
+    void remoteExecutionVersion;
     const request = ++recordRequest.current;
     if (
       !api ||
@@ -674,8 +698,7 @@ export function useTaskWorkspaceController(options: {
     overviewSelected,
     selectedBlockRef,
     selectedRecordKey,
-    // Re-project synthetic remote-live rows when workspace remoteExecution changes.
-    workspace?.blocks.map((block) => block.remoteExecution?.identity.operationId).join("|") ?? ""
+    remoteExecutionVersion
   ]);
 
   const selectedRecord =

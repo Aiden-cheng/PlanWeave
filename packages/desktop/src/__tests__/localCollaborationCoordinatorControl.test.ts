@@ -43,7 +43,7 @@ const project: DesktopProjectSummary = {
     {
       canvasId: "canvas-1",
       name: "Canvas",
-      packageDir: null,
+      packageDir: "/test/project/package",
       executionPolicy: null,
       taskCount: 0,
       missingPromptCount: 0,
@@ -404,6 +404,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
     let configFactory:
       | ((profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig)
       | undefined;
+    let ownerTrustedProjects: ServerConfig["trustedProjects"] | undefined;
     const fake = fakeControl();
     const control = new LocalCollaborationCoordinatorControl({
       safeStorage,
@@ -415,8 +416,9 @@ describe("LocalCollaborationCoordinatorControl", () => {
         resolveAuthorityProjectId: async (root, canvasId) =>
           `${root === nextProject.rootPath ? "authority-project-2" : authorityProjectId}-${canvasId}`
       },
-      createController: (createConfig) => {
+      createController: (createConfig, _onLifecycleError, ownerProjects) => {
         configFactory = createConfig;
+        ownerTrustedProjects = ownerProjects;
         return fake.control;
       },
       allocatePort: async () => 18_787
@@ -443,6 +445,101 @@ describe("LocalCollaborationCoordinatorControl", () => {
         canvasId: "canvas-2"
       }),
       expect.objectContaining({ projectId: "authority-project-2-canvas-1", canvasId: "canvas-1" })
+    ]);
+    expect(ownerTrustedProjects).toEqual([
+      expect.objectContaining({
+        projectId: `${authorityProjectId}-canvas-1`,
+        canvasId: "canvas-1",
+        trustAllDeclaredCanvases: false
+      }),
+      expect.objectContaining({
+        projectId: `${authorityProjectId}-canvas-2`,
+        canvasId: "canvas-2",
+        trustAllDeclaredCanvases: false
+      }),
+      expect.objectContaining({
+        projectId: "authority-project-2-canvas-1",
+        canvasId: "canvas-1",
+        trustAllDeclaredCanvases: false
+      })
+    ]);
+    expect(ownerTrustedProjects).toHaveLength(3);
+  });
+
+  it("starts the Owner Fleet without any collaboration canvas scope", async () => {
+    let configFactory:
+      | ((profile: NonNullable<LoopbackServerStatus["profile"]>) => ServerConfig)
+      | undefined;
+    let ownerTrustedProjects: ServerConfig["trustedProjects"] | undefined;
+    const fake = fakeControl();
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      syncOperatorProfile: async () => undefined,
+      scopeStore: scopeStore([]),
+      networkStore: networkStore(),
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: (createConfig, _onLifecycleError, ownerProjects) => {
+        configFactory = createConfig;
+        ownerTrustedProjects = ownerProjects;
+        return fake.control;
+      },
+      allocatePort: async () => 18_787
+    });
+
+    const status = await control.start();
+
+    expect(status.state).toBe("running");
+    expect(
+      configFactory!(status.profile! as NonNullable<LoopbackServerStatus["profile"]>)
+        .trustedProjects
+    ).toEqual([]);
+    expect(ownerTrustedProjects).toEqual([
+      expect.objectContaining({
+        projectId: authorityProjectId,
+        canvasId: "canvas-1",
+        trustAllDeclaredCanvases: false
+      })
+    ]);
+  });
+
+  it("reloads the Owner runtime when a newly declared canvas is selected", async () => {
+    let catalog = project;
+    const ownerCatalogs: ServerConfig["trustedProjects"][] = [];
+    const fake = fakeControl();
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      syncOperatorProfile: async () => undefined,
+      scopeStore: scopeStore([]),
+      networkStore: networkStore(),
+      projects: {
+        listProjects: async () => [catalog],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: (_createConfig, _onLifecycleError, ownerProjects) => {
+        ownerCatalogs.push(ownerProjects);
+        return fake.control;
+      },
+      allocatePort: async () => 18_787
+    });
+
+    await expect(control.start()).resolves.toMatchObject({ state: "running" });
+    catalog = {
+      ...project,
+      taskCanvases: [
+        ...project.taskCanvases,
+        { ...project.taskCanvases[0]!, canvasId: "canvas-2", name: "Canvas 2" }
+      ]
+    };
+
+    await control.setCurrentSelection({ projectId: project.projectId, canvasId: "canvas-2" });
+
+    expect(fake.apply).toHaveBeenCalledTimes(3);
+    expect(ownerCatalogs.at(-1)).toEqual([
+      expect.objectContaining({ canvasId: "canvas-1" }),
+      expect.objectContaining({ canvasId: "canvas-2" })
     ]);
   });
 

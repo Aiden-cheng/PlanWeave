@@ -90,6 +90,33 @@ describe("Desktop operator control trust boundary", () => {
     ).toThrow(/too many/);
   });
 
+  it("allows a declared root command while still rejecting nested transport escapes", () => {
+    expect(() =>
+      assertNoSmuggledOperatorSecrets(
+        {
+          profileId: "profile-a",
+          command: { schemaVersion: "remote-run/v3", projectId: "project-a" }
+        },
+        "dispatchOwnerFleetRemoteOperation",
+        { allowedRootFields: ["command"] }
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertNoSmuggledOperatorSecrets(
+        {
+          profileId: "profile-a",
+          command: {
+            schemaVersion: "remote-run/v3",
+            projectId: "project-a",
+            transport: { path: "/tmp/smuggled-credential" }
+          }
+        },
+        "dispatchOwnerFleetRemoteOperation",
+        { allowedRootFields: ["command"] }
+      )
+    ).toThrow(/field "path" is not allowed/);
+  });
+
   it("uses safeStorage or explicit session-only persistence without plaintext", async () => {
     const directory = await root("planweave-operator-vault-");
     const durablePath = join(directory, "credentials.json");
@@ -603,20 +630,52 @@ describe("Desktop operator control trust boundary", () => {
     expect(JSON.stringify(requests)).toContain(tokenA);
   });
 
+  it("replays Owner fleet ACP events through the Operator API", async () => {
+    const request = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe(
+        "https://operator.example.test/api/v1/remote-operations/operation-owner-001/events?afterCursor=7"
+      );
+      return new Response(
+        JSON.stringify({
+          executionAttemptId: "attempt-owner-001",
+          afterCursor: 7,
+          cursor: 9,
+          highWatermark: 9,
+          hasMore: false,
+          events: [],
+          diagnostics: []
+        }),
+        { status: 200 }
+      );
+    });
+    const client = new OperatorControlClient({
+      profile: profile("profile-a"),
+      credential: { getOperatorToken: () => tokenA },
+      request
+    });
+
+    await expect(client.replayRemoteOperationEvents("operation-owner-001", 7)).resolves.toEqual(
+      expect.objectContaining({ afterCursor: 7, cursor: 9, events: [] })
+    );
+  });
+
   it("routes local-owned Operator HTTP through loopback instead of Tailscale origin", async () => {
     const directory = await root("planweave-operator-loopback-");
     const seenBases: string[] = [];
-    const createClient = vi.fn((options: ConstructorParameters<typeof OperatorControlClient>[0]) => {
-      seenBases.push(options.profile.serverBaseUrl);
-      return new OperatorControlClient({
-        ...options,
-        request: vi.fn(async () =>
-          new Response(JSON.stringify({ schemaVersion: "agent-endpoint-list/v1", items: [] }), {
-            status: 200
-          })
-        )
-      });
-    });
+    const createClient = vi.fn(
+      (options: ConstructorParameters<typeof OperatorControlClient>[0]) => {
+        seenBases.push(options.profile.serverBaseUrl);
+        return new OperatorControlClient({
+          ...options,
+          request: vi.fn(
+            async () =>
+              new Response(JSON.stringify({ schemaVersion: "agent-endpoint-list/v1", items: [] }), {
+                status: 200
+              })
+          )
+        });
+      }
+    );
     const service = new OperatorControlService({
       profileStore: new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") }),
       vault: new OperatorCredentialVault({
@@ -650,17 +709,20 @@ describe("Desktop operator control trust boundary", () => {
   it("keeps remote Operator profiles on their persisted serverBaseUrl", async () => {
     const directory = await root("planweave-operator-remote-no-bypass-");
     const seenBases: string[] = [];
-    const createClient = vi.fn((options: ConstructorParameters<typeof OperatorControlClient>[0]) => {
-      seenBases.push(options.profile.serverBaseUrl);
-      return new OperatorControlClient({
-        ...options,
-        request: vi.fn(async () =>
-          new Response(JSON.stringify({ schemaVersion: "agent-endpoint-list/v1", items: [] }), {
-            status: 200
-          })
-        )
-      });
-    });
+    const createClient = vi.fn(
+      (options: ConstructorParameters<typeof OperatorControlClient>[0]) => {
+        seenBases.push(options.profile.serverBaseUrl);
+        return new OperatorControlClient({
+          ...options,
+          request: vi.fn(
+            async () =>
+              new Response(JSON.stringify({ schemaVersion: "agent-endpoint-list/v1", items: [] }), {
+                status: 200
+              })
+          )
+        });
+      }
+    );
     const service = new OperatorControlService({
       profileStore: new OperatorProfileStore({ profilesPath: join(directory, "profiles.json") }),
       vault: new OperatorCredentialVault({
@@ -680,9 +742,10 @@ describe("Desktop operator control trust boundary", () => {
     await service.upsertProfile(profile("profile-remote", "https://remote-operator.example/"));
     await service.importCredential({ profileId: "profile-remote", operatorToken: tokenA });
 
-    await expect(
-      service.listAgentEndpoints({ profileId: "profile-remote" })
-    ).resolves.toEqual({ schemaVersion: "agent-endpoint-list/v1", items: [] });
+    await expect(service.listAgentEndpoints({ profileId: "profile-remote" })).resolves.toEqual({
+      schemaVersion: "agent-endpoint-list/v1",
+      items: []
+    });
     expect(seenBases).toEqual(["https://remote-operator.example/"]);
   });
 

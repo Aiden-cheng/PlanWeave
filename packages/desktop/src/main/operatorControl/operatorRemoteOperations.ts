@@ -8,6 +8,7 @@ import {
   type RemoteHumanExecutionActionCommand,
   type RemoteOperationObservation
 } from "@planweave-ai/collaboration-protocol/remote-run";
+import { remoteBlockBindingViewSchema } from "@planweave-ai/runtime";
 import { z, type ZodType } from "zod";
 
 const operatorOperationViewSchema = z
@@ -23,7 +24,7 @@ const operatorOperationViewSchema = z
     updatedAt: z.string().min(1),
     terminalAt: z.string().optional(),
     attempt: z.object({}).passthrough(),
-    runtime: z.object({}).passthrough(),
+    runtime: remoteBlockBindingViewSchema,
     dispatchStatus: z.string().optional(),
     failure: z.object({}).passthrough().optional(),
     agentEndpoint: z.object({}).passthrough().optional()
@@ -33,6 +34,8 @@ const operatorOperationViewSchema = z
 /** Map operator observation wire to collaboration remote-run observation for claim-bus reuse. */
 export function operatorObservationToRemoteRun(input: unknown): RemoteOperationObservation {
   const view = operatorOperationViewSchema.parse(input);
+  const ownership = view.runtime.ownership;
+  const terminalReceipt = view.runtime.terminalReceipt;
   return remoteOperationObservationSchema.parse({
     operationId: view.operationId,
     projectId: view.projectId,
@@ -48,7 +51,39 @@ export function operatorObservationToRemoteRun(input: unknown): RemoteOperationO
     ...(view.dispatchStatus === undefined ? {} : { dispatchStatus: view.dispatchStatus }),
     ...(view.failure === undefined ? {} : { failure: view.failure }),
     ...(view.agentEndpoint === undefined ? {} : { agentEndpoint: view.agentEndpoint }),
-    runtime: view.runtime
+    runtime: {
+      ref: view.runtime.ref,
+      status: view.runtime.status,
+      ...(ownership
+        ? {
+            ownership: {
+              operationId: ownership.operationId,
+              phase: ownership.phase,
+              ...(ownership.phase === "active"
+                ? {
+                    dispatchId: ownership.dispatchId,
+                    executionAttemptId: ownership.executionAttemptId
+                  }
+                : {})
+            }
+          }
+        : {}),
+      ...(view.runtime.interruption ? { interruption: view.runtime.interruption } : {}),
+      ...(terminalReceipt
+        ? {
+            terminalReceipt: {
+              operationId: terminalReceipt.operationId,
+              outcome: terminalReceipt.outcome
+            }
+          }
+        : {}),
+      ...(view.runtime.blockedReason !== undefined
+        ? { blockedReason: view.runtime.blockedReason }
+        : {}),
+      ...(view.runtime.divergenceReason !== undefined
+        ? { divergenceReason: view.runtime.divergenceReason }
+        : {})
+    }
   });
 }
 

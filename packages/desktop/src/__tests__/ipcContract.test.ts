@@ -123,6 +123,9 @@ describe("desktop IPC contract", () => {
     expect(operatorControlInvokeChannels.enrollLocalAgentHost).toBe(
       "planweave-operator:enrollLocalAgentHost"
     );
+    expect(operatorControlInvokeChannels.replayOwnerFleetRemoteOperationEvents).toBe(
+      "planweave-operator:replayOwnerFleetRemoteOperationEvents"
+    );
     expect(Object.values(operatorControlInvokeChannels)).not.toContain(
       "planweave-operator:createEnrollmentGrant"
     );

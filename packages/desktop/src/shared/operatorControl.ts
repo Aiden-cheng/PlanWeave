@@ -12,11 +12,13 @@ import {
 } from "@planweave-ai/agent-host-protocol";
 import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { z } from "zod";
-import { remoteDispatchIntentV3Schema } from "@planweave-ai/collaboration-protocol/remote-run";
+import {
+  remoteDispatchIntentV3Schema,
+  remoteEventQuerySchema
+} from "@planweave-ai/collaboration-protocol/remote-run";
 import { remoteHumanExecutionActionCommandSchema } from "@planweave-ai/collaboration-protocol/remote-run";
 import type { RemoteOperationObservation } from "@planweave-ai/collaboration-protocol/remote-run";
-import type { RemoteHumanExecutionActionCommand } from "@planweave-ai/collaboration-protocol/remote-run";
-import type { RemoteDispatchIntentV3 } from "@planweave-ai/collaboration-protocol/remote-run";
+import type { RemoteEventReplay } from "@planweave-ai/collaboration-protocol/remote-run";
 
 const operatorProfileIdSchema = z.string().trim().min(1).max(128);
 
@@ -117,9 +119,7 @@ export const operatorListAgentEndpointsInputSchema = z
     profileId: operatorProfileIdSchema
   })
   .strict();
-export type OperatorListAgentEndpointsInput = z.infer<
-  typeof operatorListAgentEndpointsInputSchema
->;
+export type OperatorListAgentEndpointsInput = z.infer<typeof operatorListAgentEndpointsInputSchema>;
 
 export const operatorCreateEnrollmentGrantInputSchema = z
   .object({
@@ -195,6 +195,17 @@ export const operatorObserveOwnerFleetRemoteOperationInputSchema = z
   .strict();
 export type OperatorObserveOwnerFleetRemoteOperationInput = z.infer<
   typeof operatorObserveOwnerFleetRemoteOperationInputSchema
+>;
+
+export const operatorReplayOwnerFleetRemoteOperationEventsInputSchema = z
+  .object({
+    profileId: operatorProfileIdSchema,
+    operationId: operatorProfileIdSchema,
+    query: remoteEventQuerySchema
+  })
+  .strict();
+export type OperatorReplayOwnerFleetRemoteOperationEventsInput = z.infer<
+  typeof operatorReplayOwnerFleetRemoteOperationEventsInputSchema
 >;
 
 export const operatorExecuteOwnerFleetRemoteOperationActionInputSchema = z
@@ -414,7 +425,12 @@ function operatorIpcValidationError(context: string, detail: string): OperatorCo
 }
 
 /** Reject arbitrary secret fields and transport escapes crossing the renderer IPC boundary. */
-export function assertNoSmuggledOperatorSecrets(value: unknown, context: string): void {
+export function assertNoSmuggledOperatorSecrets(
+  value: unknown,
+  context: string,
+  options: { allowedRootFields?: readonly string[] } = {}
+): void {
+  const allowedRootFields = new Set(options.allowedRootFields ?? []);
   const stack: Array<{ candidate: unknown; depth: number }> = [{ candidate: value, depth: 0 }];
   const seen = new WeakSet<object>();
   let visited = 0;
@@ -439,7 +455,12 @@ export function assertNoSmuggledOperatorSecrets(value: unknown, context: string)
       throw operatorIpcValidationError(context, "payload contains too many values.");
     }
     for (const [key, nested] of entries) {
-      if ((forbiddenSecretKeys as readonly string[]).includes(key) && nested !== undefined) {
+      const allowedRootField = current.depth === 0 && allowedRootFields.has(key);
+      if (
+        (forbiddenSecretKeys as readonly string[]).includes(key) &&
+        nested !== undefined &&
+        !allowedRootField
+      ) {
         throw operatorIpcValidationError(context, `field "${key}" is not allowed.`);
       }
       stack.push({ candidate: nested, depth: current.depth + 1 });
@@ -491,6 +512,9 @@ export type PlanWeaveOperatorControlApi = {
   observeOwnerFleetRemoteOperation: (
     input: OperatorObserveOwnerFleetRemoteOperationInput
   ) => Promise<RemoteOperationObservation>;
+  replayOwnerFleetRemoteOperationEvents: (
+    input: OperatorReplayOwnerFleetRemoteOperationEventsInput
+  ) => Promise<RemoteEventReplay>;
   executeOwnerFleetRemoteOperationAction: (
     input: OperatorExecuteOwnerFleetRemoteOperationActionInput
   ) => Promise<unknown>;

@@ -168,6 +168,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private privateHttpsOrigin: string | null = null;
   private exposureErrorCode: DesktopServerExposureErrorCode | null = null;
   private operatorToken: string | null = null;
+  private readonly ownerRuntimeScopes = new Set<string>();
   private operationQueue: Promise<unknown> = Promise.resolve();
   private readonly runningWaiters = new Set<{
     resolve: (snapshot: LocalOperatorBackendSnapshot) => void;
@@ -181,7 +182,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   private readonly projects: ProjectCatalogPort;
   private readonly createController: (
     createConfig: (profile: LoopbackServerProfile) => ServerConfig,
-    onLifecycleError: (error: unknown) => void
+    onLifecycleError: (error: unknown) => void,
+    ownerTrustedProjects: ServerConfig["trustedProjects"]
   ) => LoopbackServerControlPort;
   private readonly allocatePort: (host: string, preferredPort: number | null) => Promise<number>;
   private readonly resolveLanAddress: () => string | null;
@@ -195,7 +197,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     projects?: ProjectCatalogPort;
     createController?: (
       createConfig: (profile: LoopbackServerProfile) => ServerConfig,
-      onLifecycleError: (error: unknown) => void
+      onLifecycleError: (error: unknown) => void,
+      ownerTrustedProjects: ServerConfig["trustedProjects"]
     ) => LoopbackServerControlPort;
     allocatePort?: (host: string, preferredPort: number | null) => Promise<number>;
     scopeStore?: LocalCollaborationScopeStorePort;
@@ -217,13 +220,14 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       options.privateHttpsExposure ?? new TailscaleManagedPrivateHttpsAdapter();
     this.createController =
       options.createController ??
-      ((createConfig, onLifecycleError) =>
+      ((createConfig, onLifecycleError, ownerTrustedProjects) =>
         new LoopbackServerController({
           createConfig,
           onLifecycleError,
           serve: (config) =>
             serveDistributedServer(config, {
-              createExposureLifecycle: (leases) => this.privateHttpsExposure.createLifecycle(leases)
+              createExposureLifecycle: (leases) => this.privateHttpsExposure.createLifecycle(leases),
+              ownerTrustedProjects
             })
         }));
     this.allocatePort = options.allocatePort ?? allocateLocalPort;
@@ -332,6 +336,13 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       projectRoot: project.rootPath
     };
     this.selection = next;
+    const ownerScopeKey = this.ownerRuntimeScopeKey(next);
+    if (this.status().state === "running" && !this.ownerRuntimeScopes.has(ownerScopeKey)) {
+      const stopped = await this.stopUnlocked();
+      if (stopped.state !== "stopped") throw new Error("local_owner_runtime_reload_stop_failed");
+      const restarted = await this.startUnlocked();
+      if (restarted.state !== "running") throw new Error("local_owner_runtime_reload_failed");
+    }
   }
 
   clearCurrentSelection(): Promise<void> {
@@ -370,7 +381,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         network.exposureMode ?? (network.lanSharingEnabled ? "lan_http" : "local_only");
       this.lanSharingEnabled = this.exposureMode === "lan_http";
       this.preferredPort = network.preferredPort;
-      return (await this.scopeStore.read()).length > 0 ? this.startUnlocked() : this.status();
+      return (await this.scopeStore.read()).length > 0 || (await this.hasOwnerRuntimeCanvases())
+        ? this.startUnlocked()
+        : this.status();
     });
   }
 
@@ -383,6 +396,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     const current = this.status();
     if (current.state === "running") return current;
     const trustedProjects = await this.resolveTrustedProjects();
+    const ownerTrustedProjects = await this.resolveOwnerTrustedProjects();
     let lastStatus: LocalCollaborationServerStatus = current;
     for (let attempt = 0; attempt < localStartAttempts; attempt += 1) {
       if (this.exposureMode === "private_https") {
@@ -413,12 +427,20 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       const controller = this.createController(
         (profile) => this.createConfig(profile, trustedProjects),
         (error) => {
+          console.error("Local collaboration server lifecycle failed.", error);
           this.exposureErrorCode = this.exposureCode(error);
-        }
+        },
+        ownerTrustedProjects
       );
       this.controller = controller;
       const status = await controller.apply({ action: "start", profile: this.serverProfile() });
       if (status.state === "running") {
+        this.ownerRuntimeScopes.clear();
+        for (const project of ownerTrustedProjects) {
+          const canvasId = project.canvasId;
+          if (!canvasId) throw new Error("local_owner_runtime_canvas_scope_required");
+          this.ownerRuntimeScopes.add(this.ownerRuntimeScopeKey({ ...project, canvasId }));
+        }
         this.exposureErrorCode = null;
         if (this.preferredPort !== this.localPort) {
           this.preferredPort = this.localPort;
@@ -430,6 +452,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       }
       lastStatus = this.status();
       this.controller = null;
+      this.ownerRuntimeScopes.clear();
       this.localPort = null;
       this.lanAddress = null;
       if (status.reason !== "start_failed") return lastStatus;
@@ -450,6 +473,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     });
     if (stopped.state === "stopped") {
       this.controller = null;
+      this.ownerRuntimeScopes.clear();
       this.localPort = null;
       this.lanAddress = null;
     }
@@ -464,7 +488,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         if (
           parsed.enabled &&
           this.status().state !== "running" &&
-          (await this.scopeStore.read()).length > 0
+          ((await this.scopeStore.read()).length > 0 || (await this.hasOwnerRuntimeCanvases()))
         ) {
           return this.startUnlocked();
         }
@@ -482,7 +506,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       this.lanSharingEnabled = parsed.enabled;
       await this.persistNetworkState();
       if (wasRunning) return this.startUnlocked();
-      if (parsed.enabled && (await this.scopeStore.read()).length > 0) {
+      if ((await this.scopeStore.read()).length > 0 || (await this.hasOwnerRuntimeCanvases())) {
         return this.startUnlocked();
       }
       return this.status();
@@ -552,7 +576,11 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       this.lanSharingEnabled = nextMode === "lan_http";
       this.exposureErrorCode = null;
       await this.persistNetworkState();
-      if (wasRunning || (await this.scopeStore.read()).length > 0) {
+      if (
+        wasRunning ||
+        (await this.scopeStore.read()).length > 0 ||
+        (await this.hasOwnerRuntimeCanvases())
+      ) {
         try {
           await this.startUnlocked();
         } catch (error) {
@@ -613,7 +641,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         if (stopped.state !== "stopped") {
           throw new Error("local_collaboration_scope_reload_stop_failed");
         }
-        if (parsed.scopes.length > 0) {
+        if (parsed.scopes.length > 0 || (await this.hasOwnerRuntimeCanvases())) {
           const restarted = await this.startUnlocked();
           if (restarted.state !== "running") {
             throw new Error("local_collaboration_scope_reload_failed");
@@ -622,6 +650,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       } else if (parsed.scopes.length > 0) {
         const started = await this.startUnlocked();
         if (started.state !== "running") throw new Error("local_collaboration_scope_start_failed");
+      } else if (await this.hasOwnerRuntimeCanvases()) {
+        const started = await this.startUnlocked();
+        if (started.state !== "running") throw new Error("local_owner_runtime_start_failed");
       }
       return this.getScopeCatalogUnlocked();
     });
@@ -871,9 +902,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   private async resolveTrustedProjects(): Promise<ServerConfig["trustedProjects"]> {
     const selectedScopes = await this.scopeStore.read();
-    if (selectedScopes.length === 0) {
-      throw new Error("local_collaboration_trusted_scope_required");
-    }
+    if (selectedScopes.length === 0) return [];
     const projects = await this.projects.listProjects();
     const trustedProjects = new Map<string, ServerConfig["trustedProjects"][number]>();
     for (const selected of selectedScopes) {
@@ -905,6 +934,51 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       throw new Error("local_collaboration_trusted_project_required");
     }
     return [...trustedProjects.values()];
+  }
+
+  private async resolveOwnerTrustedProjects(): Promise<ServerConfig["trustedProjects"]> {
+    const projects = new Map<string, ServerConfig["trustedProjects"][number]>();
+    for (const project of await this.projects.listProjects()) {
+      for (const canvas of project.taskCanvases) {
+        if (canvas.packageDir === null) continue;
+        const projectId = await this.projects.resolveAuthorityProjectId(
+          project.rootPath,
+          canvas.canvasId
+        );
+        const workspaceId = localWorkspaceIdForProject(projectId);
+        const key = this.ownerRuntimeScopeKey({ workspaceId, projectId, canvasId: canvas.canvasId });
+        const existing = projects.get(key);
+        if (existing && existing.projectRoot !== project.rootPath) {
+          throw new Error("local_owner_runtime_project_catalog_ambiguous");
+        }
+        projects.set(key, {
+          workspaceId,
+          projectId,
+          canvasId: canvas.canvasId,
+          trustAllDeclaredCanvases: false,
+          projectRoot: project.rootPath
+        });
+      }
+    }
+    if (projects.size === 0) throw new Error("local_owner_runtime_project_required");
+    return [...projects.values()];
+  }
+
+  private async hasOwnerRuntimeCanvases(): Promise<boolean> {
+    return (await this.projects.listProjects()).some((project) =>
+      project.taskCanvases.some((canvas) => canvas.packageDir !== null)
+    );
+  }
+
+  private ownerRuntimeScopeKey(input: {
+    workspaceId?: string;
+    authorityProjectId?: string;
+    projectId?: string;
+    canvasId: string;
+  }): string {
+    const projectId = input.projectId ?? input.authorityProjectId;
+    if (!projectId) throw new Error("local_owner_runtime_project_id_required");
+    return `${input.workspaceId ?? localWorkspaceIdForProject(projectId)}\0${projectId}\0${input.canvasId}`;
   }
 
   private async getScopeCatalogUnlocked(): Promise<LocalCollaborationScopeCatalog> {
