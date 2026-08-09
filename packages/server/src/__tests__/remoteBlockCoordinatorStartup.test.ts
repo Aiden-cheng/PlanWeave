@@ -836,9 +836,17 @@ describe("RemoteBlockCoordinator startup reconciliation", () => {
     expect(coordination.reservations.getRequired(dispatch.leaseId).status).toBe("active");
     await resetRuntimeState({ projectRoot: harness.workspace.root, force: true });
 
-    await expect(harness.start()).rejects.toMatchObject({
-      name: "RemoteOwnershipConflictError",
-      code: "remote_ownership_not_active"
+    const restarted = await harness.start();
+    expect(restarted.operations.getRequired(outcome.operation.id)).toMatchObject({
+      state: "failed",
+      attempt: { status: "failed" }
     });
+    expect(restarted.operations.listNonTerminal()).toEqual([]);
+    expect(
+      harness
+        .requireServer()
+        .database.prepare("SELECT diagnostic_code FROM remote_operations WHERE id=?")
+        .get(outcome.operation.id)
+    ).toEqual({ diagnostic_code: "remote_ownership_not_active" });
   });
 });

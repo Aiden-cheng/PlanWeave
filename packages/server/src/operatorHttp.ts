@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
+import { RemoteBlockRuntimeError } from "@planweave-ai/runtime";
 import { z } from "zod";
 import { agentEndpointCatalogErrorCode } from "./agentEndpointCatalog.js";
 import { OperatorTokenRegistry, type OperatorPrincipal } from "./operatorAuth.js";
@@ -180,6 +181,19 @@ function query(url: URL, allowed: readonly string[]): Record<string, string | un
 
 function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof z.ZodError) return { status: 400, code: "operator_request_invalid" };
+  if (error instanceof RemoteBlockRuntimeError) {
+    if (error.code === "remote_block_not_found") {
+      return { status: 404, code: error.code };
+    }
+    if (
+      error.code === "remote_block_not_dispatchable" ||
+      error.code === "remote_block_source_changed" ||
+      error.code === "remote_block_result_conflict"
+    ) {
+      return { status: 409, code: error.code };
+    }
+    return { status: 400, code: error.code };
+  }
   const endpointErrorCode = agentEndpointCatalogErrorCode(error);
   if (endpointErrorCode) return { status: 409, code: endpointErrorCode };
   if (error instanceof RemoteExecutionActionRejectedError) {
@@ -202,6 +216,9 @@ function safeError(error: unknown): { status: number; code: string } {
   if (!(error instanceof Error)) return { status: 500, code: "operator_request_failed" };
   if (error.message === "remote_run_v3_required") {
     return { status: 400, code: error.message };
+  }
+  if (error.message === "remote_acp_event_replay_cursor_ahead") {
+    return { status: 409, code: error.message };
   }
   if (
     [

@@ -5,6 +5,7 @@ import {
   createRemoteBlockArtifactSource,
   createRemoteBlockRuntimePort,
   getTaskWorkspaceRunDetail,
+  RemoteBlockRuntimeError,
   type PlanPackageManifest
 } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -306,6 +307,54 @@ async function setupActiveV3EndpointOperation(idempotencyKey: string) {
 }
 
 describe("RemoteBlockCoordinator", () => {
+  it("re-inspects once when the pre-dispatch source snapshot changes", async () => {
+    const fixture = await setup(true);
+    const inspect = vi.spyOn(fixture.runtime, "inspect");
+    inspect.mockRejectedValueOnce(
+      new RemoteBlockRuntimeError(
+        "remote_block_source_changed",
+        "Remote source changed while inspecting; inspect again."
+      )
+    );
+
+    await expect(
+      fixture.coordinator.dispatch(
+        endpointDispatchRequest({
+          agentEndpoints: fixture.agentEndpoints,
+          locator: fixture.locator,
+          blockRef: "T-001#B-001",
+          idempotencyKey: "dispatch-source-change-reinspect"
+        })
+      )
+    ).resolves.toMatchObject({ status: "activated" });
+    expect(inspect).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves a repeated pre-dispatch source conflict without creating an operation", async () => {
+    const fixture = await setup(true);
+    const inspect = vi.spyOn(fixture.runtime, "inspect").mockRejectedValue(
+      new RemoteBlockRuntimeError(
+        "remote_block_source_changed",
+        "Remote source keeps changing while inspecting."
+      )
+    );
+
+    await expect(
+      fixture.coordinator.dispatch(
+        endpointDispatchRequest({
+          agentEndpoints: fixture.agentEndpoints,
+          locator: fixture.locator,
+          blockRef: "T-001#B-001",
+          idempotencyKey: "dispatch-repeated-source-change"
+        })
+      )
+    ).rejects.toMatchObject({ code: "remote_block_source_changed" });
+    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(
+      fixture.server.database.prepare("SELECT COUNT(*) AS count FROM remote_operations").get()
+    ).toEqual({ count: 0 });
+  });
+
   it("routes a built-in logical executor through the selected Host ACP profile", async () => {
     const manifest = basicManifest();
     manifest.execution.defaultExecutor = "codex";

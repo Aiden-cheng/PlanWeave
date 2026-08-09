@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
+import { RemoteBlockRuntimeError } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentEndpointCatalogError } from "../agentEndpointCatalog.js";
 import { applyMigrations } from "../migrations.js";
@@ -293,6 +294,55 @@ describe("operator HTTP boundary", () => {
     const body = await response.json();
     expect(body).toEqual({ error: "agent_endpoint_incompatible" });
     expect(JSON.stringify(body)).not.toContain("private-endpoint-id");
+  });
+
+  it("returns a stable conflict when an ACP replay cursor is ahead", async () => {
+    const fixture = await setup(true);
+    vi.mocked(fixture.service.replayEvents).mockImplementationOnce(() => {
+      throw new Error("remote_acp_event_replay_cursor_ahead");
+    });
+    const response = await fetch(
+      `${fixture.origin}/api/v1/remote-operations/operation-1/events?afterCursor=999999`,
+      { headers: authorization }
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "remote_acp_event_replay_cursor_ahead"
+    });
+  });
+
+  it.each([
+    ["remote_block_not_found", 404],
+    ["remote_block_not_executable", 400],
+    ["remote_block_executor_not_acp", 400],
+    ["remote_block_not_dispatchable", 409],
+    ["remote_block_source_changed", 409],
+    ["remote_block_result_conflict", 409]
+  ] as const)("preserves the runtime dispatch diagnostic %s", async (code, status) => {
+    const fixture = await setup(true);
+    vi.mocked(fixture.service.dispatch).mockRejectedValueOnce(
+      new RemoteBlockRuntimeError(code, `private detail for ${code}`)
+    );
+    const response = await fetch(`${fixture.origin}/api/v1/remote-operations`, {
+      method: "POST",
+      headers: { ...authorization, "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: "remote-run/v3",
+        projectId: "project-a",
+        canvasId: "default",
+        blockRef: "T-001#B-001",
+        agentEndpointId: "private-endpoint-id",
+        idempotencyKey: `runtime-error-${code}`,
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0
+      })
+    });
+
+    expect(response.status).toBe(status);
+    const body = await response.json();
+    expect(body).toEqual({ error: code });
+    expect(JSON.stringify(body)).not.toContain("private detail");
   });
 
   it("serves public health and delegates bounded host pagination", async () => {

@@ -10,7 +10,11 @@ import {
 } from "@planweave-ai/agent-host-protocol";
 import { workspaceIdSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { RemoteBlockDispatchCandidate, RemoteBlockRuntimePort } from "@planweave-ai/runtime";
-import { RemoteOwnershipConflictError, remoteBlockFailureInputSchema } from "@planweave-ai/runtime";
+import {
+  RemoteBlockRuntimeError,
+  RemoteOwnershipConflictError,
+  remoteBlockFailureInputSchema
+} from "@planweave-ai/runtime";
 import type {
   RemoteArtifactContentPort,
   RemoteAcpTranscriptPort,
@@ -180,6 +184,24 @@ export class RemoteBlockCoordinator {
     }
   }
 
+  private async inspectDispatchCandidate(
+    request: RemoteEndpointDispatchRequest
+  ): Promise<RemoteBlockDispatchCandidate> {
+    try {
+      return await this.withRuntime(request, (runtime) =>
+        runtime.inspect({ ref: request.blockRef })
+      );
+    } catch (error) {
+      if (
+        !(error instanceof RemoteBlockRuntimeError) ||
+        error.code !== "remote_block_source_changed"
+      ) {
+        throw error;
+      }
+      return this.withRuntime(request, (runtime) => runtime.inspect({ ref: request.blockRef }));
+    }
+  }
+
   /**
    * Expose the Host selection authorized at dispatch begin (or last retry resnapshot).
    * Prefer durable operation snapshot so restart and retry do not lose the fingerprint.
@@ -207,9 +229,7 @@ export class RemoteBlockCoordinator {
       return this.reenter(existing.id);
     }
 
-    const candidate = await this.withRuntime(request, (runtime) =>
-      runtime.inspect({ ref: request.blockRef })
-    );
+    const candidate = await this.inspectDispatchCandidate(request);
     if (
       candidate.workspaceId !== request.workspaceId ||
       candidate.projectId !== request.projectId ||
