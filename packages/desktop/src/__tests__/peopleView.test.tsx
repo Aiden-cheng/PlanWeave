@@ -6,12 +6,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { formatPeoplePanelError, PeopleView } from "../renderer/views/PeopleView";
+import { SettingsServerSection } from "../renderer/settings/SettingsServerSection";
 import {
   parseCollaborationInvitationHandoff,
   serializeCollaborationInvitationHandoff
 } from "../renderer/team/collaborationInvitationHandoff";
-import { acquireCollaborationReadModelController } from "../renderer/collaboration/collaborationReadModelHub";
-import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 
@@ -120,10 +119,7 @@ describe("PeopleView", () => {
       />
     );
     expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
-    expect(screen.getByTestId("people-section-nav")).not.toHaveClass(
-      "bg-background/95",
-      "backdrop-blur"
-    );
+    expect(screen.queryByTestId("people-section-nav")).not.toBeInTheDocument();
 
     emitStatus?.({
       ...connectedStatus,
@@ -240,8 +236,7 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
-  it("does not refresh workspace status when opening sharing settings", async () => {
-    const user = userEvent.setup();
+  it("keeps server connection and content authority out of People workspace", async () => {
     const connectedStatus = {
       profiles: [
         {
@@ -326,17 +321,15 @@ describe("PeopleView", () => {
     );
 
     expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
+    expect(screen.queryByTestId("people-section-hosting")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("people-hosting-section")).not.toBeInTheDocument();
     expect(screen.queryByTestId("content-authority-panel")).not.toBeInTheDocument();
-    await user.click(await screen.findByTestId("people-section-hosting"));
-    expect(await screen.findByTestId("people-hosting-section")).toBeVisible();
-    expect(screen.getByTestId("deployment-connection")).toBeVisible();
-    expect(screen.getByTestId("content-authority-panel")).toBeVisible();
-    await waitFor(() => expect(api.getLocalCollaborationScopeCatalog).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId("deployment-connection")).not.toBeInTheDocument();
     expect(getCollaborationStatus).toHaveBeenCalledOnce();
     expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
-  it("keeps complete invitation creation reachable after a persisted workspace restart", async () => {
+  it("keeps complete invitation creation reachable from Settings Server after a persisted workspace restart", async () => {
     const user = userEvent.setup();
     const invitationToken = `pw_inv_${"P".repeat(43)}`;
     const restoredStatus = {
@@ -435,22 +428,18 @@ describe("PeopleView", () => {
     } as unknown as PlanWeaveCollaborationApi;
 
     render(
-      <PeopleView
+      <SettingsServerSection
         api={api}
         canvasId="canvas-1"
+        localProjectId="project-1"
         t={createTranslator("en")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
       />
     );
 
-    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
-    expect(createInvitation).not.toHaveBeenCalled();
-    await user.click(screen.getByTestId("people-section-hosting"));
+    expect(await screen.findByTestId("settings-server-section")).toBeVisible();
     expect(await screen.findByText("Invite collaborators")).toBeVisible();
-    expect(createInvitation).not.toHaveBeenCalled();
-    await user.click(screen.getByTestId("people-section-workspace"));
-    await user.click(screen.getByTestId("people-section-hosting"));
     expect(createInvitation).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Create complete invitation" }));
@@ -466,8 +455,6 @@ describe("PeopleView", () => {
     });
 
     const handoff = firstInvitation.value;
-    await user.click(screen.getByTestId("people-section-workspace"));
-    await user.click(screen.getByTestId("people-section-hosting"));
     expect(
       await screen.findByRole("textbox", {
         name: "Complete invitation (shown on this page only)"
@@ -487,7 +474,7 @@ describe("PeopleView", () => {
     expect(secondIdempotencyKey).not.toBe(firstIdempotencyKey);
   });
 
-  it("opens invitation management when local hosting reaches the open-invitation limit", async () => {
+  it("routes invitation management from Settings Server to People", async () => {
     const user = userEvent.setup();
     const connectedStatus = {
       profiles: [
@@ -526,11 +513,7 @@ describe("PeopleView", () => {
       workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
       updatedAt: "2030-01-01T00:00:00.000Z"
     } as const;
-    const listCollaborationInvitations = vi.fn().mockResolvedValue({
-      items: [],
-      nextCursor: null
-    });
-    const listCollaborationDevices = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+    const onManageInvitations = vi.fn();
     const api = {
       getCollaborationStatus: vi.fn().mockResolvedValue(connectedStatus),
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
@@ -584,57 +567,25 @@ describe("PeopleView", () => {
         message: "human_limit_exceeded",
         httpStatus: 409,
         retryable: false
-      }),
-      listCollaborationMembers: vi.fn().mockResolvedValue({
-        items: [
-          {
-            membershipId: "membership-owner",
-            projectId: "project-1",
-            humanPrincipalId: "human-1",
-            displayName: "Owner",
-            role: "owner",
-            createdAt: "2030-01-01T00:00:00.000Z",
-            updatedAt: "2030-01-01T00:00:00.000Z"
-          }
-        ],
-        nextCursor: null
-      }),
-      listCollaborationAssignments: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
-      listCollaborationActivity: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
-      listCollaborationInvitations,
-      listCollaborationDevices
-    } as unknown as PlanWeaveCollaborationApi & CollaborationReadBridgePort;
-
-    const shell = acquireCollaborationReadModelController(api);
-    await shell.controller.setActiveProject({
-      profileId: "profile-1",
-      projectId: "project-1",
-      canvasId: "canvas-1"
-    });
+      })
+    } as unknown as PlanWeaveCollaborationApi;
 
     render(
-      <PeopleView
+      <SettingsServerSection
         api={api}
         canvasId="canvas-1"
+        localProjectId="project-1"
         t={createTranslator("zh-CN")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
+        onManageInvitations={onManageInvitations}
       />
     );
 
-    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
-    await waitFor(() => expect(listCollaborationInvitations).toHaveBeenCalled());
-    listCollaborationInvitations.mockClear();
-    listCollaborationDevices.mockClear();
-
-    await user.click(screen.getByTestId("people-section-hosting"));
+    expect(await screen.findByTestId("settings-server-section")).toBeVisible();
     await user.click(await screen.findByRole("button", { name: "新建完整邀请" }));
     await user.click(await screen.findByRole("button", { name: "管理开放邀请" }));
-
-    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
-    await waitFor(() => expect(listCollaborationInvitations).toHaveBeenCalledOnce());
-    expect(listCollaborationDevices).toHaveBeenCalledOnce();
-    shell.release();
+    expect(onManageInvitations).toHaveBeenCalledOnce();
   });
 
   it("does not flash first-time onboarding while persisted collaboration status is loading", () => {

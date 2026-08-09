@@ -8,7 +8,29 @@ import type {
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
 import type { createTranslator } from "../i18n";
-import { collaborationErrorMessage } from "./formatCollaborationError";
+import { collaborationErrorCode, collaborationErrorMessage } from "./formatCollaborationError";
+
+function formatContentAuthorityError(
+  t: ReturnType<typeof createTranslator>,
+  cause: unknown
+): string {
+  const code = collaborationErrorCode(cause);
+  const message =
+    cause instanceof Error
+      ? cause.message
+      : typeof cause === "string"
+        ? cause
+        : collaborationErrorMessage(cause);
+  if (
+    code === "forbidden" ||
+    code === "WORKSPACE_FORBIDDEN" ||
+    message === "forbidden" ||
+    /CollaborationClientError:\s*forbidden/i.test(message)
+  ) {
+    return t("contentAuthorityForbidden");
+  }
+  return collaborationErrorMessage(cause);
+}
 
 function formatTimestamp(value: string): string {
   const date = new Date(value);
@@ -69,6 +91,7 @@ export function ContentAuthorityPanel({
   localProjectId,
   canvasId,
   connected,
+  appearance = "flat",
   onMaterialized,
   onReplicaReady,
   t
@@ -79,12 +102,15 @@ export function ContentAuthorityPanel({
   localProjectId: string | null;
   canvasId: string | null;
   connected: boolean;
+  /** flat: People stack; settings: denser copy inside a Settings card. */
+  appearance?: "flat" | "settings";
   onMaterialized?: () => Promise<void>;
   onReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
   t: ReturnType<typeof createTranslator>;
 }) {
   const [model, setModel] = useState<ContentVersionDesktopReadModel | null>(null);
   const [candidates, setCandidates] = useState<CollaborationContentBootstrapCandidate[]>([]);
+  const [candidatesReady, setCandidatesReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,6 +119,16 @@ export function ContentAuthorityPanel({
   connectionKeyRef.current = connectionKey;
   const canBindSelectedProject =
     authorityProjectId !== null && localProjectId === authorityProjectId;
+  const matchingCandidate =
+    authorityProjectId && canvasId
+      ? (candidates.find(
+          (candidate) =>
+            candidate.projectId === authorityProjectId && candidate.canvasId === canvasId
+        ) ?? null)
+      : null;
+  // Only auto-bind canvases the Server already authorizes. Binding an unhosted
+  // selected canvas returns HTTP 403 (forbidden) while hosted siblings still list.
+  const canBindSelectedCanvas = canBindSelectedProject && matchingCandidate !== null;
 
   const run = useCallback(async (action: () => Promise<ContentVersionDesktopReadModel>) => {
     const operation = ++operationRef.current;
@@ -113,29 +149,35 @@ export function ContentAuthorityPanel({
         operation === operationRef.current &&
         expectedConnectionKey === connectionKeyRef.current
       ) {
-        setError(collaborationErrorMessage(cause));
+        setError(formatContentAuthorityError(t, cause));
       }
     } finally {
       if (operation === operationRef.current) setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   const loadCandidates = useCallback(async () => {
     if (!api || !connected || !connectionKey) {
       setCandidates([]);
+      setCandidatesReady(true);
       return;
     }
     try {
       setCandidates(await api.listCollaborationContentBootstrapCandidates());
+      setError(null);
     } catch (cause) {
-      setError(collaborationErrorMessage(cause));
+      setError(formatContentAuthorityError(t, cause));
+    } finally {
+      setCandidatesReady(true);
     }
-  }, [api, connected, connectionKey]);
+  }, [api, connected, connectionKey, t]);
 
   useEffect(() => {
     let current = true;
+    setCandidatesReady(false);
     if (!api || !connected || !connectionKey) {
       setCandidates([]);
+      setCandidatesReady(true);
       return () => {
         current = false;
       };
@@ -143,22 +185,29 @@ export function ContentAuthorityPanel({
     void api
       .listCollaborationContentBootstrapCandidates()
       .then((nextCandidates) => {
-        if (current) setCandidates(nextCandidates);
+        if (current) {
+          setCandidates(nextCandidates);
+          setError(null);
+        }
       })
       .catch((cause: unknown) => {
-        if (current) setError(collaborationErrorMessage(cause));
+        if (current) setError(formatContentAuthorityError(t, cause));
+      })
+      .finally(() => {
+        if (current) setCandidatesReady(true);
       });
     return () => {
       current = false;
     };
-  }, [api, connected, connectionKey]);
+  }, [api, connected, connectionKey, t]);
 
   useEffect(() => {
     if (!api || !connectionKey || !connected) {
       setModel(null);
       return;
     }
-    if (!canBindSelectedProject || !localProjectId || !canvasId) {
+    if (!candidatesReady) return;
+    if (!canBindSelectedCanvas || !localProjectId || !canvasId) {
       setModel((current) =>
         current?.authoritativeHead?.scope.projectId === authorityProjectId ? current : null
       );
@@ -168,13 +217,21 @@ export function ContentAuthorityPanel({
   }, [
     api,
     authorityProjectId,
-    canBindSelectedProject,
+    canBindSelectedCanvas,
+    candidatesReady,
     connectionKey,
     localProjectId,
     canvasId,
     connected,
     run
   ]);
+
+  const selectedCanvasOutsideHostedScope =
+    candidatesReady &&
+    canBindSelectedProject &&
+    Boolean(localProjectId && canvasId) &&
+    matchingCandidate === null &&
+    candidates.some((candidate) => candidate.projectId === authorityProjectId);
 
   if (!connected) return null;
   const head = model?.authoritativeHead ?? null;
@@ -223,45 +280,65 @@ export function ContentAuthorityPanel({
         operation === operationRef.current &&
         expectedConnectionKey === connectionKeyRef.current
       ) {
-        setError(collaborationErrorMessage(cause));
+        setError(formatContentAuthorityError(t, cause));
       }
     } finally {
       if (operation === operationRef.current) setBusy(false);
     }
   };
   const retryBinding = () => {
-    if (api && canBindSelectedProject && localProjectId && canvasId) {
+    if (api && canBindSelectedCanvas && localProjectId && canvasId) {
       void run(() => api.bindCollaborationContentAuthority({ localProjectId, canvasId }));
     }
   };
   return (
     <section
-      className="min-w-0 border-t border-border/70 py-7"
+      className={appearance === "settings" ? "min-w-0 flex flex-col gap-5" : "min-w-0 border-t border-border/70 py-7"}
       data-testid="content-authority-panel"
-      aria-labelledby="content-authority-title"
+      data-appearance={appearance}
+      aria-labelledby={appearance === "settings" ? undefined : "content-authority-title"}
     >
-      <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-1 pb-5">
-        <div
-          className="flex size-8 items-center justify-center text-amber-700 dark:text-amber-300"
-          data-testid="content-authority-section-icon"
-        >
-          <DatabaseIcon className="size-5" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 pt-0.5">
-          <h2
-            id="content-authority-title"
-            className="text-base font-semibold tracking-tight text-text-strong"
+      {appearance === "flat" ? (
+        <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-1 pb-5">
+          <div
+            className="flex size-8 shrink-0 items-center justify-center text-amber-700 dark:text-amber-300"
+            data-testid="content-authority-section-icon"
           >
-            {t("contentAuthorityTitle")}
-          </h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-            {t("contentAuthorityDescription")}
-          </p>
+            <DatabaseIcon className="size-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 pt-0.5">
+            <h2
+              id="content-authority-title"
+              className="text-base font-semibold text-text-strong"
+            >
+              {t("contentAuthorityTitle")}
+            </h2>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+              {t("contentAuthorityDescription")}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
+      {selectedCanvasOutsideHostedScope ? (
+        <p
+          className={
+            appearance === "settings"
+              ? "text-xs leading-5 text-amber-800 dark:text-amber-200"
+              : "border-t border-border/60 px-1 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200 sm:ml-11"
+          }
+          data-testid="content-authority-canvas-not-hosted"
+          role="status"
+        >
+          {t("contentAuthorityCanvasNotHosted")}
+        </p>
+      ) : null}
       {visibleCandidates.length > 0 ? (
         <div
-          className="border-t border-border/60 px-1 py-4 sm:ml-11"
+          className={
+            appearance === "settings"
+              ? "border-b border-border/70 pb-5"
+              : "border-t border-border/60 px-1 py-4 sm:ml-11"
+          }
           data-testid="content-bootstrap-candidates"
         >
           <div className="mb-3">
@@ -307,8 +384,13 @@ export function ContentAuthorityPanel({
         </div>
       ) : null}
       {model && canvasId ? (
-        <div className="flex flex-col gap-5 border-t border-border/60 px-1 py-5 sm:ml-11">
-          <dl className="grid min-w-0 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div
+          className={
+            appearance === "settings"
+              ? "flex flex-col gap-5"
+              : "flex flex-col gap-5 border-t border-border/60 px-1 py-5 sm:ml-11"
+          }
+        >          <dl className="grid min-w-0 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
             <AuthorityDetail
               label={t("contentAuthorityRevisionLabel")}
               value={String(revision)}
@@ -403,7 +485,7 @@ export function ContentAuthorityPanel({
                         await onMaterialized?.();
                         setInfo(t("contentAuthorityMaterializedSuccess"));
                       } catch (cause) {
-                        setError(collaborationErrorMessage(cause));
+                        setError(formatContentAuthorityError(t, cause));
                       }
                       return nextModel;
                     })
@@ -423,7 +505,7 @@ export function ContentAuthorityPanel({
             {error ? <p className="text-destructive">{error}</p> : null}
             {info ? <p className="text-emerald-700 dark:text-emerald-300">{info}</p> : null}
           </div>
-          {error && canBindSelectedProject && localProjectId && canvasId ? (
+          {error && canBindSelectedCanvas && localProjectId && canvasId ? (
             <Button size="sm" variant="outline" disabled={busy} onClick={retryBinding}>
               {t("contentAuthorityRetry")}
             </Button>

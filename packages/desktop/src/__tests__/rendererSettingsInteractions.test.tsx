@@ -210,11 +210,42 @@ describe("desktop renderer settings interactions", () => {
         settings={settings}
         t={createTranslator("en")}
         updateSettings={vi.fn()}
+        updateSettingsAndWait={vi.fn().mockResolvedValue(undefined)}
       />
     );
 
     expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass("min-h-0", "flex-1");
     expect(container.querySelector('[data-slot="scroll-area-viewport"]')).toHaveClass("h-full");
+  });
+
+  it("exposes a dedicated Settings Server section for connection and content authority", async () => {
+    stubLayoutApis();
+    render(
+      <SettingsView
+        agentDetectionRefreshing={false}
+        agents={[]}
+        graph={null}
+        language="en"
+        refreshAgentDetections={vi.fn().mockResolvedValue(undefined)}
+        refreshRuntimeTools={vi.fn().mockResolvedValue(undefined)}
+        runtimeTools={{ tmux: { available: true, command: "tmux" } }}
+        projects={[]}
+        setActiveView={vi.fn()}
+        settings={settings}
+        t={createTranslator("en")}
+        updateSettings={vi.fn()}
+        updateSettingsAndWait={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    await userEvent.click(screen.getByTestId("settings-nav-server"));
+    expect(await screen.findByTestId("settings-server-section")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Server" })).toHaveClass("text-2xl");
+    expect(screen.getByTestId("settings-server-connection-block")).toBeVisible();
+    expect(screen.getByTestId("settings-server-hosting-block")).toBeVisible();
+    expect(screen.getByTestId("settings-server-content-block")).toBeVisible();
+    expect(screen.getByTestId("settings-server-content-needs-session")).toBeVisible();
+    expect(screen.getByTestId("settings-server-open-people")).toBeVisible();
   });
 
   it("normalizes invalid legacy migration appearance and window material settings", () => {

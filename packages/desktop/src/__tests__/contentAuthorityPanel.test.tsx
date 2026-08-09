@@ -40,6 +40,21 @@ function materializableModel(): ContentVersionDesktopReadModel {
   });
 }
 
+function hostedCandidate(
+  model: ContentVersionDesktopReadModel,
+  projectId = "local-project",
+  canvasId = "default"
+) {
+  return {
+    workspaceId: "workspace-1",
+    projectId,
+    canvasId,
+    visibility: "shared" as const,
+    authority: model,
+    localReplica: null
+  };
+}
+
 describe("ContentAuthorityPanel", () => {
   it("does not bind an unrelated selected local project when opening remote authority settings", async () => {
     const model = materializableModel();
@@ -47,14 +62,7 @@ describe("ContentAuthorityPanel", () => {
     const api = {
       bindCollaborationContentAuthority,
       listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([
-        {
-          workspaceId: "workspace-1",
-          projectId: "remote-project",
-          canvasId: "default",
-          visibility: "shared",
-          authority: model,
-          localReplica: null
-        }
+        hostedCandidate(model, "remote-project")
       ])
     } as unknown as PlanWeaveCollaborationApi;
 
@@ -75,6 +83,33 @@ describe("ContentAuthorityPanel", () => {
     expect(screen.queryByText("content_local_project_scope_mismatch")).not.toBeInTheDocument();
   });
 
+  it("does not auto-bind a selected canvas outside the hosted Server scope", async () => {
+    const model = materializableModel();
+    const bindCollaborationContentAuthority = vi.fn().mockResolvedValue(model);
+    const api = {
+      bindCollaborationContentAuthority,
+      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([
+        hostedCandidate(model, "local-project", "default")
+      ])
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <ContentAuthorityPanel
+        api={api}
+        connectionKey="profile-1"
+        authorityProjectId="local-project"
+        localProjectId="local-project"
+        canvasId="other-canvas"
+        connected
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(await screen.findByTestId("content-authority-canvas-not-hosted")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Sync to this device" })).toBeVisible();
+    expect(bindCollaborationContentAuthority).not.toHaveBeenCalled();
+  });
+
   it("rebinds the current canvas when retrying after the authority binding was lost", async () => {
     const user = userEvent.setup();
     const model = materializableModel();
@@ -88,7 +123,9 @@ describe("ContentAuthorityPanel", () => {
     const api = {
       bindCollaborationContentAuthority,
       refreshCollaborationContentAuthority,
-      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([])
+      listCollaborationContentBootstrapCandidates: vi
+        .fn()
+        .mockResolvedValue([hostedCandidate(model)])
     } as unknown as PlanWeaveCollaborationApi;
 
     render(
@@ -117,12 +154,40 @@ describe("ContentAuthorityPanel", () => {
     );
   });
 
+  it("maps forbidden bind failures to a readable content-authority hint", async () => {
+    const model = materializableModel();
+    const api = {
+      bindCollaborationContentAuthority: vi
+        .fn()
+        .mockRejectedValue(new Error("CollaborationClientError: forbidden")),
+      listCollaborationContentBootstrapCandidates: vi
+        .fn()
+        .mockResolvedValue([hostedCandidate(model)])
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <ContentAuthorityPanel
+        api={api}
+        connectionKey="profile-1"
+        authorityProjectId="local-project"
+        localProjectId="local-project"
+        canvasId="default"
+        connected
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(await screen.findByText(/Host that canvas under Local hosting/i)).toBeVisible();
+  });
+
   it("refreshes the local project and reports success after materializing the authority head", async () => {
     const user = userEvent.setup();
     const model = materializableModel();
     const api = {
       bindCollaborationContentAuthority: vi.fn().mockResolvedValue(model),
-      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
+      listCollaborationContentBootstrapCandidates: vi
+        .fn()
+        .mockResolvedValue([hostedCandidate(model)]),
       materializeCollaborationContentHead: vi.fn().mockResolvedValue({
         ...model,
         localReplica: model.authoritativeHead?.content ?? null,
@@ -177,7 +242,9 @@ describe("ContentAuthorityPanel", () => {
     const model = materializableModel();
     const api = {
       bindCollaborationContentAuthority: vi.fn().mockResolvedValue(model),
-      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([]),
+      listCollaborationContentBootstrapCandidates: vi
+        .fn()
+        .mockResolvedValue([hostedCandidate(model)]),
       materializeCollaborationContentHead: vi.fn().mockResolvedValue({
         ...model,
         localReplica: model.authoritativeHead?.content ?? null,

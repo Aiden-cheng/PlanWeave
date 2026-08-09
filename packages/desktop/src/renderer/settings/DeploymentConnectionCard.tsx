@@ -19,7 +19,8 @@ import type { createTranslator } from "../i18n";
 
 type Props = {
   t: ReturnType<typeof createTranslator>;
-  presentation?: "card" | "section" | "plain";
+  /** card: standalone Card; section/plain: People-style stack; embedded: Settings card body. */
+  presentation?: "card" | "section" | "plain" | "embedded";
   onExposureChange?: (exposure: DesktopServerExposureView) => void;
 };
 
@@ -194,8 +195,8 @@ export function DeploymentConnectionCard({ t, presentation = "card", onExposureC
 
   const content = (
     <div className="grid max-w-3xl gap-3">
-      <p className="text-xs text-text-muted">{t("deploymentBoundary")}</p>
-      <p className="text-xs text-text-muted">{t("deploymentPreConnection")}</p>
+      <p className="text-sm text-text-muted">{t("deploymentBoundary")}</p>
+      <p className="text-sm text-text-muted">{t("deploymentPreConnection")}</p>
       <div className="grid gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="deployment-topology">{t("deploymentTopology")}</Label>
@@ -374,6 +375,14 @@ export function DeploymentConnectionCard({ t, presentation = "card", onExposureC
       ) : null}
     </div>
   );
+
+  if (presentation === "embedded") {
+    return (
+      <section className="flex flex-col gap-3" data-testid="deployment-connection">
+        {content}
+      </section>
+    );
+  }
 
   if (presentation === "section") {
     return (

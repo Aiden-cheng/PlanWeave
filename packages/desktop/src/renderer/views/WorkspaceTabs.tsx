@@ -300,22 +300,12 @@ function PeopleRoute({
   localInvitationHandoff: string | null;
   onLocalInvitationHandoffChange: (handoff: string | null) => void;
 }) {
-  const { fileSync, shell } = useProjectWorkspace();
+  const { shell } = useProjectWorkspace();
   return (
     <PeopleView
       t={shell.t}
       diagnosticsEnabled={shell.developerMode}
-      localProjectId={shell.selectedProject?.projectId ?? null}
       canvasId={shell.selectedCanvasId}
-      onContentMaterialized={() =>
-        fileSync.refreshProjectDerivedState({
-          requireCurrentCanvas: true,
-          throwOnErrors: true
-        })
-      }
-      onContentReplicaReady={(result) =>
-        shell.refreshProjects({ selectProjectId: result.localProjectId })
-      }
       collaborationScopeLayout={shell.collaborationScopeLayout}
       onCollaborationScopeLayoutChange={shell.updateCollaborationScopeLayout}
       localInvitationHandoff={localInvitationHandoff}

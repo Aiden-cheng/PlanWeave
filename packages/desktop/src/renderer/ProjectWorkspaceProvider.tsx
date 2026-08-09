@@ -1023,7 +1023,15 @@ export function ProjectWorkspaceProvider({
     updateProjectPromptPolicy,
     updateGlobalPrompt,
     updateSettingsAndWait,
-    updateSettings
+    updateSettings,
+    updateCollaborationScopeLayout: (patch) =>
+      updateLayoutSettings({ collaborationScope: patch }),
+    onContentMaterialized: () =>
+      refreshProjectDerivedState({
+        requireCurrentCanvas: true,
+        throwOnErrors: true
+      }),
+    onContentReplicaReady: (result) => refreshProjects({ selectProjectId: result.localProjectId })
   });
   const workspaceShell = useMemo<WorkspaceTabsShellProps>(
     () => ({

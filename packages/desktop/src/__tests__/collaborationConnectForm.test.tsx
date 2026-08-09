@@ -619,6 +619,80 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     );
   });
 
+  it("reconnects Main-owned local profiles without renderer upsert", async () => {
+    const user = userEvent.setup();
+    const upsertCollaborationProfile = vi.fn().mockResolvedValue(undefined);
+    const registerLocalCollaborationCurrentProject = vi.fn().mockResolvedValue(undefined);
+    const connectWorkspaceConnection = vi.fn().mockResolvedValue(undefined);
+    const setActiveCollaborationProfile = vi.fn().mockResolvedValue(undefined);
+    const connectCollaborationSession = vi.fn().mockResolvedValue(undefined);
+    const api = {
+      upsertCollaborationProfile,
+      registerLocalCollaborationCurrentProject,
+      connectWorkspaceConnection,
+      setActiveCollaborationProfile,
+      connectCollaborationSession
+    } as unknown as PlanWeaveCollaborationApi;
+
+    render(
+      <CollaborationConnectForm
+        api={api}
+        status={{
+          ...diagnosticStatus,
+          activeProfileId: "planweave-local-server",
+          profiles: [
+            {
+              ...diagnosticStatus.profiles[0]!,
+              profileId: "planweave-local-server",
+              displayName: "Local PlanWeave Server",
+              serverBaseUrl: "https://owner-device.example.ts.net/",
+              allowInsecureTransport: false,
+              endpoint: {
+                topology: "private_https",
+                serverOrigin: "https://owner-device.example.ts.net/",
+                allowedClientOrigins: ["https://owner-device.example.ts.net/"],
+                tlsTrust: "system_ca"
+              }
+            }
+          ],
+          session: {
+            ...diagnosticStatus.session,
+            phase: "disconnected",
+            activeProfileId: "planweave-local-server",
+            detail: null,
+            lastErrorCode: null,
+            lastErrorMessage: null
+          },
+          workspaceConnection: {
+            ...diagnosticStatus.workspaceConnection,
+            status: "disconnected",
+            workspaceId: "workspace-local-1",
+            workspaceDisplayName: "Local workspace",
+            profile: {
+              schemaVersion: "workspace-identity/v1",
+              profileId: "planweave-local-server",
+              displayName: "Local PlanWeave Server",
+              serverBaseUrl: "https://owner-device.example.ts.net/",
+              workspaceId: "workspace-local-1",
+              allowInsecureTransport: false
+            }
+          }
+        }}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+
+    await user.click(screen.getByTestId("people-connect-submit"));
+
+    await waitFor(() =>
+      expect(registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({})
+    );
+    expect(upsertCollaborationProfile).not.toHaveBeenCalled();
+    expect(connectWorkspaceConnection).not.toHaveBeenCalled();
+    expect(connectCollaborationSession).not.toHaveBeenCalled();
+  });
+
   it("resubmits the unchanged validated endpoint before connecting", async () => {
     const user = userEvent.setup();
     const upsertCollaborationProfile = vi.fn().mockResolvedValue(undefined);

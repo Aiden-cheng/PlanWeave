@@ -13,6 +13,7 @@ import type { createTranslator } from "../i18n";
 import {
   collaborationRedeemSetupCodeInputSchema,
   collaborationUpsertProfileInputSchema,
+  isLocalCollaborationProfileId,
   type CollaborationStatus,
   type PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
@@ -203,6 +204,16 @@ export function CollaborationConnectForm({
         }
         if (activeProfile.connectionState === "reconnect_required") {
           setError(t("peopleProfileReconnectRequired"));
+          return;
+        }
+        // Main-owned local profiles are restored through coordinator activation, not
+        // renderer upsert + bare connectSession (that path leaves content routes forbidden).
+        if (isLocalCollaborationProfileId(activeProfile.profileId)) {
+          if (typeof api.registerLocalCollaborationCurrentProject !== "function") {
+            throw new Error(t("peopleMissingCredential"));
+          }
+          await api.registerLocalCollaborationCurrentProject({});
+          await onConnected?.();
           return;
         }
         const updatedProfile = collaborationUpsertProfileInputSchema.safeParse({

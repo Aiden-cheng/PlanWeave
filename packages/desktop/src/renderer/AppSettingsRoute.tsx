@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
+import type { CollaborationContentBootstrapResult } from "../shared/collaboration.js";
 import type {
   DesktopAgentDetection,
   DesktopGraphViewModel,
@@ -34,6 +35,11 @@ type AppSettingsRouteProps = {
   updateGlobalPrompt: (markdown: string) => Promise<void>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
   updateSettingsAndWait: (update: DesktopSettingsUpdate) => Promise<void>;
+  updateCollaborationScopeLayout: (
+    patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>
+  ) => void;
+  onContentMaterialized?: () => Promise<void>;
+  onContentReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
 };
 
 export function AppSettingsRoute({
@@ -59,7 +65,10 @@ export function AppSettingsRoute({
   updateProjectPromptPolicy,
   updateGlobalPrompt,
   updateSettingsAndWait,
-  updateSettings
+  updateSettings,
+  updateCollaborationScopeLayout,
+  onContentMaterialized,
+  onContentReplicaReady
 }: AppSettingsRouteProps) {
   return (
     <div className="h-screen min-h-0 overflow-hidden text-foreground">
@@ -87,6 +96,9 @@ export function AppSettingsRoute({
         updateGlobalPrompt={updateGlobalPrompt}
         updateSettingsAndWait={updateSettingsAndWait}
         updateSettings={updateSettings}
+        updateCollaborationScopeLayout={updateCollaborationScopeLayout}
+        onContentMaterialized={onContentMaterialized}
+        onContentReplicaReady={onContentReplicaReady}
       />
     </div>
   );

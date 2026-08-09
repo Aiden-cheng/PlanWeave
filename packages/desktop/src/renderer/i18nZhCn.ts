@@ -449,6 +449,7 @@ export const zhCnCatalog = {
   settingsReview: "审查",
   settingsAgents: "Agent",
   settingsMcpTunnel: "MCP Tunnel",
+  settingsServer: "Server",
   settingsHosts: "Agent Host",
   settingsGeneralHint: "项目路径、执行器、外观、语言和通知规则。",
   settingsComponentsHint: "配置图谱侧栏里的可拖拽组件和默认 Block Set。",
@@ -460,6 +461,13 @@ export const zhCnCatalog = {
   agentTransportAcp: "ACP",
   settingsMcpTunnelHint:
     "启动本机 PlanWeave MCP server，并通过 OpenAI Secure MCP Tunnel 连接到 ChatGPT。",
+  settingsServerHint:
+    "配置本机如何访问 PlanWeave Server、托管本机 Server，以及发布/同步成员与 Agent Host 共用的权威画布内容。",
+  settingsServerContentNeedsSession:
+    "发布和同步权威画布内容需要先连接协作会话。若本机已有设备凭证，可在此直接重连；否则请前往「成员」完成工作区连接。连接成功后此处会出现「发布首个版本」和「同步到本机」。",
+  settingsServerOpenPeople: "前往成员连接",
+  settingsServerReconnectSession: "重连协作会话",
+  settingsServerReconnectSessionBusy: "正在重连…",
   hostAdminLocale: "zh-CN",
   hostAdminTitle: "Agent Host",
   hostAdminDescription:
@@ -1522,6 +1530,10 @@ export const zhCnCatalog = {
   contentAuthorityWaiting: "等待首个发布",
   contentAuthorityOffline: "离线",
   contentAuthorityRetry: "重试",
+  contentAuthorityForbidden:
+    "当前设备无权访问所选画布的权威内容。请在「托管画布」中纳入该画布，或从下方列表同步已托管的画布。[forbidden]",
+  contentAuthorityCanvasNotHosted:
+    "当前选中的画布不在本机 Server 托管范围内。请从下方列表同步已托管画布，或在「托管画布」中勾选当前画布。",
   contentAuthorityPublish: "发布首个版本",
   contentAuthorityMaterialize: "同步到本机",
   contentAuthorityRecover: "从权威版本恢复",

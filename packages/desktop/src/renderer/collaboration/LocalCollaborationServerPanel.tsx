@@ -44,6 +44,7 @@ type LocalCollaborationPanelError = {
 export function LocalCollaborationServerPanel({
   api,
   t,
+  appearance = "flat",
   projectId,
   canvasId,
   scopeLayout,
@@ -57,6 +58,8 @@ export function LocalCollaborationServerPanel({
 }: {
   api: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
+  /** flat: People/onboarding stack; settings: denser copy inside a Settings card. */
+  appearance?: "flat" | "settings";
   projectId: string | null;
   canvasId: string | null;
   scopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
@@ -236,47 +239,65 @@ export function LocalCollaborationServerPanel({
 
   return (
     <section
-      className="pb-7"
+      className={appearance === "settings" ? "flex flex-col gap-5" : "pb-7"}
       data-testid="local-collaboration-server-panel"
-      aria-labelledby="local-collaboration-server-title"
+      data-appearance={appearance}
+      aria-labelledby={appearance === "settings" ? undefined : "local-collaboration-server-title"}
     >
-      <div className="px-1 pb-5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2
-              id="local-collaboration-server-title"
-              className="text-base font-semibold tracking-tight text-text-strong"
-            >
-              {t("localServerTitle")}
-            </h2>
-            <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                running
-                  ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
-                  : "bg-muted text-muted-foreground"
-              }`}
-              data-testid="local-collaboration-server-status"
-            >
+      {appearance === "flat" ? (
+        <div className="px-1 pb-5">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2
+                id="local-collaboration-server-title"
+                className="text-base font-semibold text-text-strong"
+              >
+                {t("localServerTitle")}
+              </h2>
               <span
-                className={`size-1.5 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
-              />
-              {statusLabel}
-            </span>
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  running
+                    ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                    : "bg-muted text-muted-foreground"
+                }`}
+                data-testid="local-collaboration-server-status"
+              >
+                <span
+                  className={`size-1.5 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground/50"}`}
+                />
+                {statusLabel}
+              </span>
+            </div>
+            <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted-foreground">
+              {t("localServerDescription")}
+            </p>
           </div>
-          <p className="mt-1.5 max-w-2xl text-xs leading-5 text-muted-foreground">
-            {t("localServerDescription")}
-          </p>
         </div>
-      </div>
+      ) : (
+        <span className="sr-only" data-testid="local-collaboration-server-status">
+          {statusLabel}
+        </span>
+      )}
 
       {invitationPreparationAvailable ? (
-        <div className="border-t border-border/70 px-1 py-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div
+          className={
+            appearance === "settings"
+              ? "border-b border-border/70 pb-5"
+              : "border-t border-border/70 px-1 py-5"
+          }
+        >          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="text-sm font-semibold text-text-strong">
                 {t("localServerInvitationSectionTitle")}
               </div>
-              <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+              <p
+                className={
+                  appearance === "settings"
+                    ? "mt-1 max-w-2xl text-sm text-text-muted"
+                    : "mt-1 max-w-2xl text-xs leading-5 text-muted-foreground"
+                }
+              >
                 {t("localServerInvitationSectionHint")}
               </p>
             </div>
@@ -331,7 +352,11 @@ export function LocalCollaborationServerPanel({
         </div>
       ) : null}
 
-      <div className="border-y border-border/70 px-1 py-5">
+      <div
+        className={
+          appearance === "settings" ? "pt-1" : "border-y border-border/70 px-1 py-5"
+        }
+      >
         <button
           type="button"
           className="flex w-full items-start gap-3 text-left outline-none transition-colors hover:text-text-strong focus-visible:ring-2 focus-visible:ring-ring"
@@ -357,7 +382,13 @@ export function LocalCollaborationServerPanel({
             <span className="block text-sm font-semibold text-text-strong">
               {t("localServerScopeTitle")}
             </span>
-            <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+            <span
+              className={
+                appearance === "settings"
+                  ? "mt-0.5 block text-sm text-text-muted"
+                  : "mt-0.5 block text-[11px] leading-4 text-muted-foreground"
+              }
+            >
               {t("localServerScopeHint")}
             </span>
           </span>
@@ -369,7 +400,11 @@ export function LocalCollaborationServerPanel({
         {!scopeLayout.collapsed ? (
           <div
             id="local-collaboration-scope-catalog"
-            className="mt-5 border-t border-border/70"
+            className={
+              appearance === "settings"
+                ? "mt-4 border-t border-border/60 pt-3"
+                : "mt-5 border-t border-border/70"
+            }
             data-testid="local-collaboration-scope-catalog"
           >
             {catalog?.projects.map((project, projectIndex) => {

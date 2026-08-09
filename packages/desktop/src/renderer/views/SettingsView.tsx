@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import type { CollaborationContentBootstrapResult } from "../../shared/collaboration.js";
 import type {
   DesktopAgentDetection,
   DesktopGraphViewModel,
@@ -15,6 +16,7 @@ import { SettingsNav } from "../settings/SettingsNav";
 import type { SettingsSection } from "../settings/SettingsNav";
 import { SettingsMcpSection } from "../settings/SettingsMcpSection";
 import { SettingsReviewSection } from "../settings/SettingsReviewSection";
+import { SettingsServerSection } from "../settings/SettingsServerSection";
 import type { createTranslator, Language } from "../i18n";
 import type { AppView, DesktopSettingsUpdate, DesktopUiSettings } from "../types";
 
@@ -48,6 +50,11 @@ type SettingsViewProps = {
   updateGlobalPrompt?: (markdown: string) => Promise<void>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
   updateSettingsAndWait: (update: DesktopSettingsUpdate) => Promise<void>;
+  updateCollaborationScopeLayout?: (
+    patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>
+  ) => void;
+  onContentMaterialized?: () => Promise<void>;
+  onContentReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
 };
 
 export function SettingsView({
@@ -73,7 +80,10 @@ export function SettingsView({
   updateProjectPromptPolicy,
   updateGlobalPrompt,
   updateSettingsAndWait,
-  updateSettings
+  updateSettings,
+  updateCollaborationScopeLayout = () => undefined,
+  onContentMaterialized,
+  onContentReplicaReady
 }: SettingsViewProps) {
   const [section, setSection] = useState<SettingsSection>("general");
   const [projectPromptDraft, setProjectPromptDraft] = useState(projectPromptMarkdown ?? "");
@@ -189,6 +199,18 @@ export function SettingsView({
               />
             ) : null}
             {section === "mcp" ? <SettingsMcpSection setError={setError} t={t} /> : null}
+            {section === "server" ? (
+              <SettingsServerSection
+                t={t}
+                localProjectId={selectedProject?.projectId ?? null}
+                canvasId={selectedCanvasId}
+                collaborationScopeLayout={settings.layout.collaborationScope}
+                onCollaborationScopeLayoutChange={updateCollaborationScopeLayout}
+                onContentMaterialized={onContentMaterialized}
+                onContentReplicaReady={onContentReplicaReady}
+                onManageInvitations={() => setActiveView("people")}
+              />
+            ) : null}
             {section === "hosts" ? (
               <Suspense
                 fallback={

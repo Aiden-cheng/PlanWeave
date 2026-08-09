@@ -455,6 +455,7 @@ export const enCatalog = {
   settingsReview: "Review",
   settingsAgents: "Agents",
   settingsMcpTunnel: "MCP Tunnel",
+  settingsServer: "Server",
   settingsHosts: "Agent Hosts",
   settingsGeneralHint: "Project path, executor, appearance, language, and notification rules.",
   settingsComponentsHint: "Configure draggable graph components and the default Block Set.",
@@ -467,6 +468,13 @@ export const enCatalog = {
   agentTransportAcp: "ACP",
   settingsMcpTunnelHint:
     "Run the local PlanWeave MCP server and connect it to ChatGPT through OpenAI Secure MCP Tunnel.",
+  settingsServerHint:
+    "Configure how this computer reaches PlanWeave Server, host a local Server, and publish or sync authoritative canvas content used by Members and Agent Hosts.",
+  settingsServerContentNeedsSession:
+    "Publishing and syncing authoritative canvas content requires a connected collaboration session. Reconnect here if this device already has credentials, or open People to finish workspace setup. Publish and Sync appear after the session is connected.",
+  settingsServerOpenPeople: "Open People to connect",
+  settingsServerReconnectSession: "Reconnect session",
+  settingsServerReconnectSessionBusy: "Reconnecting…",
   hostAdminLocale: "en-US",
   hostAdminTitle: "Agent Host",
   hostAdminDescription:
@@ -1615,6 +1623,10 @@ export const enCatalog = {
   contentAuthorityWaiting: "waiting for first publish",
   contentAuthorityOffline: "offline",
   contentAuthorityRetry: "Retry",
+  contentAuthorityForbidden:
+    "This device cannot access authoritative content for the selected canvas. Host that canvas under Local hosting, or sync a listed canvas below. [forbidden]",
+  contentAuthorityCanvasNotHosted:
+    "The currently selected canvas is not in this device’s hosted Server scope. Use a listed canvas below, or add the current canvas under Local hosting.",
   contentAuthorityPublish: "Publish initial version",
   contentAuthorityMaterialize: "Sync to this device",
   contentAuthorityRecover: "Restore from authoritative version",
