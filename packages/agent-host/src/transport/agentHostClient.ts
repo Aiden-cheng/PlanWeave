@@ -107,6 +107,7 @@ export class AgentHostClient implements HostTransport {
   private readonly limits: HostTransportLimits;
   private readonly reconnect: ReconnectBackoffOptions;
   private readonly listeners = new Set<HostTransportStatusListener>();
+  private readonly inFlightEventIds = new Set<string>();
   private heartbeatTimer?: unknown;
   private reconnectTimer?: unknown;
   private currentStatus: HostTransportStatus = { state: "stopped" };
@@ -125,8 +126,7 @@ export class AgentHostClient implements HostTransport {
     if (this.baseUrl.protocol !== "https:" && !options.allowInsecureTransport) {
       throw new Error("agent_host_secure_transport_required");
     }
-    if (!options.hostId || !options.token)
-      throw new Error("agent_host_credentials_required");
+    if (!options.hostId || !options.token) throw new Error("agent_host_credentials_required");
     if (!Number.isInteger(options.capacity) || options.capacity < 1 || options.capacity > 128) {
       throw new Error("agent_host_capacity_out_of_range");
     }
@@ -164,6 +164,7 @@ export class AgentHostClient implements HostTransport {
     if (this.currentStatus.state === "stopped") return;
     this.stopped = true;
     this.welcomed = false;
+    this.inFlightEventIds.clear();
     if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
     if (this.heartbeatTimer) this.clock.clearTimeout(this.heartbeatTimer);
     for (const { controller } of this.active.values()) controller.abort();
@@ -177,12 +178,14 @@ export class AgentHostClient implements HostTransport {
         })
       );
     }
+    await this.waitBounded(this.processing);
     await this.waitBounded(Promise.allSettled([...this.runs]).then(() => undefined));
     this.transition({ state: "stopped" });
   }
 
   private connect(): void {
     if (this.stopped) return;
+    this.inFlightEventIds.clear();
     this.transition({ state: "connecting", attempt: this.reconnectAttempt + 1 });
     const url = endpoint(
       this.baseUrl,
@@ -210,14 +213,21 @@ export class AgentHostClient implements HostTransport {
       socket.send(hello);
     });
     socket.on("message", (data, isBinary) => {
-      if (
-        Buffer.byteLength(data.toString()) > this.limits.maxPayloadBytes ||
-        ++this.queuedMessages > this.limits.maxQueuedMessages
-      ) {
+      if (Buffer.byteLength(data.toString()) > this.limits.maxPayloadBytes) {
         this.transition({ state: "degraded", reason: "inbound_backpressure" });
         socket.close(4009, "inbound backpressure");
         return;
       }
+      if (this.queuedMessages >= this.limits.maxQueuedMessages) {
+        this.transition({ state: "degraded", reason: "inbound_backpressure" });
+        void this.processing.finally(() => {
+          if (this.socket === socket && socket.readyState === WebSocket.OPEN) {
+            socket.close(4009, "inbound backpressure");
+          }
+        });
+        return;
+      }
+      this.queuedMessages += 1;
       this.processing = this.processing
         .then(async () => {
           if (isBinary) throw new Error("binary_messages_not_supported");
@@ -246,6 +256,7 @@ export class AgentHostClient implements HostTransport {
       if (this.socket !== socket) return;
       this.socket = undefined;
       this.welcomed = false;
+      this.inFlightEventIds.clear();
       if (this.heartbeatTimer) this.clock.clearTimeout(this.heartbeatTimer);
       if (!this.stopped && code === 4001) {
         this.stopped = true;
@@ -299,6 +310,7 @@ export class AgentHostClient implements HostTransport {
         return;
       case "host.event_ack":
         this.options.state.acknowledgeEvent(event.messageId);
+        this.inFlightEventIds.delete(event.messageId);
         this.flushEvents();
         return;
       case "lease.renewed":
@@ -323,30 +335,41 @@ export class AgentHostClient implements HostTransport {
   }
 
   private startHeartbeat(intervalMs: number): void {
+    if (this.stopped) return;
     if (this.heartbeatTimer) this.clock.clearTimeout(this.heartbeatTimer);
     const send = () => {
+      if (this.stopped || !this.welcomed) return;
       this.abandonExpiredExecutions();
-      this.send(
-        this.options.state.queueHeartbeat(this.options.state.activeLeases(), this.options.readiness)
-      );
+      this.options.state.queueHeartbeat(this.options.state.activeLeases(), this.options.readiness);
+      this.flushEvents();
       this.heartbeatTimer = this.clock.setTimeout(send, intervalMs);
     };
-    send();
+    this.heartbeatTimer = this.clock.setTimeout(send, 0);
   }
 
   private flushEvents(): void {
-    for (const event of this.options.state.pendingEvents(this.limits.maxOutboundBatch))
-      this.send(event);
+    const responseSafeWindow = Math.max(1, Math.floor((this.limits.maxQueuedMessages - 4) / 2));
+    const windowSize = Math.min(this.limits.maxOutboundBatch, responseSafeWindow);
+    let available = windowSize - this.inFlightEventIds.size;
+    if (available <= 0) return;
+    for (const event of this.options.state.pendingEvents(this.limits.maxOutboundBatch)) {
+      if (available <= 0) return;
+      if (this.inFlightEventIds.has(event.messageId)) continue;
+      if (!this.send(event)) return;
+      this.inFlightEventIds.add(event.messageId);
+      available -= 1;
+    }
   }
 
-  private send(event: unknown): void {
-    if (!this.welcomed || this.socket?.readyState !== WebSocket.OPEN) return;
+  private send(event: unknown): boolean {
+    if (!this.welcomed || this.socket?.readyState !== WebSocket.OPEN) return false;
     const payload = serializeAgentHostEvent(event);
     if (Buffer.byteLength(payload) > this.limits.maxPayloadBytes)
       throw new Error("agent_host_outbound_payload_too_large");
     if (this.socket.bufferedAmount + Buffer.byteLength(payload) > this.limits.maxBufferedBytes)
-      return;
+      return false;
     this.socket.send(payload);
+    return true;
   }
 
   private pump(): void {

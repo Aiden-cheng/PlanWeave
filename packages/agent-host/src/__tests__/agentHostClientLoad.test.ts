@@ -1,5 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server as HttpServer } from "node:http";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -27,20 +28,24 @@ afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.stop()));
   for (const state of states.splice(0)) state.close();
   await Promise.all(
-    webSocketServers.splice(0).map(
-      (server) =>
-        new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve()))
-        )
-    )
+    webSocketServers
+      .splice(0)
+      .map(
+        (server) =>
+          new Promise<void>((resolve, reject) =>
+            server.close((error) => (error ? reject(error) : resolve()))
+          )
+      )
   );
   await Promise.all(
-    httpServers.splice(0).map(
-      (server) =>
-        new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve()))
-        )
-    )
+    httpServers
+      .splice(0)
+      .map(
+        (server) =>
+          new Promise<void>((resolve, reject) =>
+            server.close((error) => (error ? reject(error) : resolve()))
+          )
+      )
   );
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -175,10 +180,15 @@ describe("Agent Host transport load and recovery boundaries", () => {
     const state = await openState();
     const attempts: number[] = [];
     const delays: number[] = [];
-    const client = createClient(port, state, { execute: vi.fn() }, {
-      reconnect: { initialDelayMs: 1, maxDelayMs: 2 },
-      random: () => 0
-    });
+    const client = createClient(
+      port,
+      state,
+      { execute: vi.fn() },
+      {
+        reconnect: { initialDelayMs: 1, maxDelayMs: 2 },
+        random: () => 0
+      }
+    );
     client.subscribe((status) => {
       if (status.state === "backing-off") {
         attempts.push(status.attempt);
@@ -208,8 +218,12 @@ describe("Agent Host transport load and recovery boundaries", () => {
           return;
         }
         if (event.type === "host.heartbeat") {
+          const transport = Reflect.get(socket, "_socket");
+          if (!(transport instanceof Socket)) throw new Error("expected_websocket_transport");
+          transport.cork();
           socket.send(JSON.stringify(delivery(1)));
           socket.send(JSON.stringify(delivery(2)));
+          transport.uncork();
         }
       });
     });
@@ -224,9 +238,84 @@ describe("Agent Host transport load and recovery boundaries", () => {
     });
     client.start();
 
-    await Promise.all([degraded.promise, executed.promise]);
-    expect(execute).toHaveBeenCalledOnce();
+    await degraded.promise;
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    await executed.promise;
     expect(execute.mock.calls[0]?.[0]).toMatchObject({ dispatchId: "dispatch-load-001" });
+  });
+
+  it("drains a durable outbound backlog without overflowing amplified server responses", async () => {
+    const allSeededEventsReceived = deferred<void>();
+    const httpServer = createServer();
+    httpServers.push(httpServer);
+    const webSocketServer = new WebSocketServer({ server: httpServer });
+    webSocketServers.push(webSocketServer);
+    const state = await openState();
+    for (let sequence = 1; sequence <= 80; sequence += 1) {
+      state.receive(delivery(sequence));
+    }
+    const seededMessageIds = new Set(state.pendingEvents().map((event) => event.messageId));
+    const receivedSeededMessageIds = new Set<string>();
+    webSocketServer.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        const event = JSON.parse(data.toString()) as { type?: string; messageId?: string };
+        if (event.type === "host.hello") {
+          socket.send(JSON.stringify(welcome()));
+          return;
+        }
+        if (!event.messageId) return;
+        if (seededMessageIds.has(event.messageId)) {
+          receivedSeededMessageIds.add(event.messageId);
+          if (receivedSeededMessageIds.size === seededMessageIds.size) {
+            allSeededEventsReceived.resolve();
+          }
+        }
+        socket.send(
+          JSON.stringify(
+            serverEventSchema.parse({
+              type: "host.event_ack",
+              protocolVersion: 1,
+              messageId: event.messageId
+            })
+          )
+        );
+        socket.send(
+          JSON.stringify(
+            serverEventSchema.parse({
+              type: "lease.renewed",
+              protocolVersion: 1,
+              dispatchId: "dispatch-load-001",
+              leaseId: "lease-load-001",
+              executionAttemptId: "attempt-load-001",
+              leaseExpiresAt: new Date(Date.now() + 60_000).toISOString()
+            })
+          )
+        );
+      });
+    });
+    const port = await listen(httpServer);
+    const degraded: string[] = [];
+    const client = createClient(
+      port,
+      state,
+      {
+        execute: vi.fn(
+          async (_command, context) =>
+            new Promise<void>((resolve) =>
+              context.signal.addEventListener("abort", () => resolve(), { once: true })
+            )
+        )
+      },
+      { limits: { maxQueuedMessages: 128, maxOutboundBatch: 128 } }
+    );
+    client.subscribe((status) => {
+      if (status.state === "degraded") degraded.push(status.reason);
+    });
+    client.start();
+
+    await allSeededEventsReceived.promise;
+    await vi.waitFor(() => expect(state.pendingEventCount()).toBe(0), { timeout: 5_000 });
+    expect(degraded).toEqual([]);
   });
 
   it("rejects a frame above maxPayloadBytes without invoking the executor", async () => {
@@ -241,10 +330,15 @@ describe("Agent Host transport load and recovery boundaries", () => {
     const port = await listen(httpServer);
     const state = await openState();
     const execute = vi.fn();
-    const client = createClient(port, state, { execute }, {
-      limits: { maxPayloadBytes: 1_024, maxBufferedBytes: 2_048 },
-      reconnect: { initialDelayMs: 60_000, maxDelayMs: 60_000 }
-    });
+    const client = createClient(
+      port,
+      state,
+      { execute },
+      {
+        limits: { maxPayloadBytes: 1_024, maxBufferedBytes: 2_048 },
+        reconnect: { initialDelayMs: 60_000, maxDelayMs: 60_000 }
+      }
+    );
     client.subscribe((status) => {
       if (status.state === "backing-off") backingOff.resolve();
     });
