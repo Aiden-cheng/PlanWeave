@@ -178,6 +178,7 @@
         "remoteRunPanelController.test.ts",
         "remoteRunPanelLocalEndpoint.test.ts",
         "remoteRunViewModels.test.ts",
+        "remoteTaskWorkspaceConversation.test.tsx",
         "rendererInterfaceInteractions.test.tsx",
         "rendererSettingsInteractions.test.tsx",
         "resizableSidebarLayoutHook.test.tsx",

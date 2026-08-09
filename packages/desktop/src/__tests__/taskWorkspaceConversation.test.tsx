@@ -2,7 +2,6 @@
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
-import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 import userEvent from "@testing-library/user-event";
 import { normalizedRunnerEventSchema, runnerRecordReadModelSchema } from "@planweave-ai/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,29 +28,28 @@ afterEach(cleanupRendererTestEnvironment);
 const t = createTranslator("en");
 
 describe("Task Workspace conversation", () => {
-  it("replays a terminal remote ACP conversation and refreshes the canonical workspace run", async () => {
+  it("replays an active remote ACP conversation", async () => {
     const onTerminal = vi.fn();
     const api = {
-      observeCollaborationRemoteOperation: vi.fn(async () => ({
+      observe: vi.fn(async () => ({
         operationId: "operation-remote-1",
         projectId: "project-server",
         canvasId: "canvas-main",
         blockRef: "T-001#B-001",
-        state: "completed" as const,
+        state: "running" as const,
         dispatchId: "dispatch-remote-1",
         executionAttemptId: "attempt-remote-1",
         createdAt: timestamp,
         updatedAt: timestamp,
-        terminalAt: timestamp,
         attempt: {
           executionAttemptId: "attempt-remote-1",
           dispatchId: "dispatch-remote-1",
-          status: "completed" as const,
+          status: "running" as const,
           stateVersion: 3
         },
-        runtime: { ref: "T-001#B-001", status: "completed" as const }
+        runtime: { ref: "T-001#B-001", status: "in_progress" as const }
       })),
-      replayCollaborationRemoteOperationEvents: vi.fn(async () => ({
+      replay: vi.fn(async () => ({
         executionAttemptId: "attempt-remote-1",
         afterCursor: 0,
         cursor: 1,
@@ -64,14 +62,8 @@ describe("Task Workspace conversation", () => {
             text: "Created the Windows file."
           }
         ]
-      })),
-      onCollaborationObserverSignal: vi.fn(() => () => {})
-    } satisfies Pick<
-      PlanWeaveCollaborationApi,
-      | "observeCollaborationRemoteOperation"
-      | "onCollaborationObserverSignal"
-      | "replayCollaborationRemoteOperationEvents"
-    >;
+      }))
+    };
 
     const { result } = renderHook(() =>
       useRemoteTaskWorkspaceConversation({
@@ -82,7 +74,7 @@ describe("Task Workspace conversation", () => {
       })
     );
 
-    await waitFor(() => expect(result.current?.state).toBe("completed"));
+    await waitFor(() => expect(result.current?.state).toBe("running"));
     expect(result.current?.timeline).toEqual([
       expect.objectContaining({
         kind: "message",
@@ -90,7 +82,7 @@ describe("Task Workspace conversation", () => {
         content: "Created the Windows file."
       })
     ]);
-    expect(onTerminal).toHaveBeenCalledTimes(1);
+    expect(onTerminal).not.toHaveBeenCalled();
   });
 
   it("shows the active remote ACP timeline instead of a stale local run", () => {
