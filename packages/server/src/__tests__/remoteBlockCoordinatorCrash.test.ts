@@ -568,6 +568,84 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     );
   });
 
+  it("acknowledges replayed completion after the operation was already sealed failed", async () => {
+    const harness = await CoordinatorHarness.create();
+    const hostId = harness.registerHost();
+    const coordination = harness.requireCoordination();
+    const outcome = await coordination.coordinator.dispatch(
+      harness.request("T-001#B-001", "terminal-operation-completion-replay")
+    );
+    const dispatch = coordination.dispatches.getRequired(outcome.operation.dispatchId);
+    const report = Buffer.from("# Remote result\n\nCompleted before ownership was lost.\n");
+    const artifact = await harness.requireArtifacts().put({
+      expectedSha256: createHash("sha256").update(report).digest("hex"),
+      expectedSizeBytes: report.byteLength,
+      mediaType: "text/markdown",
+      chunks: (async function* () {
+        yield report;
+      })()
+    });
+    const result = {
+      summary: "Completion replay after local terminal recovery.",
+      reportArtifactRef: artifact.ref,
+      artifactRefs: []
+    };
+    const grant = coordination.artifactAuthorization.createOutputGrant({
+      operationId: "terminal-operation-completion-replay-report",
+      workspaceId: dispatch.workspaceId,
+      projectId: dispatch.projectId,
+      hostId,
+      dispatchId: dispatch.id,
+      leaseId: dispatch.leaseId,
+      executionAttemptId: dispatch.executionAttemptId,
+      permission: "report_write",
+      expectedSha256: artifact.sha256,
+      expectedSizeBytes: artifact.sizeBytes,
+      expectedMediaType: artifact.mediaType
+    });
+    coordination.artifactAuthorization.acceptOutputUpload(
+      {
+        workspaceId: dispatch.workspaceId,
+        projectId: dispatch.projectId,
+        hostId,
+        dispatchId: dispatch.id,
+        leaseId: dispatch.leaseId,
+        executionAttemptId: dispatch.executionAttemptId,
+        grantId: grant.grantId
+      },
+      artifact
+    );
+    const now = new Date().toISOString();
+    harness
+      .requireServer()
+      .database.prepare(
+        "UPDATE dispatches SET status='awaiting_writeback',result_json=? WHERE id=?"
+      )
+      .run(JSON.stringify(result), dispatch.id);
+    harness
+      .requireServer()
+      .database.prepare(
+        `UPDATE remote_operations
+         SET state='failed',diagnostic_code='remote_ownership_not_active',
+           diagnostic_message='Remote ownership was already sealed.',updated_at=?,terminal_at=?
+         WHERE id=?`
+      )
+      .run(now, now, outcome.operation.id);
+
+    await expect(
+      coordination.dispatches.complete(
+        hostId,
+        "terminal-operation-completion-replay-message",
+        dispatch.id,
+        dispatch.leaseId,
+        dispatch.executionAttemptId,
+        result
+      )
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(coordination.operations.getRequired(outcome.operation.id).state).toBe("failed");
+    expect(coordination.dispatches.getRequired(dispatch.id).status).toBe("failed");
+  });
+
   it.each(dispatchCrashPoints)("recovers the same operation after %s", async (checkpoint) => {
     const harness = await CoordinatorHarness.create();
     harness.registerHost();
@@ -734,12 +812,12 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
 
     await harness.restart();
     harness.registerHost();
-    await expect(harness.requireCoordination().coordinator.reenterPending()).resolves.toMatchObject([
-      { status: "terminal" }
-    ]);
-    expect(
-      harness.requireCoordination().operations.getRequired(outcome.operation.id).state
-    ).toBe("cancelled");
+    await expect(harness.requireCoordination().coordinator.reenterPending()).resolves.toMatchObject(
+      [{ status: "terminal" }]
+    );
+    expect(harness.requireCoordination().operations.getRequired(outcome.operation.id).state).toBe(
+      "cancelled"
+    );
     expect(count(harness.requireServer().database, "host_capacity_reservations")).toBe(0);
     expect(count(harness.requireServer().database, "mailbox_messages")).toBe(0);
   });
@@ -752,6 +830,7 @@ describe("RemoteBlockCoordinator crash reconciliation", () => {
     await runtime.claim({
       ref: candidate.blockRef,
       operationId: "foreign-operation",
+      controlPlane: "collaboration",
       sourceRevision: candidate.sourceRevision,
       graphFingerprint: candidate.graphFingerprint
     });

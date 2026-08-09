@@ -58,6 +58,7 @@ export type RemoteEndpointDispatchRequest = RemoteRuntimeLocator & {
   agentEndpointId: string;
   expectedResponsibilityRevision: number;
   expectedReviewerRevision: number;
+  controlPlane?: "collaboration" | "owner";
 };
 
 export type RemoteDispatchOutcome = {
@@ -97,6 +98,7 @@ export type RemoteBlockCoordinatorOptions = {
     blockRef: string;
     expectedResponsibilityRevision: number;
     expectedReviewerRevision: number;
+    controlPlane: "collaboration" | "owner";
   }) => void;
   /** Final server-side HostAuthorization check after a lease exists and before activation. */
   finalAuthorize?: (input: {
@@ -193,9 +195,13 @@ export class RemoteBlockCoordinator {
   }
 
   async dispatch(request: RemoteEndpointDispatchRequest): Promise<RemoteDispatchOutcome> {
+    const controlPlane = request.controlPlane ?? "collaboration";
     const existing = this.options.operations.findByCallerIdentity(request);
     if (existing) {
-      if (existing.endpointSelection?.endpointId !== request.agentEndpointId) {
+      if (
+        existing.endpointSelection?.endpointId !== request.agentEndpointId ||
+        existing.endpointSelection.authority.controlPlane !== controlPlane
+      ) {
         throw new Error("remote_operation_idempotency_conflict");
       }
       return this.reenter(existing.id);
@@ -223,7 +229,8 @@ export class RemoteBlockCoordinator {
       canvasId: candidate.canvasId,
       blockRef: candidate.blockRef,
       expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-      expectedReviewerRevision: request.expectedReviewerRevision
+      expectedReviewerRevision: request.expectedReviewerRevision,
+      controlPlane
     });
     const endpointSelection = this.snapshotEndpoint(
       this.options.agentEndpoints.resolveForRun(
@@ -234,7 +241,8 @@ export class RemoteBlockCoordinator {
       candidate,
       {
         responsibilityRevision: request.expectedResponsibilityRevision,
-        reviewerRevision: request.expectedReviewerRevision
+        reviewerRevision: request.expectedReviewerRevision,
+        controlPlane
       }
     );
 
@@ -353,6 +361,7 @@ export class RemoteBlockCoordinator {
           runtime.claim({
             ref: operation.blockRef,
             operationId: operation.id,
+            controlPlane: operation.endpointSelection?.authority.controlPlane ?? "collaboration",
             sourceRevision: operation.ownershipGeneration,
             graphFingerprint: operation.sourceFingerprint
           })
@@ -373,7 +382,7 @@ export class RemoteBlockCoordinator {
     }
 
     const ownerPackageLocator =
-      operation.endpointSelection === undefined
+      operation.endpointSelection?.authority.controlPlane !== "owner"
         ? undefined
         : this.options.ownerPackageLocatorForHost?.({
             hostId: operation.endpointSelection.hostId,
@@ -553,11 +562,7 @@ export class RemoteBlockCoordinator {
         const decision = classifyReenterFailure(error);
         if (decision === "fatal") throw error;
         const diagnostic = diagnosticFromReenterFailure(error);
-        this.options.operations.recordDiagnostic(
-          operation.id,
-          diagnostic.code,
-          diagnostic.message
-        );
+        this.options.operations.recordDiagnostic(operation.id, diagnostic.code, diagnostic.message);
         if (decision === "defer_host") {
           outcomes.push({
             operation: this.options.operations.getRequired(operation.id),
@@ -688,6 +693,7 @@ export class RemoteBlockCoordinator {
 
   async complete(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
+    if (this.reconcileTerminalOperationReplay(operation)) return;
     this.authorizeWritebackIfLeaseActive(operation);
     const terminal = this.options.dispatches.inspect(operation).dispatch;
     if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "complete") {
@@ -776,7 +782,10 @@ export class RemoteBlockCoordinator {
       return { operation: current, status: "terminal" };
     }
     const persisted = this.options.dispatches.inspect(current).dispatch;
-    if (persisted?.status === "awaiting_writeback" && persisted.terminalAction?.kind === "complete") {
+    if (
+      persisted?.status === "awaiting_writeback" &&
+      persisted.terminalAction?.kind === "complete"
+    ) {
       await this.sealRejectedWriteback(current, error);
       return {
         operation: this.options.operations.getRequired(current.id),
@@ -830,6 +839,7 @@ export class RemoteBlockCoordinator {
 
   async fail(operationId: string): Promise<void> {
     let operation = this.options.operations.getRequired(operationId);
+    if (this.reconcileTerminalOperationReplay(operation)) return;
     this.authorizeWritebackIfLeaseActive(operation);
     const terminal = this.options.dispatches.inspect(operation).dispatch;
     if (terminal?.status !== "awaiting_writeback" || terminal.terminalAction?.kind !== "fail") {
@@ -861,6 +871,25 @@ export class RemoteBlockCoordinator {
     await this.checkpoint("after_dispatch_terminal_persistence");
     this.finalizeOperationTerminal(operation, status);
     await this.checkpoint("after_terminal_persistence");
+  }
+
+  private reconcileTerminalOperationReplay(operation: RemoteOperation): boolean {
+    if (
+      operation.state !== "completed" &&
+      operation.state !== "failed" &&
+      operation.state !== "cancelled"
+    ) {
+      return false;
+    }
+    const dispatch = this.options.dispatches.inspect(operation).dispatch;
+    if (!dispatch) throw new Error("remote_dispatch_not_found");
+    if (dispatch.status === "awaiting_writeback") {
+      this.options.dispatches.finishTerminal({ operation, status: operation.state });
+    } else if (dispatch.status !== operation.state) {
+      throw new Error("remote_terminal_persistence_conflict");
+    }
+    this.finalizeOperationTerminal(operation, operation.state);
+    return true;
   }
 
   private finalizeOperationTerminal(
@@ -1004,7 +1033,11 @@ export class RemoteBlockCoordinator {
   private snapshotEndpoint(
     resolved: ResolvedAgentEndpoint,
     candidate: RemoteBlockDispatchCandidate,
-    revisions: { responsibilityRevision: number; reviewerRevision: number }
+    revisions: {
+      responsibilityRevision: number;
+      reviewerRevision: number;
+      controlPlane: "collaboration" | "owner";
+    }
   ): EndpointSelectionSnapshot {
     if (resolved.agentId !== candidate.agentId) {
       throw new AgentEndpointCatalogError("agent_endpoint_incompatible");
@@ -1092,7 +1125,8 @@ export class RemoteBlockCoordinator {
       canvasId: operation.canvasId,
       blockRef: operation.blockRef,
       expectedResponsibilityRevision: selection.authority.responsibilityRevision,
-      expectedReviewerRevision: selection.authority.reviewerRevision
+      expectedReviewerRevision: selection.authority.reviewerRevision,
+      controlPlane: selection.authority.controlPlane
     });
     if (reservation) {
       this.assertReservedEndpoint(operation, candidate, reservation);

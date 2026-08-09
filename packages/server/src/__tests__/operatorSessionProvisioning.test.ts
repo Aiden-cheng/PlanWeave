@@ -152,6 +152,39 @@ describe("configured operator session provisioning", () => {
     }
   });
 
+  it("allows an explicitly anchored server admin when no collaboration project is trusted", async () => {
+    const database = await openDatabase();
+    try {
+      const identity = new WorkspaceIdentityRepository(database);
+      const ownerWorkspaceId = identity.ensureConfiguredWorkspace("workspace-owner-runtime");
+      const sessions = provisionConfiguredOperatorSessions({
+        database,
+        credentials: [credential(tokenA, [], true)],
+        trustedProjectIds: [],
+        serverAdminAnchorWorkspaceId: ownerWorkspaceId,
+        workspaceForProject: () => undefined,
+        operatorSessionTtlMs: 30 * 24 * 60 * 60 * 1_000,
+        clock: () => firstIssuedAt
+      });
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.workspaceId).toBe(ownerWorkspaceId);
+      expect(() =>
+        provisionConfiguredOperatorSessions({
+          database,
+          credentials: [credential(tokenB, ["project-a"], false)],
+          trustedProjectIds: [],
+          serverAdminAnchorWorkspaceId: ownerWorkspaceId,
+          workspaceForProject: () => undefined,
+          operatorSessionTtlMs: 30 * 24 * 60 * 60 * 1_000,
+          clock: () => firstIssuedAt
+        })
+      ).toThrow("operator_project_not_trusted");
+    } finally {
+      database.close();
+    }
+  });
+
   it("fails closed when a configured digest is bound to another workspace", async () => {
     const database = await openDatabase();
     try {

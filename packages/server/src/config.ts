@@ -173,7 +173,7 @@ const serverConfigV1InputSchema = z
     allowInsecureDevelopment: z.boolean().default(false),
     allowInsecureLan: z.boolean().default(false),
     dataDirectory: absolutePathSchema,
-    trustedProjects: z.array(trustedRuntimeProjectSchema).min(1).max(256),
+    trustedProjects: z.array(trustedRuntimeProjectSchema).max(256),
     operatorCredentials: z.array(operatorCredentialSchema).min(1).max(1_024),
     operatorSessionTtlMs: z
       .number()

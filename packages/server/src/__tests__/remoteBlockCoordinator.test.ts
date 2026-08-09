@@ -83,7 +83,11 @@ async function setup(withHost: boolean, manifest: PlanPackageManifest = remoteMa
           if (candidate.inputArtifacts.length !== 0) throw new Error("unexpected_test_artifact");
         }
       },
-      artifactContent: { readReport: async (ref) => artifacts.read(ref) }
+      artifactContent: { readReport: async (ref) => artifacts.read(ref) },
+      ownerEndpointScopeAuthorized: (scope) =>
+        scope.workspaceId === locator.workspaceId &&
+        scope.projectId === locator.projectId &&
+        scope.canvasId === locator.canvasId
     },
     { serverInstanceOwnerToken: server.serverInstanceOwnerToken }
   );
@@ -1342,6 +1346,7 @@ describe("RemoteBlockCoordinator", () => {
       blockRef: "T-001#B-001",
       idempotencyKey: "fleet-unbound-dispatch",
       agentEndpointId: endpoint.endpointId,
+      controlPlane: "owner",
       expectedResponsibilityRevision: 0,
       expectedReviewerRevision: 0
     });

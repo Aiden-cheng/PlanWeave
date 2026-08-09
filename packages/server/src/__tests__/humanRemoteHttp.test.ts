@@ -326,6 +326,7 @@ describe("human remote operation HTTP", () => {
       fixture.coordination.operations.getRequired(operationId).endpointSelection?.authority
     ).toEqual({
       schemaVersion: "endpoint-authority/v1",
+      controlPlane: "collaboration",
       responsibilityRevision: 0,
       reviewerRevision: 0
     });

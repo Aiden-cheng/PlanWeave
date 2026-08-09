@@ -117,9 +117,7 @@ async function setup(input: { serverAdmin?: boolean } = {}) {
   };
 }
 
-function registerFleetHost(
-  coordination: Awaited<ReturnType<typeof setup>>["coordination"]
-) {
+function registerFleetHost(coordination: Awaited<ReturnType<typeof setup>>["coordination"]) {
   const registration = coordination.hosts.register("Fleet Host");
   coordination.hosts.reportOnline(registration.host.id, ["acp.codex"], 1, {
     workspaceMappings: [],
@@ -137,6 +135,41 @@ function registerFleetHost(
 }
 
 describe("RemoteControlService owner fleet control plane", () => {
+  it("returns an empty event replay before the owner operation emits its first ACP event", async () => {
+    const fixture = await setup();
+    const operation = fixture.coordination.operations.create({
+      workspaceId: fixture.workspaceId,
+      projectId: "project-a",
+      canvasId: "canvas-a",
+      blockRef: "T-001#B-001",
+      ownershipGeneration: "generation-1",
+      idempotencyKey: "owner-empty-replay-1",
+      sourceFingerprint: "source-1",
+      requiredCapabilities: ["acp.codex"]
+    });
+
+    const response = await fetch(
+      `${fixture.origin}/api/v1/remote-operations/${operation.id}/events?afterCursor=0`,
+      { headers: { Authorization: `Bearer ${adminToken}` } }
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      executionAttemptId: operation.executionAttemptId,
+      afterCursor: 0,
+      cursor: 0,
+      highWatermark: 0,
+      hasMore: false,
+      events: []
+    });
+
+    const missing = await fetch(
+      `${fixture.origin}/api/v1/remote-operations/operation-missing/events?afterCursor=0`,
+      { headers: { Authorization: `Bearer ${adminToken}` } }
+    );
+    expect(missing.status).toBe(404);
+  });
+
   it("returns an unbound fleet host from getHost without workspace scope", () => {
     const run = async () => {
       const fixture = await setup();

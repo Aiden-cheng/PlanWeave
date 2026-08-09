@@ -91,7 +91,7 @@ export type TrustedRuntimeRegistry = {
 export async function createTrustedRuntimeRegistry(
   rawProjects: readonly TrustedRuntimeProject[]
 ): Promise<TrustedRuntimeRegistry> {
-  const projects = z.array(trustedRuntimeProjectSchema).min(1).parse(rawProjects);
+  const projects = z.array(trustedRuntimeProjectSchema).max(256).parse(rawProjects);
   const registry = new RemoteRuntimePortRegistry();
   const unbind: Array<() => void> = [];
   const locators: Array<{ workspaceId: string; projectId: string; canvasId: string }> = [];

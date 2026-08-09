@@ -79,6 +79,14 @@ describe("server config", () => {
     expect(JSON.stringify(serverConfigSummary(config))).not.toContain("token");
   });
 
+  it("accepts an empty collaboration trust set for a separately supplied Owner runtime", async () => {
+    const input = await secureConfig();
+    const config = parseServerConfig({ ...input, trustedProjects: [] });
+
+    expect(config.trustedProjects).toEqual([]);
+    expect(serverConfigSummary(config).projectIds).toEqual([]);
+  });
+
   it("requires matching TLS public and bind ports", async () => {
     const input = await secureConfig();
     expect(() => parseServerConfig({ ...input, publicUrl: "https://127.0.0.1:8443" })).toThrow(

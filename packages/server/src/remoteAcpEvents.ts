@@ -295,6 +295,24 @@ export class RemoteAcpEventRepository {
     };
   }
 
+  /** Replay a recognized operation before or after its first Host event batch arrives. */
+  replayAvailable(executionAttemptId: string, rawAfterCursor = 0): RemoteAcpEventReplay {
+    const afterCursor = acpEventCursorSchema.parse(rawAfterCursor);
+    if (!this.hasStream(executionAttemptId)) {
+      if (afterCursor > 0) throw new Error("remote_acp_event_replay_cursor_ahead");
+      return {
+        executionAttemptId,
+        afterCursor,
+        cursor: 0,
+        highWatermark: 0,
+        hasMore: false,
+        events: [],
+        diagnostics: []
+      };
+    }
+    return this.replay(executionAttemptId, afterCursor);
+  }
+
   hasStream(executionAttemptId: string): boolean {
     return Boolean(
       this.database

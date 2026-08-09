@@ -55,6 +55,12 @@ export type RemoteBlockCoordinationOptions = {
   artifactContent: RemoteArtifactContentPort;
   checkpoints?: RemoteCoordinatorCheckpointPort;
   interactionAuthorization?: RemoteInteractionAuthorizationPort;
+  /** Server-owner runtime authority; collaboration dispatches never consult this port. */
+  ownerEndpointScopeAuthorized?(input: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+  }): boolean;
   eventRetentionMaxEvents?: number;
   eventRetentionMaxBytes?: number;
   /**
@@ -151,13 +157,22 @@ export function createRemoteBlockCoordination(
     if (!workspaceIdentity.workspaceExists(scope.workspaceId)) {
       throw new DispatchAssignmentError("work_host_not_authorized");
     }
-    const project = projectAccess.registry.projectInternal(scope.workspaceId, scope.projectId);
-    const canvas = projectAccess.registry.canvasInternal(
-      scope.workspaceId,
-      scope.projectId,
-      scope.canvasId
-    );
-    if (!project || project.revokedAt !== null || !canvas || canvas.revokedAt !== null) {
+    const authorized =
+      input.controlPlane === "owner"
+        ? options.ownerEndpointScopeAuthorized?.(scope) === true
+        : (() => {
+            const project = projectAccess.registry.projectInternal(
+              scope.workspaceId,
+              scope.projectId
+            );
+            const canvas = projectAccess.registry.canvasInternal(
+              scope.workspaceId,
+              scope.projectId,
+              scope.canvasId
+            );
+            return !!project && project.revokedAt === null && !!canvas && canvas.revokedAt === null;
+          })();
+    if (!authorized) {
       throw new DispatchAssignmentError("work_host_not_authorized");
     }
     const current = authorityRepository.currentRevisions(scope);

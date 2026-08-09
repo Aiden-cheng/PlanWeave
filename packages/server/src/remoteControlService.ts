@@ -56,6 +56,10 @@ export type RemoteControlServiceOptions = {
   workspaceIdentity: WorkspaceIdentityRepository;
   authorizeProjectScope(scope: { workspaceId: string; projectId: string }): void;
   authorizeCanvas?: (scope: { workspaceId: string; projectId: string; canvasId: string }) => void;
+  resolveOwnerRuntimeScope?: (scope: {
+    projectId: string;
+    canvasId: string;
+  }) => { workspaceId: string; projectId: string; canvasId: string } | undefined;
 };
 
 const operatorAgentEndpointQuerySchema = z
@@ -145,23 +149,6 @@ export class RemoteControlService {
   }
 
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
-    const workspaceId = this.resolveWorkspace(principal, principal.workspaceId);
-    this.authorizeWorkspace(principal, workspaceId);
-    if (
-      rawRequest !== null &&
-      typeof rawRequest === "object" &&
-      "projectId" in rawRequest &&
-      typeof rawRequest.projectId === "string"
-    ) {
-      this.options.authorization.authorizeProject(principal, rawRequest.projectId);
-      if ("canvasId" in rawRequest && typeof rawRequest.canvasId === "string") {
-        this.options.authorizeCanvas?.({
-          workspaceId,
-          projectId: rawRequest.projectId,
-          canvasId: rawRequest.canvasId
-        });
-      }
-    }
     if (
       rawRequest !== null &&
       typeof rawRequest === "object" &&
@@ -171,6 +158,25 @@ export class RemoteControlService {
     }
     const request = remoteDispatchIntentV3Schema.parse(rawRequest);
     this.options.authorization.authorizeProject(principal, request.projectId);
+    const ownerScope = this.options.resolveOwnerRuntimeScope?.({
+      projectId: request.projectId,
+      canvasId: request.canvasId
+    });
+    if (this.options.resolveOwnerRuntimeScope && !ownerScope) {
+      throw new Error("operator_project_forbidden");
+    }
+    if (ownerScope) this.options.authorization.requireServerAdmin(principal);
+    const workspaceId = this.resolveWorkspace(
+      principal,
+      ownerScope?.workspaceId ?? principal.workspaceId
+    );
+    if (!ownerScope) {
+      this.options.authorizeCanvas?.({
+        workspaceId,
+        projectId: request.projectId,
+        canvasId: request.canvasId
+      });
+    }
     const outcome = await this.options.coordinator.dispatch({
       workspaceId,
       projectId: request.projectId,
@@ -179,7 +185,8 @@ export class RemoteControlService {
       idempotencyKey: request.idempotencyKey,
       agentEndpointId: request.agentEndpointId,
       expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-      expectedReviewerRevision: request.expectedReviewerRevision
+      expectedReviewerRevision: request.expectedReviewerRevision,
+      controlPlane: ownerScope ? "owner" : "collaboration"
     });
     return this.observeOperation(principal, outcome.operation.id);
   }
@@ -243,7 +250,7 @@ export class RemoteControlService {
     const operation = this.operationFor(principal, operationId);
     const query = operatorEventQuerySchema.parse({ afterCursor: rawAfterCursor });
     return operatorEventReplaySchema.parse(
-      this.options.events.replay(operation.executionAttemptId, query.afterCursor)
+      this.options.events.replayAvailable(operation.executionAttemptId, query.afterCursor)
     );
   }
 
@@ -280,12 +287,20 @@ export class RemoteControlService {
   }
 
   private operationFor(principal: OperatorPrincipal, operationId: string): RemoteOperation {
-    const operation = this.options.operations.getRequiredInWorkspace(
-      principal.workspaceId,
-      operationId
-    );
+    const operation = principal.serverAdmin
+      ? this.options.operations.getRequired(operationId)
+      : this.options.operations.getRequiredInWorkspace(principal.workspaceId, operationId);
     this.options.authorization.authorizeProject(principal, operation.projectId);
     this.authorizeWorkspace(principal, operation.workspaceId);
+    if (this.options.resolveOwnerRuntimeScope) {
+      const ownerScope = this.options.resolveOwnerRuntimeScope({
+        projectId: operation.projectId,
+        canvasId: operation.canvasId
+      });
+      if (!ownerScope || ownerScope.workspaceId !== operation.workspaceId) {
+        throw new Error("operator_project_forbidden");
+      }
+    }
     return operation;
   }
 
@@ -321,7 +336,6 @@ export class RemoteControlService {
     this.authorizeWorkspace(principal, workspaceId);
     return workspaceId;
   }
-
 }
 
 function toOperatorHostView(

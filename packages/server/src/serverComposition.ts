@@ -92,6 +92,8 @@ import {
 export type DistributedServerCompositionOptions = {
   httpServer: HttpServer;
   config: ServerConfig;
+  /** Owner control-plane runtime scopes. They never widen collaboration HTTP/WS authority. */
+  ownerTrustedProjects?: ServerConfig["trustedProjects"];
   clock?: () => Date;
   readiness?: ServerReadinessController;
 };
@@ -169,10 +171,38 @@ export async function createDistributedServerComposition(
   options: DistributedServerCompositionOptions
 ): Promise<DistributedServerComposition> {
   const config = serverConfigSchema.parse(options.config);
+  if (config.trustedProjects.length === 0 && !options.ownerTrustedProjects?.length) {
+    throw new Error("server_runtime_project_required");
+  }
   const transportAdmission = createTransportAdmissionPolicy(config);
   const clock = options.clock ?? (() => new Date());
   const readiness = options.readiness ?? new ServerReadinessController();
   const runtimeRegistry = await createTrustedRuntimeRegistry(config.trustedProjects);
+  let ownerRuntimeRegistry = runtimeRegistry;
+  try {
+    if (options.ownerTrustedProjects) {
+      ownerRuntimeRegistry = await createTrustedRuntimeRegistry(options.ownerTrustedProjects);
+    }
+  } catch (error) {
+    runtimeRegistry.close();
+    throw error;
+  }
+  const closeRuntimeRegistries = () => {
+    const errors: unknown[] = [];
+    if (ownerRuntimeRegistry !== runtimeRegistry) {
+      try {
+        ownerRuntimeRegistry.close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    try {
+      runtimeRegistry.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "runtime_registry_cleanup_failed");
+  };
   let lifecycle: Awaited<ReturnType<typeof startRemoteBlockCoordinationServer>> | undefined;
   let artifactStore: ArtifactStore | undefined;
   let activityRepository: ActivityRepository | undefined;
@@ -247,12 +277,13 @@ export async function createDistributedServerComposition(
           leaseDurationMs: config.limits.leaseDurationMs,
           hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
           clock,
-          runtimeResolver: runtimeRegistry.registry,
+          runtimeResolver: ownerRuntimeRegistry.registry,
           inputArtifacts: new RuntimeInputArtifactMaterializer(
-            runtimeRegistry.registry,
+            ownerRuntimeRegistry.registry,
             artifactStore
           ),
           artifactContent: new ArtifactStoreRemoteContent(artifactStore),
+          ownerEndpointScopeAuthorized: (scope) => ownerRuntimeRegistry.hasScope(scope),
           interactionAuthorization: {
             canRespond: (input) => {
               if (authorization.canRespond(input)) return true;
@@ -361,6 +392,11 @@ export async function createDistributedServerComposition(
     });
     const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
     projectAccess = new ProjectAccessRepository(server.database, clock);
+    for (const workspaceId of new Set(
+      ownerRuntimeRegistry.expansions.map((scope) => scope.workspaceId)
+    )) {
+      workspaceIdentity.ensureConfiguredWorkspace(workspaceId);
+    }
     runtimeRegistry.setScopedPackageResolver((input) => {
       if (!workspaceIdentity.workspaceExists(input.workspaceId)) return undefined;
       const canvas = projectAccess!.registry.canvasInternal(
@@ -490,6 +526,13 @@ export async function createDistributedServerComposition(
     );
     if (!projectAccess || !packageSnapshots)
       throw new Error("project_access_services_not_initialized");
+    const assertCollaborationCanvasScope = (input: {
+      workspaceId: string;
+      projectId: string;
+      canvasId: string;
+    }) => {
+      if (!runtimeRegistry.hasScope(input)) throw new Error("registry_canvas_not_found");
+    };
     const registryService: RegistryHttpService = {
       listProjects(input) {
         const items = projectAccess!.listAuthorizedProjects({
@@ -504,25 +547,43 @@ export async function createDistributedServerComposition(
         };
       },
       listCanvases(input) {
-        const items = projectAccess!.listAuthorizedCanvases({
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          actor: input.actor,
-          limit: input.limit,
-          offset: input.cursor
-        });
+        const authorized: ReturnType<ProjectAccessRepository["listAuthorizedCanvases"]> = [];
+        const pageSize = 100;
+        for (let offset = 0; ; offset += pageSize) {
+          const page = projectAccess!.listAuthorizedCanvases({
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            actor: input.actor,
+            limit: pageSize,
+            offset
+          });
+          authorized.push(...page);
+          if (page.length < pageSize) break;
+        }
+        const visible = authorized.filter((canvas) =>
+          runtimeRegistry.hasScope({
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            canvasId: canvas.registry.canvasId
+          })
+        );
+        const items = visible.slice(input.cursor, input.cursor + input.limit);
         return {
           items,
-          nextCursor: items.length === input.limit ? input.cursor + input.limit : null
+          nextCursor:
+            input.cursor + items.length < visible.length ? input.cursor + items.length : null
         };
       },
       readSnapshot(input) {
+        assertCollaborationCanvasScope(input);
         return packageSnapshots!.read(input);
       },
       createSnapshot(input) {
+        assertCollaborationCanvasScope(input);
         return packageSnapshots!.create(input);
       },
       restoreSnapshot(input) {
+        assertCollaborationCanvasScope(input);
         return packageSnapshots!.restore(input);
       }
     };
@@ -531,7 +592,8 @@ export async function createDistributedServerComposition(
       database: server.database,
       credentials: config.operatorCredentials,
       trustedProjectIds: [...new Set(runtimeRegistry.expansions.map((canvas) => canvas.projectId))],
-      serverAdminAnchorWorkspaceId: runtimeRegistry.expansions[0]?.workspaceId,
+      serverAdminAnchorWorkspaceId:
+        runtimeRegistry.expansions[0]?.workspaceId ?? ownerRuntimeRegistry.expansions[0]?.workspaceId,
       workspaceForProject: (projectId) => {
         const scopes = runtimeRegistry.expansions.filter(
           (expansion) => expansion.projectId === projectId
@@ -808,6 +870,18 @@ export async function createDistributedServerComposition(
       authorizeCanvas: (scope) => {
         if (!runtimeRegistry.hasScope(scope)) throw new Error("operator_project_forbidden");
       },
+      resolveOwnerRuntimeScope: ({ projectId, canvasId }) => {
+        const matches = ownerRuntimeRegistry.expansions.filter(
+          (scope) => scope.projectId === projectId && scope.canvasId === canvasId
+        );
+        if (matches.length !== 1) return undefined;
+        const match = matches[0]!;
+        return {
+          workspaceId: match.workspaceId,
+          projectId: match.projectId,
+          canvasId: match.canvasId
+        };
+      },
       hostOfflineAfterMs: config.limits.hostOfflineAfterMs,
       clock
     });
@@ -928,7 +1002,7 @@ export async function createDistributedServerComposition(
           try {
             closeCompositionStorage({
               closeLifecycle: server.close,
-              closeRuntimeRegistry: runtimeRegistry.close
+              closeRuntimeRegistry: closeRuntimeRegistries
             });
           } catch (error) {
             errors.push(error);
@@ -976,7 +1050,7 @@ export async function createDistributedServerComposition(
       try {
         closeCompositionStorage({
           closeLifecycle: lifecycle?.server.close,
-          closeRuntimeRegistry: runtimeRegistry.close
+          closeRuntimeRegistry: closeRuntimeRegistries
         });
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError);

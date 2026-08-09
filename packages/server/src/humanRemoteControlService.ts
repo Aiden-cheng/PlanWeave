@@ -93,7 +93,8 @@ export class HumanRemoteControlService {
       idempotencyKey: request.idempotencyKey,
       agentEndpointId: request.agentEndpointId,
       expectedResponsibilityRevision: request.expectedResponsibilityRevision,
-      expectedReviewerRevision: request.expectedReviewerRevision
+      expectedReviewerRevision: request.expectedReviewerRevision,
+      controlPlane: "collaboration"
     });
     return this.observeOperation(scope, outcome.operation.id);
   }
@@ -188,20 +189,8 @@ export class HumanRemoteControlService {
   replayEvents(scope: AuthenticatedCollaborationScope, operationId: string, rawQuery: unknown) {
     const operation = this.operationFor(scope, operationId);
     const query = remoteEventQuerySchema.parse(rawQuery);
-    if (!this.options.events.hasStream(operation.executionAttemptId)) {
-      if (query.afterCursor > 0) throw new Error("remote_acp_event_replay_cursor_ahead");
-      return remoteEventReplaySchema.parse({
-        executionAttemptId: operation.executionAttemptId,
-        afterCursor: query.afterCursor,
-        cursor: 0,
-        highWatermark: 0,
-        hasMore: false,
-        events: [],
-        diagnostics: []
-      });
-    }
     return remoteEventReplaySchema.parse(
-      this.options.events.replay(operation.executionAttemptId, query.afterCursor)
+      this.options.events.replayAvailable(operation.executionAttemptId, query.afterCursor)
     );
   }
 

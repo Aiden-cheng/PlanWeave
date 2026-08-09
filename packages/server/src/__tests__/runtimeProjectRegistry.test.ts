@@ -24,6 +24,15 @@ afterEach(async () => {
 });
 
 describe("createTrustedRuntimeRegistry", () => {
+  it("supports an empty collaboration runtime registry", async () => {
+    const trusted = await createTrustedRuntimeRegistry([]);
+
+    expect(trusted.expansions).toEqual([]);
+    expect(trusted.locators).toEqual([]);
+    expect(trusted.hasProject("project-1")).toBe(false);
+    trusted.close();
+  });
+
   it("binds only an explicitly configured project identity", async () => {
     const workspace = await createTestWorkspace(basicManifest());
     directories.push(workspace.home, workspace.root);

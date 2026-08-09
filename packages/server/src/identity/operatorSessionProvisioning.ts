@@ -77,10 +77,14 @@ export function provisionConfiguredOperatorSessions(
   const trustedProjectIds = new Set(
     input.trustedProjectIds.map((projectId) => opaqueIdentifierSchema.parse(projectId))
   );
-  if (trustedProjectIds.size === 0) throw new Error("operator_anchor_workspace_missing");
+  const firstTrustedProjectId = [...trustedProjectIds][0];
   const anchorWorkspaceId =
-    input.serverAdminAnchorWorkspaceId ?? input.workspaceForProject([...trustedProjectIds][0]);
+    input.serverAdminAnchorWorkspaceId ??
+    (firstTrustedProjectId ? input.workspaceForProject(firstTrustedProjectId) : undefined);
   if (!anchorWorkspaceId) throw new Error("operator_anchor_workspace_missing");
+  if (trustedProjectIds.size === 0 && credentials.some((credential) => !credential.serverAdmin)) {
+    throw new Error("operator_project_not_trusted");
+  }
   const ttlMs = operatorSessionTtlSchema.parse(input.operatorSessionTtlMs);
   const clock = input.clock ?? (() => new Date());
   const plans = credentials.map((credential) => ({

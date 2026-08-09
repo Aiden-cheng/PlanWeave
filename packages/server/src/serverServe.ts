@@ -26,6 +26,8 @@ export type DistributedServerExposureRuntime = {
 export type DistributedServerServeOptions = {
   exposure?: DistributedServerExposureRuntime;
   createExposureLifecycle?: (leases: ExposureLeaseStorePort) => ServerExposureLifecyclePort;
+  /** Main-process-only Owner runtime scope; collaboration remains constrained by config.trustedProjects. */
+  ownerTrustedProjects?: ServerConfig["trustedProjects"];
 };
 
 export type DistributedServerProcess = {
@@ -129,7 +131,10 @@ export async function serveDistributedServer(
     composition = await createDistributedServerComposition({
       httpServer: server,
       config,
-      readiness
+      readiness,
+      ...(options.ownerTrustedProjects
+        ? { ownerTrustedProjects: options.ownerTrustedProjects }
+        : {})
     });
     if (
       !exposure &&

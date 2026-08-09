@@ -8,6 +8,7 @@ import { z } from "zod";
 export const endpointAuthoritySnapshotSchema = z
   .object({
     schemaVersion: z.literal("endpoint-authority/v1"),
+    controlPlane: z.enum(["collaboration", "owner"]).default("collaboration"),
     responsibilityRevision: z.number().int().nonnegative(),
     reviewerRevision: z.number().int().nonnegative()
   })

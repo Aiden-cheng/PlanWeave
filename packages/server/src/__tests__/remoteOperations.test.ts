@@ -66,6 +66,7 @@ describe("RemoteOperationRepository", () => {
       resolvedAt: "2030-01-01T00:00:00.000Z",
       authority: {
         schemaVersion: "endpoint-authority/v1" as const,
+        controlPlane: "collaboration" as const,
         responsibilityRevision: 2,
         reviewerRevision: 3
       }

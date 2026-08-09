@@ -56,6 +56,7 @@ describe("canonicalRemoteRuntimePort", () => {
     const binding = await adapted.claim({
       ref: candidate.blockRef,
       operationId: "operation-1",
+      controlPlane: "collaboration",
       sourceRevision: candidate.sourceRevision,
       graphFingerprint: candidate.graphFingerprint
     });

@@ -45,6 +45,7 @@ export function endpointDispatchRequest(input: {
     idempotencyKey: input.idempotencyKey,
     agentEndpointId: endpointId,
     expectedResponsibilityRevision: input.expectedResponsibilityRevision ?? 0,
-    expectedReviewerRevision: input.expectedReviewerRevision ?? 0
+    expectedReviewerRevision: input.expectedReviewerRevision ?? 0,
+    controlPlane: "collaboration"
   };
 }
