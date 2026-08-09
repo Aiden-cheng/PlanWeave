@@ -242,7 +242,7 @@ describe("security reliability matrix", () => {
       "enrollmentCode=pw_enroll_abc123DEF456",
       "token: visible-secret",
       "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
-      "path=/Users/mrbrain/code/PlanWeave-collaboration/secrets.json",
+      "path=/Users/example/code/PlanWeave-collaboration/secrets.json",
       "url=https://vps.example.com:8443/api/v1/hosts",
       "peer=203.0.113.10:443"
     ].join("\n");

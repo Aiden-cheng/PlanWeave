@@ -334,7 +334,7 @@ describe("Task Workspace conversation", () => {
       sizeBytes: 310,
       mediaType: "text/markdown" as const
     };
-    const artifactPath = "/Users/mrbrain/code/PlanWeave/report.md";
+    const artifactPath = "/Users/example/code/PlanWeave/report.md";
     const baseModel = readModel();
     const artifactEvent = normalizedRunnerEventSchema.parse({
       version: "planweave.runner-event/v1",
