@@ -145,19 +145,17 @@ describe("parallel claim", () => {
       reportPath: await writeReport(root, "t1.md")
     });
 
-    // Capacity freed by one completion; nothing new is ready (reviews wait), retained live refs.
+    // One implementation finished while two peers remain live. The free slot advances its
+    // ready review instead of imposing a batch-wide implementation barrier.
     const second = await claimNext({ projectRoot: root, parallel: true });
     expect(second).toMatchObject({
-      kind: "batch",
-      reason: "at_capacity"
+      kind: "block",
+      ref: "T-001#R-001",
+      blockType: "review"
     });
-    if (second.kind !== "batch") {
-      throw new Error("expected batch");
-    }
-    expect(second.refs.sort()).toEqual(["T-002#B-001", "T-003#B-001"]);
 
     const status = await getExecutionStatus({ projectRoot: root });
-    expect(status.currentRefs.sort()).toEqual(["T-002#B-001", "T-003#B-001"]);
+    expect(status.currentRefs.sort()).toEqual(["T-001#R-001", "T-002#B-001", "T-003#B-001"]);
     expect(status.blocks.find((block) => block.ref === "T-002#B-001")?.status).toBe("in_progress");
     expect(status.blocks.find((block) => block.ref === "T-003#B-001")?.status).toBe("in_progress");
   });

@@ -9,22 +9,23 @@ import {
   type ScopeCompletionPort
 } from "../renderer/collaboration/claimBusScheduler";
 
-function blockClaim(ref: string): Extract<ClaimResult, { kind: "block" }> {
+function blockClaim(
+  ref: string,
+  blockType: "implementation" | "review" = "implementation"
+): Extract<ClaimResult, { kind: "block" }> {
   const [taskId, blockId] = ref.split("#");
   return {
     kind: "block",
     ref,
     taskId: taskId ?? "T-001",
     blockId: blockId ?? "B-001",
-    blockType: "implementation",
+    blockType,
     effectiveExecutor: "default",
     reason: "claimed"
   };
 }
 
-function feedbackClaim(
-  feedbackId = "FE-001"
-): Extract<ClaimResult, { kind: "feedback" }> {
+function feedbackClaim(feedbackId = "FE-001"): Extract<ClaimResult, { kind: "feedback" }> {
   return {
     kind: "feedback",
     feedbackId,
@@ -109,7 +110,11 @@ function createPorts(options: {
 describe("runClaimBusScope", () => {
   it("executes sequential blocks until none and scope is satisfied", async () => {
     const ports = createPorts({
-      previews: [blockClaim("T-001#B-001"), blockClaim("T-001#B-002"), { kind: "none", reason: "done" }],
+      previews: [
+        blockClaim("T-001#B-001"),
+        blockClaim("T-001#B-002"),
+        { kind: "none", reason: "done" }
+      ],
       // first isSatisfied before each unit (3 times) + once after final none
       satisfiedAfter: 3
     });
@@ -219,7 +224,11 @@ describe("runClaimBusScope", () => {
 
   it("routes remote vs local to the correct execution port", async () => {
     const ports = createPorts({
-      previews: [blockClaim("T-001#B-001"), blockClaim("T-001#B-002"), { kind: "none", reason: "done" }],
+      previews: [
+        blockClaim("T-001#B-001"),
+        blockClaim("T-001#B-002"),
+        { kind: "none", reason: "done" }
+      ],
       satisfiedAfter: 3,
       route: (ref) => (ref === "T-001#B-001" ? "remote" : "local")
     });
@@ -233,7 +242,7 @@ describe("runClaimBusScope", () => {
     expect(ports.executedLocal).toEqual(["T-001#B-002"]);
   });
 
-  it("executes batch refs serially", async () => {
+  it("starts all refs in a parallel batch before waiting for completion", async () => {
     const ports = createPorts({
       previews: [
         {
@@ -246,16 +255,76 @@ describe("runClaimBusScope", () => {
         },
         { kind: "none", reason: "done" }
       ],
-      satisfiedAfter: 2
+      satisfiedAfter: 2,
+      route: () => "remote"
     });
 
-    await runClaimBusScope({
+    let releaseExecutions: (() => void) | undefined;
+    const executionsReleased = new Promise<void>((resolve) => {
+      releaseExecutions = resolve;
+    });
+    ports.remoteBlock.execute = vi.fn(async () => {
+      await executionsReleased;
+    });
+
+    const run = runClaimBusScope({
       scope: { kind: "project" },
       ...ports
     });
 
-    expect(ports.executedLocal).toEqual(["T-001#B-001", "T-002#B-001"]);
-    expect(ports.localBlock.execute).toHaveBeenCalledTimes(2);
+    try {
+      await vi.waitFor(() => {
+        expect(ports.remoteBlock.execute).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      releaseExecutions?.();
+    }
+    await run;
+  });
+
+  it("starts a ready review while a peer implementation remains in flight", async () => {
+    const ports = createPorts({
+      previews: [
+        {
+          kind: "batch",
+          refs: ["T-001#B-001", "T-002#B-001"],
+          effectiveExecutors: {
+            "T-001#B-001": "default",
+            "T-002#B-001": "default"
+          }
+        },
+        blockClaim("T-001#R-001", "review")
+      ],
+      route: () => "remote"
+    });
+    const completed = new Set<string>();
+    ports.completion.isSatisfied = vi.fn(async () => completed.size === 3);
+    let releaseFirst: (() => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    const firstReleased = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondReleased = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    ports.remoteBlock.execute = vi.fn(async (ref) => {
+      if (ref === "T-001#B-001") await firstReleased;
+      if (ref === "T-002#B-001") await secondReleased;
+      completed.add(ref);
+    });
+
+    const run = runClaimBusScope({ scope: { kind: "project" }, ...ports });
+    try {
+      await vi.waitFor(() => expect(ports.remoteBlock.execute).toHaveBeenCalledTimes(2));
+      releaseFirst?.();
+      await vi.waitFor(() =>
+        expect(ports.remoteBlock.execute).toHaveBeenCalledWith("T-001#R-001", undefined)
+      );
+    } finally {
+      releaseFirst?.();
+      releaseSecond?.();
+    }
+    await run;
   });
 
   it("treats batch at_capacity as idle and does not re-dispatch live refs", async () => {

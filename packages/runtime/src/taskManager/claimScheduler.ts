@@ -126,19 +126,30 @@ async function claimNextUnlocked(options: {
     return readiness.claimOrder.result;
   }
 
-  const claimCandidate = async (candidate: ClaimCandidate): Promise<ClaimResult> => {
+  const claimCandidate = async (
+    candidate: ClaimCandidate,
+    retainedRefs: readonly string[] = []
+  ): Promise<ClaimResult> => {
     if (dryRun) {
       return candidate.result;
     }
     markClaimed(state, candidate.ref, graph);
+    if (retainedRefs.length > 0) {
+      state.currentRefs = [
+        ...retainedRefs,
+        ...state.currentRefs.filter((ref) => !retainedRefs.includes(ref))
+      ];
+    }
     state = refreshDerivedState(manifest, state);
     await writeState(workspace.stateFile, state);
     return candidate.result;
   };
 
-  const claimSequentialReviewBlock = async (): Promise<ClaimResult | null> => {
+  const claimSequentialReviewBlock = async (
+    retainedRefs: readonly string[] = []
+  ): Promise<ClaimResult | null> => {
     const candidate = readiness.sequentialReviewCandidates[0];
-    return candidate ? claimCandidate(candidate) : null;
+    return candidate ? claimCandidate(candidate, retainedRefs) : null;
   };
 
   if (options.parallel) {
@@ -161,20 +172,7 @@ async function claimNextUnlocked(options: {
     }
     const selected = readiness.parallelBatchRefs;
     if (selected.length === 0) {
-      if (retained.length > 0) {
-        // Live work remains; do not clear currentRefs or re-dispatch retained refs.
-        return {
-          kind: "batch",
-          refs: retained,
-          effectiveExecutors: effectiveExecutorsForRefs(
-            retained,
-            graph,
-            manifest.execution.defaultExecutor
-          ),
-          reason: "at_capacity"
-        };
-      }
-      const reviewClaim = await claimSequentialReviewBlock();
+      const reviewClaim = await claimSequentialReviewBlock(retained);
       if (reviewClaim) {
         if (dryRun && reviewClaim.kind === "block" && reviewClaim.blockType === "review") {
           return {
@@ -185,6 +183,20 @@ async function claimNextUnlocked(options: {
           };
         }
         return reviewClaim;
+      }
+      if (retained.length > 0) {
+        // Live implementations remain, but no implementation or review can use the free slot.
+        // Keep currentRefs intact and let a streaming caller wait for the next completion.
+        return {
+          kind: "batch",
+          refs: retained,
+          effectiveExecutors: effectiveExecutorsForRefs(
+            retained,
+            graph,
+            manifest.execution.defaultExecutor
+          ),
+          reason: "at_capacity"
+        };
       }
       if (readiness.firstProjectBlockedResult) {
         return readiness.firstProjectBlockedResult;

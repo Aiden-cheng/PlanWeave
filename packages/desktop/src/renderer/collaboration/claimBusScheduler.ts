@@ -55,19 +55,48 @@ async function executeBlockRef(ref: string, input: ClaimBusScopeInput): Promise<
   throw new Error(`claim_bus_route_missing:${ref}`);
 }
 
+type InFlightExecution = {
+  settled: Promise<{ execution: InFlightExecution; error?: unknown }>;
+};
+
+function startInFlight(execute: () => Promise<void>): InFlightExecution {
+  const execution = {} as InFlightExecution;
+  execution.settled = execute().then(
+    () => ({ execution }),
+    (error: unknown) => ({ execution, error })
+  );
+  return execution;
+}
+
+async function settleNext(inFlight: Set<InFlightExecution>): Promise<void> {
+  if (inFlight.size === 0) return;
+  const outcome = await Promise.race([...inFlight].map((execution) => execution.settled));
+  inFlight.delete(outcome.execution);
+  if (outcome.error !== undefined) throw outcome.error;
+}
+
 /**
  * Claim-bus work-unit loop: dry-run claim order only, then route each unit.
  * Does not scan dispatchable projection or reimplement readiness.
  */
 export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void> {
+  const inFlight = new Set<InFlightExecution>();
+  const start = (execute: () => Promise<void>) => {
+    inFlight.add(startInFlight(execute));
+  };
+
   while (!input.signal?.aborted) {
-    if (await input.completion.isSatisfied()) {
+    if (inFlight.size === 0 && (await input.completion.isSatisfied())) {
       return;
     }
 
     const unit = await input.preview.previewNext(input.scope);
 
     if (unit.kind === "none") {
+      if (inFlight.size > 0) {
+        await settleNext(inFlight);
+        continue;
+      }
       // Projection may lag the just-finished unit; refresh before idle vs complete.
       if (await input.completion.isSatisfied({ refresh: true })) {
         return;
@@ -80,7 +109,8 @@ export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void>
     }
 
     if (unit.kind === "feedback") {
-      await input.feedback.execute(unit, input.signal);
+      start(() => input.feedback.execute(unit, input.signal));
+      await settleNext(inFlight);
       continue;
     }
 
@@ -88,21 +118,27 @@ export async function runClaimBusScope(input: ClaimBusScopeInput): Promise<void>
       // Parallel dry-run may report retained in_progress holders as batch+at_capacity
       // (same as runAutoRunStep idle). Never re-dispatch those refs.
       if (unit.reason === "at_capacity") {
+        if (inFlight.size > 0) {
+          await settleNext(inFlight);
+          continue;
+        }
         if (await input.completion.isSatisfied({ refresh: true })) {
           return;
         }
         throw new Error("claim_bus_idle:at_capacity");
       }
-      for (const ref of unit.refs) {
-        if (input.signal?.aborted) {
-          throw new Error("claim_bus_cancelled");
-        }
-        await executeBlockRef(ref, input);
+      if (input.signal?.aborted) {
+        throw new Error("claim_bus_cancelled");
       }
+      for (const ref of unit.refs) {
+        start(() => executeBlockRef(ref, input));
+      }
+      await settleNext(inFlight);
       continue;
     }
 
-    await executeBlockRef(unit.ref, input);
+    start(() => executeBlockRef(unit.ref, input));
+    await settleNext(inFlight);
   }
 
   throw new Error("claim_bus_cancelled");
