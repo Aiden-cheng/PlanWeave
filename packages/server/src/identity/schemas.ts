@@ -223,6 +223,7 @@ export const projectScopedActionSchema = z.enum([
   "bootstrap_owner",
   "view_project",
   "view_members",
+  "update_own_profile",
   "create_invitation",
   "revoke_invitation",
   "join_project",

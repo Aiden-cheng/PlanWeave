@@ -152,6 +152,7 @@ export {
   humanMembershipViewSchema,
   humanPageQuerySchema,
   humanPrincipalViewSchema,
+  humanUpdateDisplayNameRequestSchema,
   toDeviceView,
   toInvitationView,
   toMembershipView,
@@ -162,6 +163,7 @@ export {
   type HumanInvitationView,
   type HumanMembershipView,
   type HumanPrincipalView,
+  type HumanUpdateDisplayNameRequest,
   type WorkspaceIdentityReadModel
 } from "./dtos.js";
 

@@ -298,6 +298,33 @@ describe("CollaborationClient", () => {
     client.dispose();
   });
 
+  it("updates the authenticated human display name through the strict profile route", async () => {
+    const fixture = await listen(async (req, res) => {
+      expect(req.method).toBe("PATCH");
+      expect(req.url).toBe("/api/v1/projects/project-demo-001/human/me");
+      expect(req.headers.authorization).toBe(`Bearer ${exampleHumanDeviceToken}`);
+      expect(JSON.parse((await readBody(req)).toString("utf8"))).toEqual({
+        displayName: "Ada Lovelace"
+      });
+      json(res, 200, {
+        humanPrincipalId: "human-owner-001",
+        displayName: "Ada Lovelace",
+        createdAt: "2030-01-01T00:00:00.000Z"
+      });
+    });
+    cleanups.push(fixture.close);
+    const client = clientFor(fixture.origin, { token: exampleHumanDeviceToken });
+
+    await expect(client.updateOwnDisplayName({ displayName: "  Ada Lovelace  " })).resolves.toEqual(
+      {
+        humanPrincipalId: "human-owner-001",
+        displayName: "Ada Lovelace",
+        createdAt: "2030-01-01T00:00:00.000Z"
+      }
+    );
+    client.dispose();
+  });
+
   it("reads a comment attachment with device authentication", async () => {
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     const digestSha256 = createHash("sha256").update(bytes).digest("hex");

@@ -68,6 +68,8 @@ import {
   humanRevokeInvitationsResponseSchema,
   humanMemberPageSchema,
   humanPageQuerySchema,
+  humanPrincipalViewSchema,
+  humanUpdateDisplayNameRequestSchema,
   type HumanBootstrapRequest,
   type HumanBootstrapResponse,
   type HumanConsumeInvitationRequest,
@@ -77,7 +79,9 @@ import {
   type HumanInvitationPage,
   type HumanInvitationView,
   type HumanRevokeInvitationsResponse,
-  type HumanMemberPage
+  type HumanMemberPage,
+  type HumanPrincipalView,
+  type HumanUpdateDisplayNameRequest
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
   remoteEventQuerySchema,
@@ -450,6 +454,19 @@ export class CollaborationClient {
 
   async verifyAccess(signal?: AbortSignal): Promise<void> {
     await this.listMembers({ cursor: 0, limit: 1 }, signal);
+  }
+
+  async updateOwnDisplayName(
+    input: HumanUpdateDisplayNameRequest,
+    signal?: AbortSignal
+  ): Promise<HumanPrincipalView> {
+    const body = humanUpdateDisplayNameRequestSchema.parse(input);
+    return this.json(
+      "PATCH",
+      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/human/me`,
+      humanPrincipalViewSchema,
+      { body, signal }
+    );
   }
 
   async removeMember(humanPrincipalId: string, signal?: AbortSignal): Promise<void> {

@@ -817,6 +817,16 @@ describe("preload bridge invocation", () => {
       if (channel === collaborationInvokeChannels.listCollaborationMembers) {
         return { ok: true, value: { items: [], nextCursor: null } };
       }
+      if (channel === collaborationInvokeChannels.updateOwnCollaborationDisplayName) {
+        return {
+          ok: true,
+          value: {
+            humanPrincipalId: "human-1",
+            displayName: "Ada Lovelace",
+            createdAt: "2026-07-25T00:00:00.000Z"
+          }
+        };
+      }
       if (channel === collaborationInvokeChannels.listCollaborationDevices) {
         return { ok: true, value: { items: [], nextCursor: null } };
       }
@@ -976,6 +986,7 @@ describe("preload bridge invocation", () => {
     await api.stopCollaborationCanvasLiveSync();
     await api.flushCollaborationCanvasReplicaMaterialization();
     await api.listCollaborationMembers({ cursor: 0, limit: 20 });
+    await api.updateOwnCollaborationDisplayName({ displayName: "Ada Lovelace" });
     await api.createCollaborationInvitation({});
     await api.createCollaborationInvitationHandoff({});
     await api.getCollaborationInvitationHandoff({ invitationId: "invitation-1" });
@@ -1098,6 +1109,10 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.listCollaborationMembers,
       { cursor: 0, limit: 20 }
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      collaborationInvokeChannels.updateOwnCollaborationDisplayName,
+      { displayName: "Ada Lovelace" }
     );
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       collaborationInvokeChannels.readCollaborationCommentAttachment,

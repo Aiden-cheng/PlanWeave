@@ -67,6 +67,7 @@ import {
   humanConsumeInvitationRequestSchema,
   humanCreateInvitationRequestSchema,
   humanRevokeInvitationsRequestSchema,
+  humanUpdateDisplayNameRequestSchema,
   type HumanBootstrapRequest,
   type HumanConsumeInvitationRequest,
   type HumanCreateInvitationResponse,
@@ -371,6 +372,11 @@ export type HumanBootstrapRequestInput = HumanBootstrapRequest;
 export type HumanConsumeInvitationRequestInput = Omit<
   HumanConsumeInvitationRequest,
   "existingDeviceToken"
+>;
+
+export const collaborationUpdateOwnDisplayNameInputSchema = humanUpdateDisplayNameRequestSchema;
+export type CollaborationUpdateOwnDisplayNameInput = z.infer<
+  typeof collaborationUpdateOwnDisplayNameInputSchema
 >;
 
 /**
@@ -825,6 +831,9 @@ export type PlanWeaveCollaborationApi = {
     input?: LocalCollaborationRegistrationInput
   ) => Promise<LoopbackProjectRegistrationView>;
   listCollaborationMembers: (input?: CollaborationPageQueryInput) => Promise<HumanMemberPage>;
+  updateOwnCollaborationDisplayName: (
+    input: CollaborationUpdateOwnDisplayNameInput
+  ) => Promise<HumanPrincipalView>;
   listCollaborationDevices: (input?: CollaborationDeviceListQueryInput) => Promise<HumanDevicePage>;
   listCollaborationInvitations: (
     input?: CollaborationInvitationListQueryInput

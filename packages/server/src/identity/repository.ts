@@ -122,6 +122,16 @@ export class HumanIdentityRepository {
     return this.memberships.listActiveMembers(projectId, limit, offset);
   }
 
+  updateHumanDisplayName(humanPrincipalId: string, displayName: string): HumanPrincipal {
+    return inWriteTransaction(this.database, () => {
+      const principal = this.memberships.updatePrincipalDisplayName(humanPrincipalId, displayName);
+      this.database
+        .prepare("UPDATE workspace_principals SET display_name=? WHERE human_principal_id=?")
+        .run(principal.displayName, principal.humanPrincipalId);
+      return principal;
+    });
+  }
+
   getInvitation(invitationId: string): ProjectInvitationMetadata | undefined {
     return this.invitations.getInvitation(invitationId);
   }

@@ -34,6 +34,7 @@ export {
   humanMembershipViewSchema,
   humanPageQuerySchema,
   humanPrincipalViewSchema,
+  humanUpdateDisplayNameRequestSchema,
   humanRevokeInvitationsRequestSchema,
   humanRevokeInvitationsResponseSchema,
   workspaceIdentityReadModelSchema
@@ -56,6 +57,7 @@ export type {
   HumanMembershipView,
   HumanPageQuery,
   HumanPrincipalView,
+  HumanUpdateDisplayNameRequest,
   HumanRevokeInvitationsRequest,
   HumanRevokeInvitationsResponse,
   WorkspaceIdentityReadModel

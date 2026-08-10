@@ -257,6 +257,7 @@ describe("human identity schemas", () => {
     expect(() => tokenSha256HexSchema.parse("not-hex")).toThrow();
     expect(() => tokenSha256HexSchema.parse("A".repeat(64))).toThrow();
     expect(projectScopedActionSchema.parse("bootstrap_owner")).toBe("bootstrap_owner");
+    expect(projectScopedActionSchema.parse("update_own_profile")).toBe("update_own_profile");
     expect(() => projectScopedActionSchema.parse("delete_project")).toThrow();
   });
 

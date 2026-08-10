@@ -62,6 +62,7 @@ export const collaborationInvokeChannels = {
   listLocalCollaborationTrustedScopes: "planweave-collaboration:listLocalTrustedScopes",
   registerLocalCollaborationCurrentProject: "planweave-collaboration:registerLocalCurrentProject",
   listCollaborationMembers: "planweave-collaboration:listMembers",
+  updateOwnCollaborationDisplayName: "planweave-collaboration:updateOwnDisplayName",
   listCollaborationDevices: "planweave-collaboration:listDevices",
   listCollaborationInvitations: "planweave-collaboration:listInvitations",
   createCollaborationInvitation: "planweave-collaboration:createInvitation",

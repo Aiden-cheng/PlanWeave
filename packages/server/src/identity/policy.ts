@@ -132,6 +132,7 @@ function protectLastOwner(facts: HumanPolicyFacts | undefined): HumanAuthDecisio
  * | bootstrap_owner        | deny   | deny          | deny   | deny* | allow†      |
  * | view_project           | deny   | deny          | allow  | allow | deny        |
  * | view_members           | deny   | deny          | allow  | allow | deny        |
+ * | update_own_profile     | deny   | deny          | allow  | allow | deny        |
  * | create_invitation      | deny   | deny          | deny   | allow | deny        |
  * | revoke_invitation      | deny   | deny          | deny   | allow | deny        |
  * | join_project           | deny   | allow‡        | deny§  | deny§ | deny        |
@@ -166,6 +167,7 @@ export function authorizeHumanAction(input: AuthorizeHumanActionInput): HumanAut
       return authorizeJoin(subject, facts);
     case "view_project":
     case "view_members":
+    case "update_own_profile":
     case "assign_work":
     case "comment":
     case "view_activity":

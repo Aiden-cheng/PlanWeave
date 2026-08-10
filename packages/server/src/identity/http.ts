@@ -55,6 +55,7 @@ type HumanRoute =
   | { kind: "revoke_invitations"; projectId: string }
   | { kind: "revoke_invitation"; projectId: string; invitationId: string }
   | { kind: "list_members"; projectId: string }
+  | { kind: "update_own_profile"; projectId: string }
   | { kind: "remove_member"; projectId: string; humanPrincipalId: string }
   | { kind: "promote_owner"; projectId: string; humanPrincipalId: string }
   | { kind: "demote_owner"; projectId: string; humanPrincipalId: string }
@@ -124,6 +125,9 @@ function route(request: IncomingMessage, pathname: string): HumanRoute | undefin
   }
   if (request.method === "GET" && rest === "/members") {
     return { kind: "list_members", projectId };
+  }
+  if (request.method === "PATCH" && rest === "/me") {
+    return { kind: "update_own_profile", projectId };
   }
   const memberAction = /^\/members\/([^/]+)\/(remove|promote|demote)$/.exec(rest);
   if (request.method === "POST" && memberAction) {
@@ -613,6 +617,17 @@ export async function handleHumanHttpRequest(
         const context = requireHumanContext(options, request, matched.projectId);
         const parameters = query(url, ["cursor", "limit"]);
         respond(response, 200, options.service.listMembers(context, matched.projectId, parameters));
+        break;
+      }
+      case "update_own_profile": {
+        query(url, []);
+        const context = requireHumanContext(options, request, matched.projectId);
+        const body = await readJson(request);
+        respond(
+          response,
+          200,
+          options.service.updateOwnDisplayName(context, matched.projectId, body)
+        );
         break;
       }
       case "remove_member": {

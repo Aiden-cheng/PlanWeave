@@ -8,6 +8,7 @@ import {
   humanInvitationPageSchema,
   humanInvitationViewSchema,
   humanMemberPageSchema,
+  humanPrincipalViewSchema,
   humanRevokeInvitationsResponseSchema
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import { collaborationInvitationHandoffResponseSchema } from "@planweave-ai/collaboration-protocol/handoff/invitation";
@@ -160,7 +161,9 @@ export function registerCollaborationHandlers(
     .catch((error: unknown) => {
       console.error("Failed to restore the persisted collaboration Workspace.", error);
     });
-  const suspendLocalSession = async (profileId = local.localProfile()?.profileId): Promise<void> => {
+  const suspendLocalSession = async (
+    profileId = local.localProfile()?.profileId
+  ): Promise<void> => {
     if (profileId && (await active.getStatus()).activeProfileId === profileId) {
       await active.disconnectSession();
     }
@@ -431,6 +434,11 @@ export function registerCollaborationHandlers(
   );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationMembers, (_event, input: unknown) =>
     runCollaborationCommand(() => active.listMembers(input), humanMemberPageSchema)
+  );
+  ipcMain.handle(
+    collaborationInvokeChannels.updateOwnCollaborationDisplayName,
+    (_event, input: unknown) =>
+      runCollaborationCommand(() => active.updateOwnDisplayName(input), humanPrincipalViewSchema)
   );
   ipcMain.handle(collaborationInvokeChannels.listCollaborationDevices, (_event, input: unknown) =>
     runCollaborationCommand(() => active.listDevices(input), humanDevicePageSchema)

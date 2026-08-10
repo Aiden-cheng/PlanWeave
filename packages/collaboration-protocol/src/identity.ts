@@ -358,6 +358,13 @@ export const humanPrincipalViewSchema = z
   .strict();
 export type HumanPrincipalView = z.infer<typeof humanPrincipalViewSchema>;
 
+export const humanUpdateDisplayNameRequestSchema = z
+  .object({
+    displayName: humanDisplayNameSchema
+  })
+  .strict();
+export type HumanUpdateDisplayNameRequest = z.infer<typeof humanUpdateDisplayNameRequestSchema>;
+
 export const humanMembershipViewSchema = z
   .object({
     membershipId: projectMembershipIdSchema,

@@ -8,7 +8,8 @@ import {
   type HumanDevicePage,
   type HumanInvitationPage,
   type HumanInvitationView,
-  type HumanMemberPage
+  type HumanMemberPage,
+  type HumanPrincipalView
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
   type ActivityListPage,
@@ -308,7 +309,11 @@ export class CollaborationService {
     });
     this.identityOperations = new CollaborationIdentityOperations({
       invitationVault: this.invitationVault,
+      profiles: this.profiles,
       getClientProfileId: () => this.clientProfileId,
+      publishStatus: async () => {
+        await this.publishStatus();
+      },
       withActiveClient: (operation) => this.withActiveClient(operation)
     });
   }
@@ -857,6 +862,10 @@ export class CollaborationService {
 
   async listMembers(input: unknown = {}): Promise<HumanMemberPage> {
     return this.identityOperations.listMembers(input);
+  }
+
+  async updateOwnDisplayName(input: unknown): Promise<HumanPrincipalView> {
+    return this.identityOperations.updateOwnDisplayName(input);
   }
 
   registry(): CollaborationRegistryService {

@@ -231,6 +231,9 @@ describe("desktop IPC contract", () => {
     expect(collaborationInvokeChannels.listCollaborationMembers).toBe(
       "planweave-collaboration:listMembers"
     );
+    expect(collaborationInvokeChannels.updateOwnCollaborationDisplayName).toBe(
+      "planweave-collaboration:updateOwnDisplayName"
+    );
     expect(collaborationInvokeChannels.createCollaborationInvitation).toBe(
       "planweave-collaboration:createInvitation"
     );

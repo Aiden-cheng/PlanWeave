@@ -177,6 +177,7 @@ describe("authorizeHumanAction policy table", () => {
     for (const action of [
       "view_project",
       "view_members",
+      "update_own_profile",
       "assign_work",
       "comment",
       "view_activity",

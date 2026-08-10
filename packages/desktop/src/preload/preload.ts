@@ -7,6 +7,7 @@ import {
   humanInvitationPageSchema,
   humanInvitationViewSchema,
   humanMemberPageSchema,
+  humanPrincipalViewSchema,
   humanRevokeInvitationsResponseSchema
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import { collaborationInvitationHandoffResponseSchema } from "@planweave-ai/collaboration-protocol/handoff/invitation";
@@ -344,6 +345,14 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     unwrapCollaborationCommandResult(
       await ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationMembers, input),
       humanMemberPageSchema
+    ),
+  updateOwnCollaborationDisplayName: async (input) =>
+    unwrapCollaborationCommandResult(
+      await ipcRenderer.invoke(
+        collaborationInvokeChannels.updateOwnCollaborationDisplayName,
+        input
+      ),
+      humanPrincipalViewSchema
     ),
   listCollaborationDevices: async (input) =>
     unwrapCollaborationCommandResult(

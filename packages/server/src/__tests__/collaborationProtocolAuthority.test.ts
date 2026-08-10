@@ -20,6 +20,10 @@ const identitySchemaPairs = [
     protocolIdentity.workspaceIdentityReadModelSchema
   ],
   [serverIdentity.humanPrincipalViewSchema, protocolIdentity.humanPrincipalViewSchema],
+  [
+    serverIdentity.humanUpdateDisplayNameRequestSchema,
+    protocolIdentity.humanUpdateDisplayNameRequestSchema
+  ],
   [serverIdentity.humanMembershipViewSchema, protocolIdentity.humanMembershipViewSchema],
   [serverIdentity.humanDeviceViewSchema, protocolIdentity.humanDeviceViewSchema],
   [serverIdentity.humanInvitationViewSchema, protocolIdentity.humanInvitationViewSchema],

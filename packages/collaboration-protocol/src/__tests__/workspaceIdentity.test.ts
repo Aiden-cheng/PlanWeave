@@ -8,6 +8,7 @@ import {
   evaluateAgentHostUsability,
   evaluateDeviceSessionUsability,
   evaluateOperatorSessionUsability,
+  humanUpdateDisplayNameRequestSchema,
   operatorSessionSchema,
   workspaceMembershipSchema,
   workspaceSchema
@@ -24,10 +25,7 @@ import {
   exampleWorkspaceMembership,
   exampleWorkspacePrincipal
 } from "../fixtures/collaboration.js";
-import {
-  identityMigrationMatrixSchema,
-  identityMigrationStateSchema
-} from "../migration.js";
+import { identityMigrationMatrixSchema, identityMigrationStateSchema } from "../migration.js";
 import { workspaceConnectionProfileSchema } from "../connection.js";
 
 const now = new Date("2030-01-01T12:00:00.000Z");
@@ -43,9 +41,7 @@ describe("Workspace identity contracts", () => {
         projectRoot: "workspace-root"
       })
     ).toThrow();
-    expect(() =>
-      workspaceSchema.parse({ ...exampleWorkspace, command: "/bin/sh" })
-    ).toThrow();
+    expect(() => workspaceSchema.parse({ ...exampleWorkspace, command: "/bin/sh" })).toThrow();
   });
 
   it("rejects cross-workspace assembled references", () => {
@@ -141,14 +137,23 @@ describe("Workspace identity contracts", () => {
     expect(identityMigrationStateSchema.parse(exampleIdentityMigrationState).failureCode).toBe(
       null
     );
-    expect(identityMigrationMatrixSchema.parse(exampleIdentityMigrationMatrix).entries).toHaveLength(
-      2
-    );
+    expect(
+      identityMigrationMatrixSchema.parse(exampleIdentityMigrationMatrix).entries
+    ).toHaveLength(2);
     expect(exampleIdentityMigrationStateFixtures).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ status: "completed", interruptionMarker: "read_cutover_complete" }),
-        expect.objectContaining({ status: "interrupted", interruptionMarker: "partial_backfill_failed" }),
-        expect.objectContaining({ status: "repair_required", interruptionMarker: "partial_backfill_failed" }),
+        expect.objectContaining({
+          status: "completed",
+          interruptionMarker: "read_cutover_complete"
+        }),
+        expect.objectContaining({
+          status: "interrupted",
+          interruptionMarker: "partial_backfill_failed"
+        }),
+        expect.objectContaining({
+          status: "repair_required",
+          interruptionMarker: "partial_backfill_failed"
+        }),
         expect.objectContaining({ status: "rolled_back", interruptionMarker: "rollback_complete" })
       ])
     );
@@ -192,6 +197,16 @@ describe("Workspace identity contracts", () => {
         deviceToken: `pw_hdev_${"A".repeat(43)}`
       })
     ).toThrow();
+  });
+
+  it("keeps display-name updates strict and normalized", () => {
+    expect(humanUpdateDisplayNameRequestSchema.parse({ displayName: "  Ada Lovelace  " })).toEqual({
+      displayName: "Ada Lovelace"
+    });
+    expect(() =>
+      humanUpdateDisplayNameRequestSchema.parse({ displayName: "Ada", humanPrincipalId: "other" })
+    ).toThrow();
+    expect(() => humanUpdateDisplayNameRequestSchema.parse({ displayName: "   " })).toThrow();
   });
 });
 

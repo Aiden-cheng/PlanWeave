@@ -13,6 +13,7 @@ import {
   humanInvitationListQuerySchema,
   humanRevokeInvitationsRequestSchema,
   humanPageQuerySchema,
+  humanUpdateDisplayNameRequestSchema,
   type HumanDeviceView,
   type HumanInvitationView,
   type HumanRevokeInvitationsResponse,
@@ -345,6 +346,32 @@ export class HumanMembershipService {
       });
       const nextCursor = items.length === page.limit ? page.cursor + items.length : null;
       return { items, nextCursor };
+    } catch (error) {
+      mapIdentityError(error);
+    }
+  }
+
+  updateOwnDisplayName(
+    context: HumanAuthContext,
+    projectId: string,
+    request: unknown
+  ): HumanPrincipalView {
+    try {
+      const pid = this.requireProject(projectId);
+      const body = humanUpdateDisplayNameRequestSchema.parse(request);
+      const decision = authorizeHumanAction({
+        action: "update_own_profile",
+        subject: { kind: "human", context },
+        facts: {
+          targetProjectId: pid,
+          targetHumanPrincipalId: context.humanPrincipalId
+        }
+      });
+      if (!decision.allowed) deny(decision.code);
+
+      return toPrincipalView(
+        this.repository.updateHumanDisplayName(context.humanPrincipalId, body.displayName)
+      );
     } catch (error) {
       mapIdentityError(error);
     }

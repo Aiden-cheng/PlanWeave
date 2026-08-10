@@ -162,6 +162,16 @@ export class MembershipStore {
     return this.getPrincipal(id)!;
   }
 
+  updatePrincipalDisplayName(humanPrincipalId: string, displayName: string): HumanPrincipal {
+    const id = humanPrincipalIdSchema.parse(humanPrincipalId);
+    const name = humanDisplayNameSchema.parse(displayName);
+    const updated = this.database
+      .prepare("UPDATE human_principals SET display_name=? WHERE human_principal_id=?")
+      .run(name, id);
+    if (updated.changes !== 1) throw new HumanIdentityError("human_input_invalid");
+    return this.getPrincipal(id)!;
+  }
+
   insertMembership(input: {
     projectId: string;
     humanPrincipalId: string;
@@ -186,7 +196,10 @@ export class MembershipStore {
     return this.getMembership(membershipId)!;
   }
 
-  removeMember(projectId: string, targetHumanPrincipalId: string): {
+  removeMember(
+    projectId: string,
+    targetHumanPrincipalId: string
+  ): {
     membership: ProjectMembership;
     revokedAt: string;
   } {

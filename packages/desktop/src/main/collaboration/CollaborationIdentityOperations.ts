@@ -5,7 +5,8 @@ import {
   type HumanDevicePage,
   type HumanInvitationPage,
   type HumanInvitationView,
-  type HumanMemberPage
+  type HumanMemberPage,
+  type HumanPrincipalView
 } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
   collaborationCreateInvitationInputSchema,
@@ -13,14 +14,18 @@ import {
   collaborationHumanPrincipalIdInputSchema,
   collaborationInvitationIdInputSchema,
   collaborationInvitationIdsInputSchema,
+  collaborationUpdateOwnDisplayNameInputSchema,
   type CollaborationInvitationCreateView
 } from "../../shared/collaboration.js";
 import type { CollaborationClient } from "./CollaborationClient.js";
 import type { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
+import type { CollaborationProfileStore } from "./collaborationProfileStore.js";
 
 type CollaborationIdentityOperationsDependencies = {
   invitationVault: CollaborationInvitationVault;
+  profiles: CollaborationProfileStore;
   getClientProfileId(): string | null;
+  publishStatus(): Promise<void>;
   withActiveClient<T>(operation: (client: CollaborationClient) => Promise<T>): Promise<T>;
 };
 
@@ -32,6 +37,28 @@ export class CollaborationIdentityOperations {
     return this.dependencies.withActiveClient((client) =>
       client.listMembers(humanPageQuerySchema.parse(input ?? {}))
     );
+  }
+
+  async updateOwnDisplayName(input: unknown): Promise<HumanPrincipalView> {
+    const body = collaborationUpdateOwnDisplayNameInputSchema.parse(input);
+    const profileId = this.dependencies.getClientProfileId();
+    if (!profileId) throw new Error("No active collaboration profile.");
+
+    const principal = await this.dependencies.withActiveClient((client) =>
+      client.updateOwnDisplayName(body)
+    );
+    const profile = await this.dependencies.profiles.get(profileId);
+    if (!profile) throw new Error(`Unknown collaboration profile: ${profileId}`);
+    await this.dependencies.profiles.upsert({
+      profileId: profile.profileId,
+      displayName: principal.displayName,
+      serverBaseUrl: profile.serverBaseUrl,
+      projectId: profile.projectId,
+      allowInsecureTransport: profile.allowInsecureTransport,
+      endpoint: profile.endpoint
+    });
+    await this.dependencies.publishStatus();
+    return principal;
   }
 
   async listDevices(input: unknown = {}): Promise<HumanDevicePage> {
