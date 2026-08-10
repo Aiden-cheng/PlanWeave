@@ -222,6 +222,48 @@ describe("desktop auto run API", () => {
     });
   });
 
+  it("does not restore a blocked Auto Run as latest after Desktop runtime reset", async () => {
+    const manifest = manifestTestBuilder()
+      .withExecutor("package-codex-acp", {
+        adapter: "agent",
+        agent: "codex",
+        runner: { transport: "acp" }
+      })
+      .withDefaultExecutor("package-codex-acp")
+      .withBlock("T-001", "B-001", (block) => ({
+        ...block,
+        executor: "package-codex-acp"
+      }))
+      .build();
+    const { root } = await createTestWorkspace(manifest);
+
+    const started = await startAutoRun(root, null, { kind: "project" }, 1, noTmux);
+    startedRunIds.add(started.runId);
+    const blocked = await waitForLatestRunSummary(
+      root,
+      null,
+      started.runId,
+      (state) => state.phase === "blocked"
+    );
+
+    await resetDesktopRuntimeState(root, null, {
+      force: true,
+      reason: "clear blocked runtime state"
+    });
+
+    await expect(getLatestAutoRunSummary(root, null)).resolves.toBeNull();
+    await expect(listAutoRunEvents(root, null, blocked.runId)).resolves.toMatchObject({
+      diagnostics: [],
+      events: expect.arrayContaining([
+        expect.objectContaining({ runId: blocked.runId, phase: "blocked" })
+      ])
+    });
+
+    const next = await startAutoRun(root, null, { kind: "project" }, 0, noTmux);
+    startedRunIds.add(next.runId);
+    expect(next.runId).not.toBe(blocked.runId);
+  });
+
   it("starts, pauses, resumes, stops, and summarizes project-level Auto Run", async () => {
     const manifest = manifestTestBuilder()
       .withExecutor("fake-codex", {
@@ -389,21 +431,23 @@ describe("desktop auto run API", () => {
       status: "ready",
       lastRunId: null
     });
-    await expect(getLatestAutoRunSummary(root, null)).resolves.toMatchObject({
-      runId: started.runId,
-      phase: "stopped"
+    await expect(getLatestAutoRunSummary(root, null)).resolves.toBeNull();
+    await expect(listAutoRunEvents(root, null, started.runId)).resolves.toMatchObject({
+      diagnostics: [],
+      events: expect.arrayContaining([
+        expect.objectContaining({ type: "run_stopped", runId: started.runId })
+      ])
     });
-    const stoppedRun = await getLatestAutoRunSummary(root, null);
-    if (!stoppedRun) {
-      throw new Error("Expected stopped Auto Run summary after force reset.");
-    }
-    await expectAutoRunSessionConsistency(root, stoppedRun, {
-      phase: "stopped",
-      latestAutoRunEvent: "run_stopped",
-      sessionPhase: "stopped",
-      stepCount: 1,
-      stopReason: null,
-      finalSessionEvent: "session_stopped"
+    await expect(getRunSession(root, runSessionIdFor(manualState))).resolves.toMatchObject({
+      session: {
+        phase: "stopped",
+        autoRun: {
+          desktopRunId: started.runId,
+          stepCount: 1,
+          stopReason: null
+        }
+      },
+      events: expect.arrayContaining([expect.objectContaining({ type: "session_stopped" })])
     });
 
     const detail = await getRunSession(root, result.session.sessionId);

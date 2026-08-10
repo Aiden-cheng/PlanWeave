@@ -56,6 +56,7 @@ import {
   readPersistedAutoRunEventLog,
   writePersistedAutoRunState
 } from "./runStateRepository.js";
+import { highestRunId } from "./autoRunIdReservations.js";
 import {
   mutateAutoRunTransition,
   recoverAllPendingTransitions,
@@ -87,6 +88,7 @@ import {
 import { discardRunSessionInitialization } from "../runSessions/repository.js";
 import type { RunSessionAutoRunSummary, RunSessionPhase } from "../runSessions/index.js";
 import {
+  clearLatestAutoRunStateSelection,
   latestAutoRunStatePointerPath,
   readLatestAutoRunStatePointer,
   writeLatestAutoRunStatePointer
@@ -102,6 +104,7 @@ const runWorkspaces = new Map<string, ProjectWorkspace>();
 const stopOperations = new Map<string, Promise<DesktopAutoRunState>>();
 const stopIntents = new Set<string>();
 const activeLoops = new Set<string>();
+const runtimeResetStateFiles = new Set<string>();
 type DesktopRunLoopOperation = {
   result: Promise<void>;
   handled: Promise<void>;
@@ -625,6 +628,9 @@ export async function initializeAutoRunUnderCanvasLock(
   stepLimit = 20,
   options?: DesktopAutoRunOptions
 ): Promise<DesktopAutoRunState> {
+  if (runtimeResetStateFiles.has(resolve(workspace.stateFile))) {
+    throw new Error("Cannot start Auto Run while runtime state reset is in progress.");
+  }
   if (await hasAutoRunInWorkspace(workspace)) {
     throw new Error("Cannot start Auto Run while another Auto Run is active.");
   }
@@ -937,8 +943,15 @@ export async function resetDesktopRuntimeState(
     phase: "resetting"
   });
   let stoppedAutoRunIds: string[] = [];
+  const targetStateFile = resolve(workspace.stateFile);
+  let ownsResetTarget = false;
 
   try {
+    if (runtimeResetStateFiles.has(targetStateFile)) {
+      throw new Error("Runtime state reset is already in progress for this canvas.");
+    }
+    runtimeResetStateFiles.add(targetStateFile);
+    ownsResetTarget = true;
     const activeRunIds = activeResetTargetAutoRunIds(projectRoot, normalizedCanvasId);
     if (activeRunIds.length > 0) {
       throw new Error(
@@ -954,6 +967,16 @@ export async function resetDesktopRuntimeState(
       reason: options.reason,
       session
     });
+    const resetTargetRunIds = [...runs.values()]
+      .filter((run) => sameAutoRunTarget(run, projectRoot, normalizedCanvasId))
+      .map((run) => run.runId);
+    await clearLatestAutoRunStateSelection(
+      workspace,
+      highestRunId(await listRunDirectories(workspace))
+    );
+    for (const runId of resetTargetRunIds) {
+      clearAutoRunInitializationMemory(runId);
+    }
     invalidateDesktopProjectProjection(projectRoot);
     const finishedAt = new Date().toISOString();
     const completedSession = await updateRunSession(workspace, session.sessionId, {
@@ -985,6 +1008,10 @@ export async function resetDesktopRuntimeState(
       stoppedAutoRunIds
     });
     throw error;
+  } finally {
+    if (ownsResetTarget) {
+      runtimeResetStateFiles.delete(targetStateFile);
+    }
   }
 }
 

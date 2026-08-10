@@ -132,6 +132,20 @@ export async function writeLatestAutoRunStatePointer(
   await writeLatestAutoRunStatePointerAt(latestAutoRunStatePointerPath(workspace), pointer);
 }
 
+export async function clearLatestAutoRunStateSelection(
+  workspace: ProjectWorkspace,
+  observedHighestRunId: string | null
+): Promise<void> {
+  const current = await readLatestAutoRunStatePointer(workspace);
+  await writeLatestAutoRunStatePointer(workspace, {
+    version: 1,
+    selectedRunId: null,
+    selectedUpdatedAt: null,
+    highestRunId: maxRunId(current?.highestRunId ?? null, observedHighestRunId),
+    diagnostics: []
+  });
+}
+
 export function compareAutoRunStatesNewestFirst(
   left: DesktopAutoRunState,
   right: DesktopAutoRunState
