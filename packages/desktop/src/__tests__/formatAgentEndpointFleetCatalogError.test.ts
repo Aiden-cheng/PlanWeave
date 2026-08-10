@@ -3,12 +3,12 @@ import { formatAgentEndpointFleetCatalogError } from "../renderer/collaboration/
 import { createTranslator } from "../renderer/i18n";
 
 describe("formatAgentEndpointFleetCatalogError", () => {
-  it("does not route fleet credential failures to People / Workspace connection copy", () => {
+  it("does not render optional Owner Fleet setup state as a task-card error", () => {
     const t = createTranslator("en");
-    const message = formatAgentEndpointFleetCatalogError("operator_credential_missing", t);
-    expect(message).toContain("Settings → Server");
-    expect(message).not.toMatch(/People/i);
-    expect(message).not.toMatch(/connect.*workspace/i);
+    expect(formatAgentEndpointFleetCatalogError("operator_credential_missing", t)).toBeNull();
+    expect(formatAgentEndpointFleetCatalogError("operator_profile_not_active", t)).toBeNull();
+    expect(formatAgentEndpointFleetCatalogError("operator_profile_not_found", t)).toBeNull();
+    expect(formatAgentEndpointFleetCatalogError("operator_bridge_unavailable", t)).toBeNull();
   });
 
   it("surfaces http transport failures so an empty fleet picker is not silent", () => {

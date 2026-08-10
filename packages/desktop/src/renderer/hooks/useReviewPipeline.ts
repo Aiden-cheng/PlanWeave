@@ -30,6 +30,13 @@ function missingReviewTaskError(caught: unknown, taskId: string): boolean {
   return message.includes(`Task '${taskId}' does not exist.`);
 }
 
+function transientManifestReplacementGap(caught: unknown): boolean {
+  const message = caught instanceof Error ? caught.message : String(caught);
+  return message.includes("ENOENT") && /(?:^|[\\/])manifest\.json(?:'|$)/.test(message);
+}
+
+const transientManifestRetryDelayMs = 50;
+
 export function useReviewPipeline({
   graph,
   reloadCurrentCanvas,
@@ -69,36 +76,49 @@ export function useReviewPipeline({
       return;
     }
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const runtimeBridge = bridge;
     const canvas = desktopCanvasReference(selectedProject, selectedCanvasId);
-    bridge
-      .getReviewPipeline(canvas, reviewTaskId)
-      .then((pipeline) => {
-        if (cancelled) {
-          return;
-        }
-        if (!pipeline) {
-          setReviewPipeline(null);
-          setReviewDraft([]);
-          return;
-        }
-        setReviewPipeline(pipeline);
-        setReviewDraft(pipeline.steps);
-        setReviewDefaultCyclesDraft(pipeline.packageDefaults.maxFeedbackCycles);
-      })
-      .catch((caught: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        if (missingReviewTaskError(caught, reviewTaskId)) {
-          setReviewTaskId((current) => (current === reviewTaskId ? null : current));
-          setReviewPipeline(null);
-          setReviewDraft([]);
-          return;
-        }
-        setError(caught instanceof Error ? caught.message : String(caught));
-      });
+    const load = (retried: boolean) => {
+      void runtimeBridge
+        .getReviewPipeline(canvas, reviewTaskId)
+        .then((pipeline) => {
+          if (cancelled) {
+            return;
+          }
+          if (!pipeline) {
+            setReviewPipeline(null);
+            setReviewDraft([]);
+            return;
+          }
+          setReviewPipeline(pipeline);
+          setReviewDraft(pipeline.steps);
+          setReviewDefaultCyclesDraft(pipeline.packageDefaults.maxFeedbackCycles);
+        })
+        .catch((caught: unknown) => {
+          if (cancelled) {
+            return;
+          }
+          if (!retried && transientManifestReplacementGap(caught)) {
+            retryTimer = setTimeout(() => {
+              retryTimer = null;
+              if (!cancelled) load(true);
+            }, transientManifestRetryDelayMs);
+            return;
+          }
+          if (missingReviewTaskError(caught, reviewTaskId)) {
+            setReviewTaskId((current) => (current === reviewTaskId ? null : current));
+            setReviewPipeline(null);
+            setReviewDraft([]);
+            return;
+          }
+          setError(caught instanceof Error ? caught.message : String(caught));
+        });
+    };
+    load(false);
     return () => {
       cancelled = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
     };
   }, [graph, reviewTaskId, selectedCanvasId, selectedProject, setError]);
 

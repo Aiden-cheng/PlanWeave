@@ -325,4 +325,38 @@ describe("desktop renderer hook interfaces", () => {
     expect(result.current.reviewPipeline).toBeNull();
     expect(setError).not.toHaveBeenCalled();
   });
+
+  it("retries a transient manifest gap while authoritative content is atomically replaced", async () => {
+    const getReviewPipeline = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          "Error invoking remote method 'planweave:getReviewPipeline': Error: ENOENT: no such file or directory, open 'C:\\Users\\test-user\\.planweave\\projects\\shared\\canvases\\default\\package\\manifest.json'"
+        )
+      )
+      .mockResolvedValue(reviewPipeline);
+    const bridge = createDesktopBridgeMock({ getReviewPipeline });
+    vi.stubGlobal("planweave", bridge);
+    vi.resetModules();
+    const [{ useReviewPipeline }, { createTranslator }] = await Promise.all([
+      import("../renderer/hooks/useReviewPipeline"),
+      import("../renderer/i18n")
+    ]);
+    const setError = vi.fn();
+
+    const { result } = renderHook(() =>
+      useReviewPipeline({
+        graph,
+        reloadCurrentCanvas: vi.fn().mockResolvedValue(undefined),
+        selectedCanvasId: "canvas-main",
+        selectedProject: project,
+        setError,
+        t: createTranslator("en")
+      })
+    );
+
+    await waitFor(() => expect(result.current.reviewPipeline).toEqual(reviewPipeline));
+    expect(getReviewPipeline).toHaveBeenCalledTimes(2);
+    expect(setError).not.toHaveBeenCalled();
+  });
 });
