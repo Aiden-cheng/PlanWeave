@@ -116,6 +116,13 @@ function unavailablePackageDirMessage(canvasId: string): string {
   return `Cannot copy agent prompt because packageDir is unavailable for canvas '${canvasId}'.`;
 }
 
+export function collaborationSurfaceCanvasIdForView(
+  activeView: AppView,
+  selectedCanvasId: string | null
+): string | null {
+  return activeView === "people" ? null : selectedCanvasId;
+}
+
 type LayoutSettingsPatch = {
   leftSidebar?: Partial<DesktopUiSettings["layout"]["leftSidebar"]>;
   rightSidebar?: Partial<DesktopUiSettings["layout"]["rightSidebar"]>;
@@ -259,7 +266,7 @@ export function ProjectWorkspaceProvider({
 
   // Shared canvas command session must be available before any durable package write hooks.
   const collaborationSurface = useCollaborationSurface({
-    canvasId: selectedCanvasId,
+    canvasId: collaborationSurfaceCanvasIdForView(activeView, selectedCanvasId),
     t
   });
   const sharedCanvasCommands = useSharedCanvasCommands({
@@ -1024,14 +1031,7 @@ export function ProjectWorkspaceProvider({
     updateProjectPromptPolicy,
     updateGlobalPrompt,
     updateSettingsAndWait,
-    updateSettings,
-    updateCollaborationScopeLayout: (patch) => updateLayoutSettings({ collaborationScope: patch }),
-    onContentMaterialized: () =>
-      refreshProjectDerivedState({
-        requireCurrentCanvas: true,
-        throwOnErrors: true
-      }),
-    onContentReplicaReady: (result) => refreshProjects({ selectProjectId: result.localProjectId })
+    updateSettings
   });
   const workspaceShell = useMemo<WorkspaceTabsShellProps>(
     () => ({

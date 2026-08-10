@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import type { DesktopServerExposureView } from "../../shared/deploymentExposure";
 import type { createTranslator } from "../i18n";
 import { collaborationBridge } from "../bridge";
-import { useHostAdministrationController } from "../hooks/useHostAdministrationController";
+import {
+  type HostAdministrationController,
+  useHostAdministrationController
+} from "../hooks/useHostAdministrationController";
 import { HostBootstrapCard } from "./HostBootstrapCard";
 import { LocalAgentHostCard } from "./LocalAgentHostCard";
 import { HostAvailabilityCard } from "./HostAvailabilityCard";
@@ -16,6 +19,10 @@ type HostAdministrationSectionProps = {
   showDeploymentConnection?: boolean;
   showHeader?: boolean;
   t: ReturnType<typeof createTranslator>;
+};
+
+type HostAdministrationContentProps = HostAdministrationSectionProps & {
+  controller: HostAdministrationController;
 };
 
 function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>): string | null {
@@ -91,13 +98,18 @@ function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>)
   return t(key);
 }
 
-export function HostAdministrationSection({
+export function HostAdministrationSection({ ...props }: HostAdministrationSectionProps) {
+  const controller = useHostAdministrationController();
+  return <HostAdministrationContent {...props} controller={controller} />;
+}
+
+export function HostAdministrationContent({
+  controller,
   diagnosticsEnabled = false,
   showDeploymentConnection = true,
   showHeader = true,
   t
-}: HostAdministrationSectionProps) {
-  const controller = useHostAdministrationController();
+}: HostAdministrationContentProps) {
   const [desktopServerExposure, setDesktopServerExposure] =
     useState<DesktopServerExposureView | null>(null);
   const handleExposureChange = useCallback((exposure: DesktopServerExposureView) => {
@@ -209,15 +221,12 @@ export function HostAdministrationSection({
         />
       ) : null}
 
-      <LocalAgentHostCard
-        activeProfile={activeProfile}
+      <HostAvailabilityCard
         busy={busy}
-        localServerHosted={desktopServerExposure?.lifecycle === "ready"}
-        loading={localAgentHostLoading}
-        status={localAgentHost}
-        register={registerLocalAgentHost}
-        repair={repairLocalAgentHost}
-        enroll={enrollLocalAgentHost}
+        hosts={hosts}
+        loading={hostsLoading}
+        onRefresh={() => void refreshHosts()}
+        onRevoke={(host) => void handleRevoke(host)}
         t={t}
       />
 
@@ -232,12 +241,15 @@ export function HostAdministrationSection({
         t={t}
       />
 
-      <HostAvailabilityCard
+      <LocalAgentHostCard
+        activeProfile={activeProfile}
         busy={busy}
-        hosts={hosts}
-        loading={hostsLoading}
-        onRefresh={() => void refreshHosts()}
-        onRevoke={(host) => void handleRevoke(host)}
+        localServerHosted={desktopServerExposure?.lifecycle === "ready"}
+        loading={localAgentHostLoading}
+        status={localAgentHost}
+        register={registerLocalAgentHost}
+        repair={repairLocalAgentHost}
+        enroll={enrollLocalAgentHost}
         t={t}
       />
     </div>

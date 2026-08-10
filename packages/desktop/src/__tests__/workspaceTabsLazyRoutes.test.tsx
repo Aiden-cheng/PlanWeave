@@ -84,7 +84,7 @@ describe("WorkspaceTabs lazy routes", () => {
     expect(await screen.findByTestId(testId)).toBeInTheDocument();
   });
 
-  it("keeps an invitation handoff across routes and clears it across projects", async () => {
+  it("keeps the global invitation handoff across routes and sidebar project changes", async () => {
     let activeView = "people";
     let selectedProjectId = "project-1";
     useProjectWorkspace.mockImplementation(() => ({
@@ -118,6 +118,8 @@ describe("WorkspaceTabs lazy routes", () => {
 
     selectedProjectId = "project-2";
     view.rerender(<WorkspaceTabs />);
-    expect(await screen.findByTestId("people-invitation-handoff")).toBeEmptyDOMElement();
+    expect(await screen.findByTestId("people-invitation-handoff")).toHaveTextContent(
+      "full-invitation"
+    );
   });
 });

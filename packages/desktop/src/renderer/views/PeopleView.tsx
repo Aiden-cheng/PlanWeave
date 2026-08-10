@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  CollaborationContentBootstrapResult,
   LocalCollaborationServerStatus,
   PlanWeaveCollaborationApi
 } from "../../shared/collaboration.js";
+import { Button } from "@/components/ui/button";
 import { collaborationBridge } from "../bridge";
 import type { createTranslator } from "../i18n";
 import { useCollaborationReadModels } from "../hooks/useCollaborationReadModels";
@@ -12,11 +14,13 @@ import { CollaborationConnectForm } from "../team/CollaborationConnectForm";
 import { buildCollaborationDiagnosticReport } from "../team/collaborationDiagnostics";
 import { CollaborationWorkspaceOnboarding } from "../team/CollaborationWorkspaceOnboarding";
 import { PeoplePanel } from "../team/PeoplePanel";
+import { WorkspaceManagementPanel } from "../team/WorkspaceManagementPanel";
 import {
   CurrentCanvasAccessPanel,
   CurrentCanvasMemberAccess
 } from "../collaboration/CurrentCanvasAccessPanel";
 import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborationServerPanel";
+import { ContentAuthorityPanel } from "../collaboration/ContentAuthorityPanel";
 import { DeploymentConnectionCard } from "../settings/DeploymentConnectionCard";
 import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
@@ -36,6 +40,7 @@ export type PeopleViewProps = {
   /** Optional clipboard writer; defaults to navigator.clipboard. */
   copyText?: (text: string) => Promise<void>;
   canvasId?: string | null;
+  onContentReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
   onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
   collaborationScopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
   onCollaborationScopeLayoutChange: (
@@ -70,6 +75,7 @@ export function PeopleView({
   api: apiProp,
   copyText = defaultCopyText,
   canvasId = null,
+  onContentReplicaReady,
   onMembershipOutcome,
   collaborationScopeLayout,
   onCollaborationScopeLayoutChange,
@@ -78,6 +84,7 @@ export function PeopleView({
 }: PeopleViewProps) {
   const api = apiProp === undefined ? collaborationBridge : apiProp;
   const [localHostingOpen, setLocalHostingOpen] = useState(false);
+  const [connectedSection, setConnectedSection] = useState<"members" | "workspace">("members");
   const [revealInvitationManagement, setRevealInvitationManagement] = useState(false);
   const [reconnectPending, setReconnectPending] = useState(false);
   const [reconnectError, setReconnectError] = useState<string | null>(null);
@@ -123,8 +130,7 @@ export function PeopleView({
   useEffect(() => {
     if (sessionConnected) setReconnectError(null);
   }, [sessionConnected]);
-  const hasConfiguredWorkspace =
-    status !== null && status.workspaceConnection.workspaceId !== null;
+  const hasConfiguredWorkspace = status !== null && status.workspaceConnection.workspaceId !== null;
   const showOnboarding = !hasConfiguredWorkspace;
 
   useEffect(() => {
@@ -187,6 +193,7 @@ export function PeopleView({
 
   const handleManageInvitations = useCallback(() => {
     setLocalHostingOpen(false);
+    setConnectedSection("members");
     setRevealInvitationManagement(true);
     void panel.refreshDetails();
   }, [panel.refreshDetails]);
@@ -225,7 +232,7 @@ export function PeopleView({
 
   return (
     <section
-      className="h-full min-h-0 w-full overflow-y-auto"
+      className="h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable]"
       data-testid="people-view"
       aria-label={t("peopleTitle")}
     >
@@ -258,7 +265,7 @@ export function PeopleView({
                     api={api}
                     t={t}
                     projectId={null}
-                    canvasId={canvasId}
+                    canvasId={null}
                     scopeLayout={collaborationScopeLayout}
                     onScopeLayoutChange={onCollaborationScopeLayoutChange}
                     copyText={copyText}
@@ -278,7 +285,7 @@ export function PeopleView({
                   t={t}
                   fixedMode="setup"
                   showHeader={false}
-                  showConnectionSummary
+                  showConnectionSummary={false}
                   copyText={copyText}
                   onConnected={refreshCollaborationStatus}
                 />
@@ -300,6 +307,35 @@ export function PeopleView({
           </>
         ) : (
           <div className="flex flex-col gap-6" data-testid="people-workspace-section">
+            <div
+              className="flex items-center gap-7 border-b border-border/70"
+              role="tablist"
+              aria-label={t("peopleTitle")}
+              data-testid="people-connected-sections"
+            >
+              {(
+                [
+                  ["members", "peopleSectionWorkspace"],
+                  ["workspace", "peopleSectionHosting"]
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={connectedSection === value}
+                  data-testid={`people-section-${value}`}
+                  className={`relative pb-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    connectedSection === value
+                      ? "text-text-strong after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-text-strong"
+                      : "text-muted-foreground hover:text-text-strong"
+                  }`}
+                  onClick={() => setConnectedSection(value)}
+                >
+                  {t(label)}
+                </button>
+              ))}
+            </div>
             {reconnectError ? (
               <div
                 className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
@@ -309,107 +345,178 @@ export function PeopleView({
                 {reconnectError}
               </div>
             ) : null}
-            <PeoplePanel
-              mode={panel.mode}
-              presence={panel.presence}
-              members={panel.members}
-              invitations={panel.invitations}
-              devices={panel.devices}
-              detailsLoading={panel.detailsLoading || reconnectPending}
-              detailsError={panel.detailsError}
-              actionError={panel.actionError}
-              actionBusy={panel.actionBusy}
-              pendingInvitation={panel.pendingInvitation}
-              revealInvitationManagement={revealInvitationManagement}
-              showTitle={false}
-              diagnosticReport={diagnosticReport}
-              diagnosticsEnabled={diagnosticsEnabled}
-              onCopyDiagnostics={copyText}
-              t={t}
-              onCreateInvitation={panel.createInvitation}
-              onViewInvitation={panel.viewInvitation}
-              onCopyInvitationToken={copyText}
-              onDismissPendingInvitation={panel.clearPendingInvitation}
-              onRevokeInvitation={async (invitationId) => {
-                const ok = await panel.revokeInvitation(invitationId);
-                reportMembership(ok, membershipResult(ok));
-                return ok;
-              }}
-              onRevokeInvitations={async (invitationIds) => {
-                const ok = await panel.revokeInvitations(invitationIds);
-                reportMembership(ok, membershipResult(ok));
-                return ok;
-              }}
-              onPromoteMember={async (humanPrincipalId) => {
-                const ok = await panel.promoteMember(humanPrincipalId);
-                if (ok) await refreshMembers();
-                reportMembership(ok, membershipResult(ok));
-                return ok;
-              }}
-              onDemoteMember={async (humanPrincipalId) => {
-                const ok = await panel.demoteMember(humanPrincipalId);
-                if (ok) await refreshMembers();
-                reportMembership(ok, membershipResult(ok));
-                return ok;
-              }}
-              onRemoveMember={async (humanPrincipalId) => {
-                const ok = await panel.removeMember(humanPrincipalId);
-                if (ok) await refreshMembers();
-                reportMembership(ok, membershipResult(ok));
-                return ok;
-              }}
-              onRevokeDevice={async (deviceCredentialId) => {
-                const ok = await panel.revokeDevice(deviceCredentialId);
-                reportMembership(ok, membershipResult(ok));
-                return ok;
-              }}
-              onRefreshDetails={handleRefreshDetails}
-              renderMemberAccess={(member) => {
-                if (currentCanvasAccess.loading && !currentCanvasAccess.view) {
-                  return <p className="text-xs text-muted-foreground">{t("accessLoading")}</p>;
-                }
-                const person = currentCanvasAccess.view?.people.find(
-                  (candidate) => candidate.humanPrincipalId === member.humanPrincipalId
-                );
-                if (!currentCanvasAccess.view || !person) {
-                  return (
-                    <p className="text-xs text-muted-foreground">
-                      {currentCanvasAccess.error ?? t("accessMemberUnavailable")}
-                    </p>
-                  );
-                }
-                return (
-                  <CurrentCanvasMemberAccess
-                    view={currentCanvasAccess.view}
-                    person={person}
-                    busy={currentCanvasAccess.busy}
-                    t={t}
-                    onGrant={currentCanvasAccess.grant}
-                    onRevoke={currentCanvasAccess.revoke}
-                  />
-                );
-              }}
-              connectSlot={
-                <CollaborationConnectForm
-                  api={api}
+            {connectedSection === "members" ? (
+              <>
+                <PeoplePanel
+                  mode={panel.mode}
+                  presence={panel.presence}
+                  members={panel.members}
+                  invitations={panel.invitations}
+                  devices={panel.devices}
+                  detailsLoading={panel.detailsLoading || reconnectPending}
+                  detailsError={panel.detailsError}
+                  actionError={panel.actionError}
+                  actionBusy={panel.actionBusy}
+                  pendingInvitation={panel.pendingInvitation}
+                  revealInvitationManagement={revealInvitationManagement}
+                  showTitle={false}
+                  diagnosticReport={diagnosticReport}
                   diagnosticsEnabled={diagnosticsEnabled}
-                  status={status}
+                  onCopyDiagnostics={copyText}
                   t={t}
-                  initialMode={activeProfile ? "connect" : "join"}
-                  copyText={copyText}
-                  onConnected={refreshCollaborationStatus}
+                  onCreateInvitation={panel.createInvitation}
+                  onViewInvitation={panel.viewInvitation}
+                  onCopyInvitationToken={copyText}
+                  onDismissPendingInvitation={panel.clearPendingInvitation}
+                  onRevokeInvitation={async (invitationId) => {
+                    const ok = await panel.revokeInvitation(invitationId);
+                    reportMembership(ok, membershipResult(ok));
+                    return ok;
+                  }}
+                  onRevokeInvitations={async (invitationIds) => {
+                    const ok = await panel.revokeInvitations(invitationIds);
+                    reportMembership(ok, membershipResult(ok));
+                    return ok;
+                  }}
+                  onUpdateOwnDisplayName={async (displayName) => {
+                    const ok = await panel.updateOwnDisplayName(displayName);
+                    if (ok) {
+                      await Promise.all([refreshMembers(), refreshCollaborationStatus()]);
+                    }
+                    return ok;
+                  }}
+                  onPromoteMember={async (humanPrincipalId) => {
+                    const ok = await panel.promoteMember(humanPrincipalId);
+                    if (ok) await refreshMembers();
+                    reportMembership(ok, membershipResult(ok));
+                    return ok;
+                  }}
+                  onDemoteMember={async (humanPrincipalId) => {
+                    const ok = await panel.demoteMember(humanPrincipalId);
+                    if (ok) await refreshMembers();
+                    reportMembership(ok, membershipResult(ok));
+                    return ok;
+                  }}
+                  onRemoveMember={async (humanPrincipalId) => {
+                    const ok = await panel.removeMember(humanPrincipalId);
+                    if (ok) await refreshMembers();
+                    reportMembership(ok, membershipResult(ok));
+                    return ok;
+                  }}
+                  onRevokeDevice={async (deviceCredentialId) => {
+                    const ok = await panel.revokeDevice(deviceCredentialId);
+                    reportMembership(ok, membershipResult(ok));
+                    return ok;
+                  }}
+                  onRefreshDetails={handleRefreshDetails}
+                  renderMemberAccess={(member) => {
+                    if (currentCanvasAccess.loading && !currentCanvasAccess.view) {
+                      return <p className="text-xs text-muted-foreground">{t("accessLoading")}</p>;
+                    }
+                    const person = currentCanvasAccess.view?.people.find(
+                      (candidate) => candidate.humanPrincipalId === member.humanPrincipalId
+                    );
+                    if (!currentCanvasAccess.view || !person) {
+                      return (
+                        <p className="text-xs text-muted-foreground">
+                          {currentCanvasAccess.error ?? t("accessMemberUnavailable")}
+                        </p>
+                      );
+                    }
+                    return (
+                      <CurrentCanvasMemberAccess
+                        view={currentCanvasAccess.view}
+                        person={person}
+                        busy={currentCanvasAccess.busy}
+                        t={t}
+                        onGrant={currentCanvasAccess.grant}
+                        onRevoke={currentCanvasAccess.revoke}
+                      />
+                    );
+                  }}
                 />
-              }
-            />
-            <CurrentCanvasAccessPanel
-              view={currentCanvasAccess.view}
-              loading={currentCanvasAccess.loading}
-              error={currentCanvasAccess.error}
-              busy={currentCanvasAccess.busy}
-              t={t}
-              onRefresh={currentCanvasAccess.refresh}
-              onUpdateVisibility={currentCanvasAccess.updateVisibility}
-            />
+                <CurrentCanvasAccessPanel
+                  view={currentCanvasAccess.view}
+                  loading={currentCanvasAccess.loading}
+                  error={currentCanvasAccess.error}
+                  busy={currentCanvasAccess.busy}
+                  t={t}
+                  onRefresh={currentCanvasAccess.refresh}
+                  onUpdateVisibility={currentCanvasAccess.updateVisibility}
+                />
+              </>
+            ) : (
+              <WorkspaceManagementPanel
+                t={t}
+                connection={
+                  <CollaborationConnectForm
+                    api={api}
+                    diagnosticsEnabled={diagnosticsEnabled}
+                    status={status}
+                    t={t}
+                    initialMode="join"
+                    workspaceConnectionOnly
+                    showHeader={false}
+                    copyText={copyText}
+                    onConnected={refreshCollaborationStatus}
+                  />
+                }
+                hostedCanvases={
+                  <LocalCollaborationServerPanel
+                    api={api}
+                    t={t}
+                    projectId={null}
+                    canvasId={null}
+                    scopeLayout={collaborationScopeLayout}
+                    onScopeLayoutChange={onCollaborationScopeLayoutChange}
+                    copyText={copyText}
+                    showInvitationControls={false}
+                    invitationHandoff={localInvitationHandoff}
+                    onInvitationHandoffChange={setLocalInvitationHandoff}
+                    onStatusChange={handleLocalServerStatusChange}
+                    serverExposure={desktopServerExposure}
+                  />
+                }
+                contentAuthority={
+                  sessionConnected ? (
+                    <ContentAuthorityPanel
+                      api={api ?? null}
+                      connectionKey={activeProfile?.profileId ?? null}
+                      authorityProjectId={activeProfile?.projectId ?? null}
+                      localProjectId={null}
+                      canvasId={null}
+                      connected={sessionConnected}
+                      onReplicaReady={onContentReplicaReady}
+                      t={t}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-start gap-3 py-1">
+                      <div>
+                        <h2 className="text-base font-semibold text-text-strong">
+                          {t("contentAuthorityTitle")}
+                        </h2>
+                        <p className="mt-1 max-w-3xl text-sm leading-6 text-text-muted">
+                          {t("settingsServerContentNeedsSession")}
+                        </p>
+                      </div>
+                      {activeProfile?.hasDeviceCredential ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={reconnectPending}
+                          onClick={() => void handleRefreshDetails()}
+                          data-testid="people-workspace-reconnect-session"
+                        >
+                          {reconnectPending
+                            ? t("settingsServerReconnectSessionBusy")
+                            : t("settingsServerReconnectSession")}
+                        </Button>
+                      ) : null}
+                    </div>
+                  )
+                }
+              />
+            )}
           </div>
         )}
       </div>

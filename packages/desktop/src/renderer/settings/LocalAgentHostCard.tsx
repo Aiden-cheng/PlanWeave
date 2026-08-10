@@ -15,9 +15,7 @@ type LocalAgentHostCardProps = {
   loading: boolean;
   status: OperatorLocalAgentHostStatus | null;
   register: (profileIds: readonly string[]) => Promise<OperatorLocalAgentHostStatus | null>;
-  repair: (
-    profileIds: readonly string[]
-  ) => Promise<OperatorLocalAgentHostStatus | null>;
+  repair: (profileIds: readonly string[]) => Promise<OperatorLocalAgentHostStatus | null>;
   enroll: (
     handoff: string,
     profileIds: readonly string[]
@@ -108,8 +106,7 @@ export function LocalAgentHostCard({
       !loading
   );
   const canUpdate = status?.state !== "not_registered" && hasDirectRegistration;
-  const canRegisterDirectly =
-    status?.state === "not_registered" && hasDirectRegistration;
+  const canRegisterDirectly = status?.state === "not_registered" && hasDirectRegistration;
 
   return (
     <section className="border-t border-border/70 py-8" data-testid="host-admin-local-agent-host">
@@ -162,9 +159,7 @@ export function LocalAgentHostCard({
                   </span>
                   {": "}
                   {serverConnectionLabel(status.serverConnection, t)}
-                  {status.serverConnection?.reason
-                    ? ` · ${status.serverConnection.reason}`
-                    : null}
+                  {status.serverConnection?.reason ? ` · ${status.serverConnection.reason}` : null}
                 </p>
                 {status.serverConnection?.serverOrigin ? (
                   <p
@@ -194,7 +189,6 @@ export function LocalAgentHostCard({
                     rows={4}
                     spellCheck={false}
                     autoComplete="off"
-                    autoFocus
                     placeholder={t("hostAdminLocalHostHandoffPlaceholder")}
                     disabled={busy || loading}
                     onChange={(event) => setHandoff(event.target.value)}

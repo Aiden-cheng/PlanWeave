@@ -195,8 +195,6 @@ export function DeploymentConnectionCard({ t, presentation = "card", onExposureC
 
   const content = (
     <div className="grid max-w-3xl gap-3">
-      <p className="text-sm text-text-muted">{t("deploymentBoundary")}</p>
-      <p className="text-sm text-text-muted">{t("deploymentPreConnection")}</p>
       <div className="grid gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="deployment-topology">{t("deploymentTopology")}</Label>

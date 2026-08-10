@@ -44,7 +44,7 @@ export function HostAvailabilityCard({
   const activeHosts = hosts.filter((host) => !host.revokedAt);
 
   return (
-    <section className="border-y border-border/70 py-8" data-testid="host-availability">
+    <section className="border-b border-border/70 py-8" data-testid="host-availability">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="max-w-3xl">
           <h2 className="text-lg font-semibold tracking-[-0.01em] text-text-strong">
@@ -75,10 +75,7 @@ export function HostAvailabilityCard({
             </p>
           </div>
         ) : (
-          <ul
-            className="divide-y divide-border/60 border-y border-border/60"
-            aria-label={t("hostAvailabilityTitle")}
-          >
+          <ul className="divide-y divide-border/60" aria-label={t("hostAvailabilityTitle")}>
             {activeHosts.map((host) => {
               const reason = availabilityReason(host);
               const agents = agentNames(host);

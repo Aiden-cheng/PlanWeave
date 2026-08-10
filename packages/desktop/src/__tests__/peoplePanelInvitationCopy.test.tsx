@@ -78,6 +78,7 @@ function createProps(
     onDismissPendingInvitation: vi.fn(),
     onRevokeInvitation: vi.fn(),
     onRevokeInvitations: vi.fn(),
+    onUpdateOwnDisplayName: vi.fn(),
     onPromoteMember: vi.fn(),
     onDemoteMember: vi.fn(),
     onRemoveMember: vi.fn(),

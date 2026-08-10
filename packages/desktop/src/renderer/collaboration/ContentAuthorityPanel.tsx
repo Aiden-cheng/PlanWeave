@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContentVersionDesktopReadModel } from "@planweave-ai/collaboration-protocol/content/authority";
-import { DatabaseIcon, DownloadIcon } from "lucide-react";
+import { DownloadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {
   CollaborationContentBootstrapCandidate,
@@ -130,31 +130,34 @@ export function ContentAuthorityPanel({
   // selected canvas returns HTTP 403 (forbidden) while hosted siblings still list.
   const canBindSelectedCanvas = canBindSelectedProject && matchingCandidate !== null;
 
-  const run = useCallback(async (action: () => Promise<ContentVersionDesktopReadModel>) => {
-    const operation = ++operationRef.current;
-    const expectedConnectionKey = connectionKeyRef.current;
-    setBusy(true);
-    setError(null);
-    setInfo(null);
-    try {
-      const nextModel = await action();
-      if (
-        operation === operationRef.current &&
-        expectedConnectionKey === connectionKeyRef.current
-      ) {
-        setModel(nextModel);
+  const run = useCallback(
+    async (action: () => Promise<ContentVersionDesktopReadModel>) => {
+      const operation = ++operationRef.current;
+      const expectedConnectionKey = connectionKeyRef.current;
+      setBusy(true);
+      setError(null);
+      setInfo(null);
+      try {
+        const nextModel = await action();
+        if (
+          operation === operationRef.current &&
+          expectedConnectionKey === connectionKeyRef.current
+        ) {
+          setModel(nextModel);
+        }
+      } catch (cause) {
+        if (
+          operation === operationRef.current &&
+          expectedConnectionKey === connectionKeyRef.current
+        ) {
+          setError(formatContentAuthorityError(t, cause));
+        }
+      } finally {
+        if (operation === operationRef.current) setBusy(false);
       }
-    } catch (cause) {
-      if (
-        operation === operationRef.current &&
-        expectedConnectionKey === connectionKeyRef.current
-      ) {
-        setError(formatContentAuthorityError(t, cause));
-      }
-    } finally {
-      if (operation === operationRef.current) setBusy(false);
-    }
-  }, [t]);
+    },
+    [t]
+  );
 
   const loadCandidates = useCallback(async () => {
     if (!api || !connected || !connectionKey) {
@@ -293,30 +296,23 @@ export function ContentAuthorityPanel({
   };
   return (
     <section
-      className={appearance === "settings" ? "min-w-0 flex flex-col gap-5" : "min-w-0 border-t border-border/70 py-7"}
+      className={
+        appearance === "settings"
+          ? "min-w-0 flex flex-col gap-5"
+          : "min-w-0 border-t border-border/70 py-7"
+      }
       data-testid="content-authority-panel"
       data-appearance={appearance}
       aria-labelledby={appearance === "settings" ? undefined : "content-authority-title"}
     >
       {appearance === "flat" ? (
-        <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-1 pb-5">
-          <div
-            className="flex size-8 shrink-0 items-center justify-center text-amber-700 dark:text-amber-300"
-            data-testid="content-authority-section-icon"
-          >
-            <DatabaseIcon className="size-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0 pt-0.5">
-            <h2
-              id="content-authority-title"
-              className="text-base font-semibold text-text-strong"
-            >
-              {t("contentAuthorityTitle")}
-            </h2>
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-              {t("contentAuthorityDescription")}
-            </p>
-          </div>
+        <div className="min-w-0 px-1 pb-5">
+          <h2 id="content-authority-title" className="text-base font-semibold text-text-strong">
+            {t("contentAuthorityTitle")}
+          </h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+            {t("contentAuthorityDescription")}
+          </p>
         </div>
       ) : null}
       {selectedCanvasOutsideHostedScope ? (
@@ -324,7 +320,7 @@ export function ContentAuthorityPanel({
           className={
             appearance === "settings"
               ? "text-xs leading-5 text-amber-800 dark:text-amber-200"
-              : "border-t border-border/60 px-1 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200 sm:ml-11"
+              : "border-t border-border/60 px-1 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200"
           }
           data-testid="content-authority-canvas-not-hosted"
           role="status"
@@ -337,7 +333,7 @@ export function ContentAuthorityPanel({
           className={
             appearance === "settings"
               ? "border-b border-border/70 pb-5"
-              : "border-t border-border/60 px-1 py-4 sm:ml-11"
+              : "border-t border-border/60 px-1 py-4"
           }
           data-testid="content-bootstrap-candidates"
         >
@@ -388,9 +384,10 @@ export function ContentAuthorityPanel({
           className={
             appearance === "settings"
               ? "flex flex-col gap-5"
-              : "flex flex-col gap-5 border-t border-border/60 px-1 py-5 sm:ml-11"
+              : "flex flex-col gap-5 border-t border-border/60 px-1 py-5"
           }
-        >          <dl className="grid min-w-0 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+        >
+          <dl className="grid min-w-0 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
             <AuthorityDetail
               label={t("contentAuthorityRevisionLabel")}
               value={String(revision)}
@@ -441,7 +438,6 @@ export function ContentAuthorityPanel({
               testId="content-authority-acknowledged-at"
             />
           </dl>
-
           <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 text-xs text-muted-foreground">
               {acknowledgement ? <p>{t("contentAuthorityAcknowledged")}</p> : null}
@@ -500,7 +496,7 @@ export function ContentAuthorityPanel({
           </div>
         </div>
       ) : error || info ? (
-        <div className="flex items-center justify-between gap-3 border-t border-border/60 px-1 py-4 text-xs sm:ml-11">
+        <div className="flex items-center justify-between gap-3 border-t border-border/60 px-1 py-4 text-xs">
           <div>
             {error ? <p className="text-destructive">{error}</p> : null}
             {info ? <p className="text-emerald-700 dark:text-emerald-300">{info}</p> : null}

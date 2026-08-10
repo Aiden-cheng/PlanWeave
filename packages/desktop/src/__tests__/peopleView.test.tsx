@@ -6,11 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { formatPeoplePanelError, PeopleView } from "../renderer/views/PeopleView";
-import { SettingsServerSection } from "../renderer/settings/SettingsServerSection";
-import {
-  parseCollaborationInvitationHandoff,
-  serializeCollaborationInvitationHandoff
-} from "../renderer/team/collaborationInvitationHandoff";
+import { serializeCollaborationInvitationHandoff } from "../renderer/team/collaborationInvitationHandoff";
 import { cleanupRendererTestEnvironment } from "./helpers/rendererTestEnvironment";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
 
@@ -236,7 +232,7 @@ describe("PeopleView", () => {
     expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
-  it("keeps server connection and content authority out of People workspace", async () => {
+  it("separates member administration from Workspace management", async () => {
     const connectedStatus = {
       profiles: [
         {
@@ -321,15 +317,47 @@ describe("PeopleView", () => {
     );
 
     expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
-    expect(screen.queryByTestId("people-section-hosting")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("people-hosting-section")).not.toBeInTheDocument();
+    expect(screen.getByTestId("people-section-members")).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByTestId("people-workspace-management")).not.toBeInTheDocument();
     expect(screen.queryByTestId("content-authority-panel")).not.toBeInTheDocument();
     expect(screen.queryByTestId("deployment-connection")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("people-section-workspace"));
+    expect(await screen.findByTestId("people-workspace-management")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Workspace management" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("people-workspace-hosting-section")).not.toHaveClass("border-t");
+    expect(screen.getByTestId("people-workspace-connection-status")).toHaveAttribute(
+      "data-status",
+      "connected"
+    );
+    expect(screen.getByTestId("people-workspace-connection-status")).toHaveClass("border-y");
+    expect(screen.getByText("http://127.0.0.1:56584/")).toBeVisible();
+    expect(screen.getByTestId("people-workspace-change-connection")).toBeVisible();
+    expect(screen.queryByTestId("people-workspace-disconnect")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("people-connect-active-profile")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("people-connect-submit")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("people-invite-trust-note")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("people-workspace-change-connection"));
+    expect(screen.getByTestId("people-connect-invitation-details")).toBeVisible();
+    expect(screen.getByTestId("people-connect-submit")).toBeVisible();
+    expect(screen.getByTestId("people-workspace-change-connection")).toHaveTextContent("Cancel");
+    expect(screen.queryByTestId("people-connect-mode-setup")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("people-connect-mode-connect")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("people-connect-mode-bootstrap")).not.toBeInTheDocument();
+    expect(screen.getByTestId("local-collaboration-server-panel")).toBeVisible();
+    expect(screen.getByTestId("content-authority-panel")).toBeVisible();
+    expect(screen.queryByTestId("people-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("current-canvas-access-panel")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Create complete invitation" })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Invite collaborators")).not.toBeInTheDocument();
     expect(getCollaborationStatus).toHaveBeenCalledOnce();
     expect(screen.queryByTestId("collaboration-workspace-onboarding")).not.toBeInTheDocument();
   });
 
-  it("keeps complete invitation creation reachable from Settings Server after a persisted workspace restart", async () => {
+  it("keeps invitation creation out of Workspace management after a persisted restart", async () => {
     const user = userEvent.setup();
     const invitationToken = `pw_inv_${"P".repeat(43)}`;
     const restoredStatus = {
@@ -428,53 +456,26 @@ describe("PeopleView", () => {
     } as unknown as PlanWeaveCollaborationApi;
 
     render(
-      <SettingsServerSection
+      <PeopleView
         api={api}
         canvasId="canvas-1"
-        localProjectId="project-1"
         t={createTranslator("en")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
       />
     );
 
-    expect(await screen.findByTestId("settings-server-section")).toBeVisible();
-    expect(await screen.findByText("Invite collaborators")).toBeVisible();
-    expect(createInvitation).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Create complete invitation" }));
-    const firstInvitation = (await screen.findByRole("textbox", {
-      name: "Complete invitation (shown on this page only)"
-    })) as HTMLTextAreaElement;
-    expect(createInvitation).toHaveBeenCalledTimes(1);
-    expect(parseCollaborationInvitationHandoff(firstInvitation.value)).toMatchObject({
-      serverBaseUrl: "http://192.168.1.20:56584/",
-      projectId: "authority-project-1",
-      invitationToken,
-      allowInsecureTransport: true
-    });
-
-    const handoff = firstInvitation.value;
+    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
+    await user.click(screen.getByTestId("people-section-workspace"));
+    expect(await screen.findByTestId("people-workspace-management")).toBeVisible();
+    expect(screen.queryByText("Invite collaborators")).not.toBeInTheDocument();
     expect(
-      await screen.findByRole("textbox", {
-        name: "Complete invitation (shown on this page only)"
-      })
-    ).toHaveValue(handoff);
-    expect(createInvitation).toHaveBeenCalledTimes(1);
-
-    await user.click(screen.getByRole("button", { name: "Create complete invitation" }));
-    await waitFor(() => expect(createInvitation).toHaveBeenCalledTimes(2));
-    const firstIdempotencyKey = (createInvitation.mock.calls[0]![0] as { idempotencyKey?: unknown })
-      .idempotencyKey;
-    const secondIdempotencyKey = (
-      createInvitation.mock.calls[1]![0] as { idempotencyKey?: unknown }
-    ).idempotencyKey;
-    expect(firstIdempotencyKey).toEqual(expect.any(String));
-    expect(secondIdempotencyKey).toEqual(expect.any(String));
-    expect(secondIdempotencyKey).not.toBe(firstIdempotencyKey);
+      screen.queryByRole("button", { name: "Create complete invitation" })
+    ).not.toBeInTheDocument();
+    expect(createInvitation).not.toHaveBeenCalled();
   });
 
-  it("routes invitation management from Settings Server to People", async () => {
+  it("does not expose invitation management from Workspace management", async () => {
     const user = userEvent.setup();
     const connectedStatus = {
       profiles: [
@@ -513,7 +514,6 @@ describe("PeopleView", () => {
       workspacePicker: { schemaVersion: "workspace-setup/v1", items: [], nextCursor: null },
       updatedAt: "2030-01-01T00:00:00.000Z"
     } as const;
-    const onManageInvitations = vi.fn();
     const api = {
       getCollaborationStatus: vi.fn().mockResolvedValue(connectedStatus),
       onCollaborationStatusChanged: vi.fn(() => () => undefined),
@@ -571,21 +571,21 @@ describe("PeopleView", () => {
     } as unknown as PlanWeaveCollaborationApi;
 
     render(
-      <SettingsServerSection
+      <PeopleView
         api={api}
         canvasId="canvas-1"
-        localProjectId="project-1"
         t={createTranslator("zh-CN")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
-        onManageInvitations={onManageInvitations}
       />
     );
 
-    expect(await screen.findByTestId("settings-server-section")).toBeVisible();
-    await user.click(await screen.findByRole("button", { name: "新建完整邀请" }));
-    await user.click(await screen.findByRole("button", { name: "管理开放邀请" }));
-    expect(onManageInvitations).toHaveBeenCalledOnce();
+    expect(await screen.findByTestId("people-workspace-section")).toBeVisible();
+    await user.click(screen.getByTestId("people-section-workspace"));
+    expect(await screen.findByTestId("people-workspace-management")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "新建完整邀请" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "管理开放邀请" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("people-panel")).not.toBeInTheDocument();
   });
 
   it("does not flash first-time onboarding while persisted collaboration status is loading", () => {
@@ -620,6 +620,7 @@ describe("PeopleView", () => {
 
     expect(screen.getByTestId("people-view")).toHaveAccessibleName("Project people");
     expect(screen.getByTestId("people-view")).not.toHaveClass("border");
+    expect(screen.getByTestId("people-view")).toHaveClass("[scrollbar-gutter:stable]");
     expect(screen.queryByRole("heading", { name: "Project people" })).not.toBeInTheDocument();
     expect(screen.getByTestId("collaboration-workspace-onboarding")).toBeInTheDocument();
     expect(screen.getByTestId("collaboration-onboarding-create")).toHaveTextContent(

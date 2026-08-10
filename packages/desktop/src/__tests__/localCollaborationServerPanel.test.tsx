@@ -259,7 +259,9 @@ describe("LocalCollaborationServerPanel", () => {
       "shadow-sm",
       "bg-background"
     );
-    expect(screen.getByRole("heading", { name: "Hosted canvases" })).toHaveClass("text-base");
+    expect(screen.getByTestId("local-collaboration-scope-section")).toHaveClass("border-t");
+    expect(screen.getByTestId("local-collaboration-scope-section")).not.toHaveClass("border-y");
+    expect(screen.getByRole("heading", { name: "Workspace canvases" })).toHaveClass("text-base");
     await userEvent.click(screen.getByRole("button", { name: "Hide hosted canvas selection" }));
     expect(onLayoutChange).toHaveBeenLastCalledWith({ collapsed: true });
 
@@ -324,7 +326,7 @@ describe("LocalCollaborationServerPanel", () => {
       />
     );
 
-    expect(await screen.findByRole("heading", { name: "Hosted canvases" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Workspace canvases" })).toBeVisible();
     expect(screen.getByText("Invite collaborators")).toBeVisible();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy address only" })).not.toBeInTheDocument();

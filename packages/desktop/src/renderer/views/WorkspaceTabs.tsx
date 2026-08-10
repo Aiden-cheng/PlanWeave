@@ -1,8 +1,6 @@
 import {
   lazy,
   Suspense,
-  useEffect,
-  useRef,
   useState,
   type CSSProperties,
   type Dispatch,
@@ -306,6 +304,9 @@ function PeopleRoute({
       t={shell.t}
       diagnosticsEnabled={shell.developerMode}
       canvasId={shell.selectedCanvasId}
+      onContentReplicaReady={(result) =>
+        shell.refreshProjects({ selectProjectId: result.localProjectId })
+      }
       collaborationScopeLayout={shell.collaborationScopeLayout}
       onCollaborationScopeLayoutChange={shell.updateCollaborationScopeLayout}
       localInvitationHandoff={localInvitationHandoff}
@@ -345,18 +346,7 @@ function CanvasMapRoute() {
 export function WorkspaceTabs() {
   const { shell } = useProjectWorkspace();
   const activeView = shell.activeView;
-  const selectedProjectId = shell.selectedProject?.projectId ?? null;
   const [localInvitationHandoff, setLocalInvitationHandoff] = useState<string | null>(null);
-  const invitationProjectIdRef = useRef(selectedProjectId);
-  const visibleLocalInvitationHandoff =
-    invitationProjectIdRef.current === selectedProjectId ? localInvitationHandoff : null;
-
-  useEffect(() => {
-    if (invitationProjectIdRef.current !== selectedProjectId) {
-      invitationProjectIdRef.current = selectedProjectId;
-      setLocalInvitationHandoff(null);
-    }
-  }, [selectedProjectId]);
 
   const content = (() => {
     switch (activeView) {
@@ -373,7 +363,7 @@ export function WorkspaceTabs() {
       case "people":
         return (
           <PeopleRoute
-            localInvitationHandoff={visibleLocalInvitationHandoff}
+            localInvitationHandoff={localInvitationHandoff}
             onLocalInvitationHandoffChange={setLocalInvitationHandoff}
           />
         );

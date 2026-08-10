@@ -2,7 +2,7 @@ import type {
   ActiveCanvasPersonGrant,
   CurrentCanvasAccessView
 } from "@planweave-ai/collaboration-protocol/access/control";
-import { LockKeyholeIcon, ShieldCheckIcon, UsersRoundIcon } from "lucide-react";
+import { LockKeyholeIcon, UsersRoundIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
 import type { CurrentCanvasVisibilityScope } from "../hooks/useCurrentCanvasAccess";
@@ -113,57 +113,6 @@ function CapabilityState({
   );
 }
 
-function VisibilityControl({
-  scopeKind,
-  visibility,
-  allowed,
-  reason,
-  busy,
-  t,
-  onUpdate
-}: {
-  scopeKind: CurrentCanvasVisibilityScope;
-  visibility: "private" | "shared";
-  allowed: boolean;
-  reason: CurrentCanvasAccessView["canvas"]["disabledReason"] | "capability_denied";
-  busy: boolean;
-  t: ReturnType<typeof createTranslator>;
-  onUpdate: CurrentCanvasAccessPanelProps["onUpdateVisibility"];
-}) {
-  const label =
-    scopeKind === "project" ? t("accessProjectVisibility") : t("accessCanvasVisibility");
-  return (
-    <div
-      className="flex flex-col gap-2 border-t border-border/60 px-1 py-3 sm:flex-row sm:items-center sm:justify-between"
-      data-testid={`canvas-access-${scopeKind}-visibility`}
-    >
-      <span className="text-xs font-medium text-text-strong">{label}</span>
-      <div className="flex items-center gap-1 rounded-md bg-muted/50 p-0.5">
-        {(["private", "shared"] as const).map((nextVisibility) => (
-          <Button
-            key={nextVisibility}
-            type="button"
-            size="sm"
-            variant={visibility === nextVisibility ? "secondary" : "ghost"}
-            className="h-7 px-2.5 text-[11px]"
-            data-testid={`canvas-access-${scopeKind}-${nextVisibility}`}
-            aria-pressed={visibility === nextVisibility}
-            disabled={!allowed || busy}
-            title={!allowed ? reasonLabel(reason, t) : undefined}
-            onClick={() => {
-              if (visibility !== nextVisibility) void onUpdate(scopeKind, nextVisibility);
-            }}
-          >
-            {nextVisibility === "private"
-              ? t("accessVisibilityPrivate")
-              : t("accessVisibilityShared")}
-          </Button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function CanvasVisibilitySelector({
   visibility,
   allowed,
@@ -171,7 +120,14 @@ function CanvasVisibilitySelector({
   busy,
   t,
   onUpdate
-}: Omit<Parameters<typeof VisibilityControl>[0], "scopeKind">) {
+}: {
+  visibility: "private" | "shared";
+  allowed: boolean;
+  reason: CurrentCanvasAccessView["canvas"]["disabledReason"] | "capability_denied";
+  busy: boolean;
+  t: ReturnType<typeof createTranslator>;
+  onUpdate: CurrentCanvasAccessPanelProps["onUpdateVisibility"];
+}) {
   const choices = [
     {
       value: "private" as const,
@@ -258,27 +214,19 @@ export function CurrentCanvasAccessPanel({
         data-testid="canvas-access-panel"
         aria-labelledby="canvas-access-title"
       >
-        <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-1 pb-5">
-          <div
-            className="flex size-8 items-center justify-center text-sky-700 dark:text-sky-300"
-            data-testid="canvas-access-section-icon"
+        <div className="px-1 pb-5">
+          <h2
+            id="canvas-access-title"
+            className="text-base font-semibold tracking-tight text-text-strong"
           >
-            <ShieldCheckIcon className="size-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0 pt-0.5">
-            <h2
-              id="canvas-access-title"
-              className="text-base font-semibold tracking-tight text-text-strong"
-            >
-              {t("accessTitle")}
-            </h2>
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-              {t("accessDescription")}
-            </p>
-          </div>
+            {t("accessTitle")}
+          </h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+            {t("accessDescription")}
+          </p>
         </div>
         <div
-          className="border-t border-border/60 px-1 py-5 text-sm text-muted-foreground sm:ml-11"
+          className="border-t border-border/60 px-1 py-5 text-sm text-muted-foreground"
           role="status"
         >
           {loading ? t("accessLoading") : (error ?? t("accessUnavailable"))}
@@ -288,7 +236,6 @@ export function CurrentCanvasAccessPanel({
   }
 
   const { project, canvas } = view;
-  const projectDisabledReason = project.disabledReason ?? "capability_denied";
   const canvasDisabledReason = canvas.disabledReason ?? "capability_denied";
   return (
     <section
@@ -296,14 +243,8 @@ export function CurrentCanvasAccessPanel({
       data-testid="canvas-access-panel"
       aria-labelledby="canvas-access-title"
     >
-      <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 px-1 pb-5 sm:grid-cols-[2rem_minmax(0,1fr)_auto]">
-        <div
-          className="flex size-8 items-center justify-center text-sky-700 dark:text-sky-300"
-          data-testid="canvas-access-section-icon"
-        >
-          <ShieldCheckIcon className="size-5" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 pt-0.5">
+      <div className="flex items-start justify-between gap-3 px-1 pb-5">
+        <div className="min-w-0">
           <h2
             id="canvas-access-title"
             className="text-base font-semibold tracking-tight text-text-strong"
@@ -319,7 +260,7 @@ export function CurrentCanvasAccessPanel({
             {t("accessDescription")}
           </p>
         </div>
-        <div className="col-start-2 mt-4 sm:col-start-3 sm:row-start-1 sm:mt-0">
+        <div className="shrink-0">
           <Button
             type="button"
             size="sm"
@@ -336,14 +277,14 @@ export function CurrentCanvasAccessPanel({
 
       {error ? (
         <div
-          className="mx-1 mb-4 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-xs text-destructive sm:ml-11"
+          className="mx-1 mb-4 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-xs text-destructive"
           role="alert"
         >
           {errorLabel(error, t)}
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-8 border-t border-border/60 px-1 py-5 sm:ml-11 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] xl:gap-0">
+      <div className="grid min-w-0 gap-8 border-t border-border/60 px-1 py-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] xl:gap-0">
         <div
           className="flex min-w-0 flex-col gap-3"
           data-testid="canvas-access-visibility-controls"
@@ -352,15 +293,6 @@ export function CurrentCanvasAccessPanel({
             visibility={view.canvasVisibility}
             allowed={canvas.capabilities.visibility}
             reason={canvasDisabledReason}
-            busy={busy}
-            t={t}
-            onUpdate={onUpdateVisibility}
-          />
-          <VisibilityControl
-            scopeKind="project"
-            visibility={view.projectVisibility}
-            allowed={project.capabilities.visibility}
-            reason={projectDisabledReason}
             busy={busy}
             t={t}
             onUpdate={onUpdateVisibility}

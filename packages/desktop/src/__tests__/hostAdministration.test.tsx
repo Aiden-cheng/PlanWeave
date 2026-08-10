@@ -315,7 +315,7 @@ describe("Agent Host settings", () => {
     expect(screen.getByTestId("host-admin-register-local")).toBeDisabled();
   });
 
-  it("focuses the enrollment input when a remote computer opens Agent Host settings", () => {
+  it("does not focus the enrollment input when Agent Host settings open", () => {
     render(
       <LocalAgentHostCard
         activeProfile={status().profiles[0]}
@@ -343,7 +343,7 @@ describe("Agent Host settings", () => {
       />
     );
 
-    expect(screen.getByTestId("host-admin-local-handoff")).toHaveFocus();
+    expect(screen.getByTestId("host-admin-local-handoff")).not.toHaveFocus();
   });
 
   it("shows only user-facing device and agent information", async () => {

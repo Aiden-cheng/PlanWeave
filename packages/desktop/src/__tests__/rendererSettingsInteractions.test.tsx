@@ -3,8 +3,10 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSettingsPanel } from "../renderer/components/AgentSettingsPanel";
+import { SettingsConnectionsSection } from "../renderer/settings/SettingsConnectionsSection";
 import { SettingsView } from "../renderer/views/SettingsView";
 import { createTranslator } from "../renderer/i18n";
 import {
@@ -13,6 +15,14 @@ import {
 } from "../renderer/settings";
 import type { DesktopUiSettings } from "../renderer/types";
 import type { DesktopProjectSummary } from "@planweave-ai/runtime";
+
+const { useHostAdministrationController } = vi.hoisted(() => ({
+  useHostAdministrationController: vi.fn()
+}));
+
+vi.mock("../renderer/hooks/useHostAdministrationController", () => ({
+  useHostAdministrationController
+}));
 
 const settings: DesktopUiSettings = {
   runtimePath: "/tmp/project",
@@ -111,6 +121,39 @@ const projectB: DesktopProjectSummary = {
   taskCanvases: []
 };
 
+function hostAdministrationController() {
+  return {
+    status: null,
+    hosts: [],
+    activeProfile: null,
+    loadState: "ready" as const,
+    hostsLoading: false,
+    busy: false,
+    error: null,
+    handoff: null,
+    memberSetupCodeHandoff: null,
+    localAgentHost: null,
+    localAgentHostLoading: false,
+    refresh: vi.fn().mockResolvedValue(undefined),
+    refreshHosts: vi.fn().mockResolvedValue(undefined),
+    saveProfile: vi.fn().mockResolvedValue(false),
+    removeProfile: vi.fn().mockResolvedValue(false),
+    selectProfile: vi.fn().mockResolvedValue(false),
+    clearActiveProfile: vi.fn().mockResolvedValue(false),
+    importCredential: vi.fn().mockResolvedValue(false),
+    clearCredential: vi.fn().mockResolvedValue(false),
+    copyBootstrapHandoff: vi.fn().mockResolvedValue(null),
+    copyMemberSetupCode: vi.fn().mockResolvedValue(null),
+    revokeHost: vi.fn().mockResolvedValue(null),
+    registerLocalAgentHost: vi.fn().mockResolvedValue(null),
+    repairLocalAgentHost: vi.fn().mockResolvedValue(null),
+    enrollLocalAgentHost: vi.fn().mockResolvedValue(null),
+    dismissHandoff: vi.fn(),
+    dismissMemberSetupCodeHandoff: vi.fn(),
+    clearError: vi.fn()
+  };
+}
+
 function stubLayoutApis() {
   class ResizeObserverMock {
     disconnect = vi.fn();
@@ -160,6 +203,8 @@ function stubLocalStorage() {
 
 beforeEach(() => {
   stubLocalStorage();
+  useHostAdministrationController.mockReset();
+  useHostAdministrationController.mockReturnValue(hostAdministrationController());
 });
 
 afterEach(() => {
@@ -215,11 +260,63 @@ describe("desktop renderer settings interactions", () => {
     );
 
     expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass("min-h-0", "flex-1");
-    expect(container.querySelector('[data-slot="scroll-area-viewport"]')).toHaveClass("h-full");
+    expect(container.querySelector('[data-slot="scroll-area-viewport"]')).toHaveClass(
+      "h-full",
+      "[overflow-anchor:none]"
+    );
+  });
+
+  it("keeps one host administration controller while switching connection tabs", async () => {
+    const controllerMounts = vi.fn();
+    const controller = hostAdministrationController();
+    useHostAdministrationController.mockImplementation(() => {
+      useEffect(() => {
+        controllerMounts();
+      }, []);
+      return controller;
+    });
+
+    render(<SettingsConnectionsSection t={createTranslator("en")} />);
+
+    expect(await screen.findByTestId("settings-connections-overview")).toBeVisible();
+    await waitFor(() => expect(controllerMounts).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(screen.getByTestId("settings-connections-tab-devices"));
+
+    expect(await screen.findByTestId("host-administration")).toBeVisible();
+    expect(controllerMounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps focus on My devices when the enrollment form appears", async () => {
+    useHostAdministrationController.mockReturnValue({
+      ...hostAdministrationController(),
+      localAgentHost: {
+        supported: true,
+        state: "not_registered",
+        agents: [
+          {
+            profileId: "codex-acp",
+            agentId: "codex",
+            displayName: "Codex",
+            detected: true,
+            exposed: false,
+            ready: false
+          }
+        ]
+      }
+    });
+    render(<SettingsConnectionsSection t={createTranslator("en")} />);
+    const devicesTab = screen.getByTestId("settings-connections-tab-devices");
+
+    await userEvent.click(devicesTab);
+
+    expect(await screen.findByTestId("host-admin-local-handoff")).toBeVisible();
+    expect(devicesTab).toHaveFocus();
   });
 
   it("groups Server and Agent Hosts under Connections & Devices", async () => {
     stubLayoutApis();
+    const requestAnimationFrameSpy = vi.spyOn(window, "requestAnimationFrame");
     render(
       <SettingsView
         agentDetectionRefreshing={false}
@@ -244,19 +341,62 @@ describe("desktop renderer settings interactions", () => {
     await userEvent.click(screen.getByTestId("settings-nav-connections"));
     expect(await screen.findByTestId("settings-connections-overview")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Connections & Devices" })).toHaveClass("text-2xl");
-    expect(screen.getByTestId("settings-connections-rail")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Current status" })).toBeVisible();
+    expect(screen.getByTestId("settings-connections-server-state")).toBeVisible();
+    expect(screen.getByTestId("settings-connections-devices-state")).toBeVisible();
+    expect(screen.queryByTestId("settings-connections-workspace-state")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage my devices" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Advanced connection settings" })
+    ).not.toBeInTheDocument();
 
+    const settingsViewport = document.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]'
+    );
+    expect(settingsViewport).not.toBeNull();
+    requestAnimationFrameSpy.mockClear();
+    if (settingsViewport) settingsViewport.scrollTop = 240;
     await userEvent.click(screen.getByTestId("settings-connections-tab-advanced"));
+    expect(settingsViewport?.scrollTop).toBe(0);
+    expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
     expect(await screen.findByTestId("settings-server-section")).toBeVisible();
+    await waitFor(() => expect(settingsViewport?.scrollTop).toBe(0));
     expect(screen.getByTestId("settings-server-connection-block")).toBeVisible();
-    expect(screen.getByTestId("settings-server-hosting-block")).toBeVisible();
-    expect(screen.getByTestId("settings-server-content-block")).toBeVisible();
-    expect(screen.getByTestId("settings-server-content-needs-session")).toBeVisible();
-    expect(screen.getByTestId("settings-server-open-people")).toBeVisible();
+    expect(
+      screen
+        .getByTestId("settings-server-connection-block")
+        .querySelector("[data-slot='field-group']")
+    ).toBeNull();
+    expect(screen.getByTestId("deployment-connection")).not.toHaveClass(
+      "rounded-md",
+      "border",
+      "bg-surface-raised"
+    );
+    expect(screen.queryByTestId("settings-server-hosting-block")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-server-content-block")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-server-content-needs-session")).not.toBeInTheDocument();
 
+    if (settingsViewport) settingsViewport.scrollTop = 240;
     await userEvent.click(screen.getByTestId("settings-connections-tab-devices"));
+    expect(settingsViewport?.scrollTop).toBe(0);
     expect(await screen.findByTestId("host-administration")).toBeVisible();
+    await waitFor(() => expect(settingsViewport?.scrollTop).toBe(0));
+    expect(
+      screen.getByTestId("host-administration").closest('[data-slot="tabs-content"]')
+    ).toHaveClass("pt-0");
     expect(screen.queryByTestId("deployment-connection")).not.toBeInTheDocument();
+    const remoteDevices = screen.getByTestId("host-availability");
+    const addRemoteDevice = screen.getByTestId("host-admin-bootstrap");
+    const localAgentHost = screen.getByTestId("host-admin-local-agent-host");
+    expect(remoteDevices).toHaveClass("border-b");
+    expect(remoteDevices).not.toHaveClass("border-y");
+    expect(addRemoteDevice).not.toHaveClass("border-t");
+    expect(remoteDevices.compareDocumentPosition(addRemoteDevice)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(addRemoteDevice.compareDocumentPosition(localAgentHost)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
   });
 
   it("normalizes invalid legacy migration appearance and window material settings", () => {

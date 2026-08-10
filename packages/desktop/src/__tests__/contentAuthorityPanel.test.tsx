@@ -61,9 +61,9 @@ describe("ContentAuthorityPanel", () => {
     const bindCollaborationContentAuthority = vi.fn().mockResolvedValue(model);
     const api = {
       bindCollaborationContentAuthority,
-      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([
-        hostedCandidate(model, "remote-project")
-      ])
+      listCollaborationContentBootstrapCandidates: vi
+        .fn()
+        .mockResolvedValue([hostedCandidate(model, "remote-project")])
     } as unknown as PlanWeaveCollaborationApi;
 
     render(
@@ -88,9 +88,9 @@ describe("ContentAuthorityPanel", () => {
     const bindCollaborationContentAuthority = vi.fn().mockResolvedValue(model);
     const api = {
       bindCollaborationContentAuthority,
-      listCollaborationContentBootstrapCandidates: vi.fn().mockResolvedValue([
-        hostedCandidate(model, "local-project", "default")
-      ])
+      listCollaborationContentBootstrapCandidates: vi
+        .fn()
+        .mockResolvedValue([hostedCandidate(model, "local-project", "default")])
     } as unknown as PlanWeaveCollaborationApi;
 
     render(
@@ -177,7 +177,7 @@ describe("ContentAuthorityPanel", () => {
       />
     );
 
-    expect(await screen.findByText(/Host that canvas under Local hosting/i)).toBeVisible();
+    expect(await screen.findByText(/Add it under Workspace canvases/i)).toBeVisible();
   });
 
   it("refreshes the local project and reports success after materializing the authority head", async () => {
@@ -217,8 +217,8 @@ describe("ContentAuthorityPanel", () => {
       "border",
       "bg-background"
     );
-    expect(screen.getByTestId("content-authority-section-icon")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Authoritative content" })).toHaveClass("text-base");
+    expect(screen.queryByTestId("content-authority-section-icon")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Member content sync" })).toHaveClass("text-base");
     expect(screen.getByTestId("content-authority-digest")).toHaveAttribute("title", "a".repeat(64));
     expect(screen.getByTestId("content-authority-local-version")).toHaveTextContent(
       "Not materialized on this device"

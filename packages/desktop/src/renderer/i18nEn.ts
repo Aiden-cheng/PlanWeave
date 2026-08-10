@@ -456,42 +456,19 @@ export const enCatalog = {
   settingsAgents: "Agents",
   settingsMcpTunnel: "MCP Tunnel",
   settingsConnections: "Connections & Devices",
-  settingsConnectionsHint:
-    "See how Server, your collaboration Workspace, and remote Agent Hosts fit together, then manage each layer in context.",
+  settingsConnectionsHint: "Manage remote devices and how they connect to PlanWeave Server.",
   settingsConnectionsOverview: "Overview",
   settingsConnectionsDevices: "My devices",
   settingsConnectionsAdvanced: "Advanced connection",
-  settingsConnectionsOverviewTitle: "Connection overview",
-  settingsConnectionsOverviewDescription:
-    "Server carries the connection, Workspace scopes human collaboration, and your Agent Hosts extend your personal agent fleet across canvases.",
+  settingsConnectionsOverviewTitle: "Current status",
   settingsConnectionsServer: "Server",
-  settingsConnectionsServerDescription:
-    "The shared transport used by members and remote Agent Hosts.",
   settingsConnectionsServerReady: "Available",
   settingsConnectionsServerPreparing: "Starting…",
   settingsConnectionsServerError: "Needs attention",
   settingsConnectionsServerStopped: "Not exposed",
-  settingsConnectionsWorkspace: "Workspace",
-  settingsConnectionsWorkspaceDescription:
-    "Human membership and canvas access remain Workspace-scoped.",
-  settingsConnectionsWorkspaceConnected: "Connected",
-  settingsConnectionsWorkspaceConnecting: "Connecting…",
-  settingsConnectionsWorkspaceLocal: "Local only",
-  settingsConnectionsWorkspaceDisconnected: "Disconnected",
-  settingsConnectionsWorkspaceError: "Connection error",
-  settingsConnectionsDevicesDescription:
-    "Owner Agent Hosts remain available across all of your canvases.",
   settingsConnectionsDevicesOnline: "{online} of {total} online",
   settingsConnectionsDevicesLoading: "Loading devices…",
   settingsConnectionsDevicesUnavailable: "Device status unavailable",
-  settingsConnectionsMemberScopeLabel: "Members",
-  settingsConnectionsMemberScope:
-    "Member agents follow Workspace membership and each canvas access policy.",
-  settingsConnectionsOwnerFleetScopeLabel: "My remote agents",
-  settingsConnectionsOwnerFleetScope:
-    "Your registered Agent Hosts are part of your personal fleet and are not limited to one Workspace.",
-  settingsConnectionsManageDevices: "Manage my devices",
-  settingsConnectionsManageAdvanced: "Advanced connection settings",
   settingsServer: "Server",
   settingsHosts: "Agent Hosts",
   settingsGeneralHint: "Project path, executor, appearance, language, and notification rules.",
@@ -505,10 +482,9 @@ export const enCatalog = {
   agentTransportAcp: "ACP",
   settingsMcpTunnelHint:
     "Run the local PlanWeave MCP server and connect it to ChatGPT through OpenAI Secure MCP Tunnel.",
-  settingsServerHint:
-    "Configure how this computer reaches PlanWeave Server, host a local Server, and publish or sync authoritative canvas content used by Members and Agent Hosts.",
+  settingsServerHint: "Configure how this computer and remote devices reach PlanWeave Server.",
   settingsServerContentNeedsSession:
-    "Publishing and syncing authoritative canvas content requires a connected collaboration session. Reconnect here if this device already has credentials, or open People to finish workspace setup. Publish and Sync appear after the session is connected.",
+    "Syncing Workspace content requires a connected collaboration session. Reconnect with this device's credential, or finish connecting the Workspace first.",
   settingsServerOpenPeople: "Open People to connect",
   settingsServerReconnectSession: "Reconnect session",
   settingsServerReconnectSessionBusy: "Reconnecting…",
@@ -518,14 +494,10 @@ export const enCatalog = {
     "Choose the agents this computer exposes, enroll another computer or VPS, and check the availability of your personal remote agent fleet.",
   hostAdminDesktopBoundary:
     "Desktop creates the secure onboarding handoff only. It does not SSH to a VPS, provision infrastructure, install software, or start a system service.",
-  deploymentTitle: "Server connection",
+  deploymentTitle: "Remote access",
   deploymentDescription:
-    "Choose how this computer and remote devices reach PlanWeave Server. Private HTTPS can be configured automatically or supplied as an existing address.",
-  deploymentBoundary:
-    "Changing the connection only changes how Server is reached. Workspace, member, task, and agent data stay unchanged.",
-  deploymentPreConnection:
-    "Before connecting Windows or a VPS, enable a connection that remote devices can reach.",
-  deploymentTopology: "Connection",
+    "Choose how other computers or VPS hosts reach PlanWeave Server on this computer.",
+  deploymentTopology: "Access method",
   deploymentLoopback: "This computer only (HTTP)",
   deploymentLoopbackTls: "Local loopback HTTPS",
   deploymentLan: "LAN HTTPS",
@@ -538,12 +510,12 @@ export const enCatalog = {
   deploymentPublicHttps: "Public HTTPS",
   deploymentLanAdvanced: "LAN HTTP (development only)",
   deploymentPrivateHttpsNote:
-    "PlanWeave uses an available adapter to establish private HTTPS automatically. The built-in adapter currently uses Tailscale Serve; choose Existing HTTPS Server for other private networks.",
+    "Use Tailscale for automatic private HTTPS, or choose Existing HTTPS Server for another private network.",
   deploymentLanAdvancedNote:
     "LAN HTTP is unencrypted and should only be used for explicit development on a trusted private network.",
   deploymentActivate: "Enable this connection",
-  deploymentAdvertisedOrigin: "Connection address",
-  deploymentPrivateHttpsProvider: "Automatic configuration adapter",
+  deploymentAdvertisedOrigin: "Current address",
+  deploymentPrivateHttpsProvider: "Provided by",
   deploymentPrivateHttpsProviderNotInstalled:
     "The automatic configuration adapter is not installed. Install it and retry.",
   deploymentPrivateHttpsProviderAuthRequired:
@@ -1171,7 +1143,7 @@ export const enCatalog = {
   peopleTitle: "Project people",
   peopleSections: "People page sections",
   peopleSectionWorkspace: "Members",
-  peopleSectionHosting: "Sharing settings",
+  peopleSectionHosting: "Workspace",
   collaborationOnboardingTitle: "Work together in PlanWeave",
   collaborationOnboardingDescription:
     "Create a shared workspace for this project, or join one with an invitation.",
@@ -1207,6 +1179,10 @@ export const enCatalog = {
   peopleDevices: "Devices",
   peopleMemberDevices: "Member devices",
   peopleYou: "you",
+  peopleEditOwnName: "Edit my name",
+  peopleEditOwnNameInput: "My display name",
+  peopleSaveOwnName: "Save",
+  peopleCancelOwnName: "Cancel",
   peopleRoleOwner: "Owner",
   peopleRoleMember: "Member",
   peoplePromote: "Promote",
@@ -1300,8 +1276,9 @@ export const enCatalog = {
   peopleUnnamedDevice: "Unnamed device {number}",
   peopleDeviceRevoked: "Revoked",
   peopleConnectModes: "Connection mode",
-  peopleConnectSetupCode: "Setup code",
-  peopleConnectJoin: "Join with invitation",
+  peopleConnectSetupCode: "Connect Server deployment",
+  peopleConnectJoin: "Join Workspace",
+  peopleConnectAdvanced: "Advanced connection options",
   peopleConnectBootstrap: "Bootstrap owner",
   peopleConnectExisting: "Connect existing",
   peopleConnectSetupSubmit: "Redeem setup code",
@@ -1313,9 +1290,9 @@ export const enCatalog = {
     "This validated address is read-only. Use a new invitation or the deployment connection flow to change it.",
   peopleProfileReconnectRequired:
     "This legacy profile needs a new invitation or deployment connection before it can connect.",
-  peopleRemoteWorkspaceTitle: "Remote Workspace",
+  peopleRemoteWorkspaceTitle: "Workspace management",
   peopleRemoteWorkspaceDescription:
-    "Connect to a shared PlanWeave Server for people, permissions, and multi-device collaboration.",
+    "Manage the Workspace connection, canvases shared with members, and content sync on this device.",
   peopleClose: "Close",
   peopleWorking: "Working…",
   peopleDisplayName: "Your name or nickname",
@@ -1344,16 +1321,17 @@ export const enCatalog = {
     "Setup codes are one-time and Workspace-scoped. Desktop main redeems the code and stores the device credential; the code is cleared from this form immediately and never written to logs or URLs.",
   peopleSessionOnlyCredentialWarning:
     "Electron safeStorage is unavailable. Your collaboration device credential is held only for this PlanWeave process and will not persist across restarts.",
-  peopleWorkspaceLocalOnly: "Local only",
-  peopleWorkspaceLocalOnlyHint:
-    "This project stays local until you explicitly connect with a setup code or stored Workspace.",
+  peopleWorkspaceLocalOnly: "Not connected to a Workspace",
+  peopleWorkspaceLocalOnlyHint: "Join with a Workspace invitation when you want to collaborate.",
   peopleWorkspaceConnecting: "Connecting to Workspace…",
   peopleWorkspaceConnected: "Connected to Workspace",
   peopleWorkspaceReconnecting: "Reconnecting to Workspace…",
   peopleWorkspaceError: "Workspace connection error",
   peopleWorkspaceDisconnected: "Workspace disconnected",
   peopleWorkspaceRetry: "Retry connection",
-  peopleWorkspaceStayLocal: "Stay local",
+  peopleWorkspaceStayLocal: "Disconnect Workspace",
+  peopleWorkspaceChangeConnection: "Change Workspace",
+  peopleWorkspaceHideConnection: "Cancel",
   peopleWorkspacePicker: "Workspaces",
   peopleWorkspaceRoleUnknown: "Role unknown",
   peopleWorkspaceMembershipInactive: "membership inactive",
@@ -1638,9 +1616,9 @@ export const enCatalog = {
   sharedCanvasOfflineRevision: "Offline · read-only · last confirmed revision {revision}",
   canvasCommandUnsupportedLocalOnly:
     "This edit is not available while the shared canvas is connected. Disconnect collaboration or use a supported shared command.",
-  contentAuthorityTitle: "Authoritative content",
+  contentAuthorityTitle: "Member content sync",
   contentAuthorityDescription:
-    "The Server's immutable reference version for this canvas and the state of this device's local replica.",
+    "View sync status between the Server and this member device for the current canvas.",
   contentAuthorityRevisionLabel: "Revision",
   contentAuthorityStatusLabel: "Replica status",
   contentAuthorityRevision: "Revision: {revision}",
@@ -1662,9 +1640,9 @@ export const enCatalog = {
   contentAuthorityOffline: "offline",
   contentAuthorityRetry: "Retry",
   contentAuthorityForbidden:
-    "This device cannot access authoritative content for the selected canvas. Host that canvas under Local hosting, or sync a listed canvas below. [forbidden]",
+    "This device cannot sync the selected canvas. Add it under Workspace canvases, or sync a shared canvas listed below. [forbidden]",
   contentAuthorityCanvasNotHosted:
-    "The currently selected canvas is not in this device’s hosted Server scope. Use a listed canvas below, or add the current canvas under Local hosting.",
+    "The selected canvas is not available to this Workspace. Sync a shared canvas below, or add the current canvas under Workspace canvases.",
   contentAuthorityPublish: "Publish initial version",
   contentAuthorityMaterialize: "Sync to this device",
   contentAuthorityRecover: "Restore from authoritative version",
@@ -1681,27 +1659,27 @@ export const enCatalog = {
   contentBootstrapSuccess: "The authoritative Plan Package was synced and opened.",
   contentBootstrapAcknowledgementPending:
     "Content was synced, but Server acknowledgement is still pending. Retry later.",
-  localServerTitle: "Hosted canvases",
-  localServerDescription:
-    "Choose the canvases hosted by this computer. Remote access is managed by Server connection above.",
+  localServerTitle: "Workspace canvases",
+  localServerDescription: "Choose the canvases that Workspace members can access.",
   localServerRunning: "Running on this device",
   localServerStopped: "Stopped",
   localServerStart: "Start local server",
   localServerStartSelected: "Start with {count} canvases",
   localServerStop: "Stop local server",
-  localServerScopeTitle: "Hosted canvas scope",
+  localServerScopeTitle: "Shared canvas scope",
   localServerScopeHint:
-    "Choose exactly which canvases this device hosts. Hosting makes a canvas available to the server; its private/shared permission remains explicit below.",
+    "Choose the canvases available to Workspace members. Manage each member's access on the Members page.",
   localServerSelectedCount: "{count} selected",
   localServerScopeExpand: "Show hosted canvas selection",
   localServerScopeCollapse: "Hide hosted canvas selection",
   localServerProjectExpand: "Show canvases in {project}",
   localServerProjectCollapse: "Hide canvases in {project}",
   localServerCurrentCanvas: "Current",
-  localServerHosted: "Hosted",
-  localServerPrivate: "Not hosted",
+  localServerHosted: "Shared",
+  localServerPrivate: "Not shared",
   localServerNoProjects: "Add a project with a task canvas before starting the service.",
-  localServerScopeChanged: "Scope changed. Applying will briefly restart the local service.",
+  localServerScopeChanged:
+    "The shared scope changed. Applying will briefly refresh the connection.",
   localServerApplyScopes: "Apply changes",
   localServerCurrentCanvasReady: "Current canvas collaboration is active",
   localServerOwnerPending: "PlanWeave is restoring the local collaboration session automatically.",

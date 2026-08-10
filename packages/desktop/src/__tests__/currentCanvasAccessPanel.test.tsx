@@ -96,7 +96,7 @@ describe("CurrentCanvasAccessPanel", () => {
     expect(screen.getByRole("radio", { name: /Shared/ })).toBeChecked();
     expect(screen.getAllByTestId("canvas-access-capability")).toHaveLength(4);
     expect(screen.getByTestId("canvas-access-panel")).not.toHaveClass("rounded-xl", "border");
-    expect(screen.getByTestId("canvas-access-section-icon")).toBeVisible();
+    expect(screen.queryByTestId("canvas-access-section-icon")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Canvas access" })).toHaveClass("text-base");
     expect(screen.getByTestId("canvas-access-canvas-visibility")).not.toHaveClass(
       "rounded-lg",
@@ -106,17 +106,10 @@ describe("CurrentCanvasAccessPanel", () => {
       expect(capability).not.toHaveClass("rounded-lg", "border");
     }
     expect(screen.queryByTestId("canvas-access-people")).not.toBeInTheDocument();
-    expect(screen.getByTestId("canvas-access-project-private")).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-    expect(screen.getByTestId("canvas-access-project-private")).not.toBeDisabled();
-    expect(screen.getByTestId("canvas-access-project-shared")).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
-    await userEvent.click(screen.getByTestId("canvas-access-project-shared"));
-    expect(onUpdateVisibility).toHaveBeenCalledWith("project", "shared");
+    expect(screen.queryByTestId("canvas-access-project-private")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("canvas-access-project-shared")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("canvas-access-canvas-private"));
+    expect(onUpdateVisibility).toHaveBeenCalledWith("canvas", "private");
   });
 
   it("keeps owner-only visibility visible but disabled for viewers with a stable reason", () => {
@@ -132,9 +125,9 @@ describe("CurrentCanvasAccessPanel", () => {
       />
     );
 
-    const projectVisibility = screen.getByTestId("canvas-access-project-shared");
-    expect(projectVisibility).toBeDisabled();
-    expect(projectVisibility).toHaveAttribute("title", "This action requires an owner capability.");
+    const canvasVisibility = screen.getByTestId("canvas-access-canvas-shared");
+    expect(canvasVisibility).toBeDisabled();
+    expect(canvasVisibility).toHaveAttribute("title", "This action requires an owner capability.");
     expect(screen.getAllByText("This action requires an owner capability.")).toHaveLength(4);
   });
 

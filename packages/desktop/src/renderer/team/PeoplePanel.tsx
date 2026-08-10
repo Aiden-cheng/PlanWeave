@@ -10,6 +10,7 @@ import type {
 } from "../collaboration/peopleViewModels";
 import type { CollaborationInvitationHandoffView } from "../../shared/collaboration.js";
 import { CollaborationDiagnosticsDetails } from "./CollaborationDiagnosticsDetails";
+import { OwnDisplayNameControl } from "./OwnDisplayNameControl";
 
 export type PeoplePanelProps = {
   mode: PeoplePanelMode;
@@ -31,6 +32,7 @@ export type PeoplePanelProps = {
   onDismissPendingInvitation: () => void;
   onRevokeInvitation: (invitationId: string) => Promise<boolean>;
   onRevokeInvitations: (invitationIds: readonly string[]) => Promise<boolean>;
+  onUpdateOwnDisplayName: (displayName: string) => Promise<boolean>;
   onPromoteMember: (humanPrincipalId: string) => Promise<boolean>;
   onDemoteMember: (humanPrincipalId: string) => Promise<boolean>;
   onRemoveMember: (humanPrincipalId: string) => Promise<boolean>;
@@ -93,6 +95,7 @@ export function PeoplePanel({
   onDismissPendingInvitation,
   onRevokeInvitation,
   onRevokeInvitations,
+  onUpdateOwnDisplayName,
   onPromoteMember,
   onDemoteMember,
   onRemoveMember,
@@ -118,11 +121,15 @@ export function PeoplePanel({
   useEffect(() => {
     setCopied(false);
     setCopyError(false);
-    if (pendingInvitation && pendingInvitationRef.current) {
+    if (pendingInvitation) setShowOwnerDetails(true);
+  }, [pendingInvitation]);
+
+  useEffect(() => {
+    if (pendingInvitation && showOwnerDetails && pendingInvitationRef.current) {
       pendingInvitationRef.current.focus();
       pendingInvitationRef.current.select();
     }
-  }, [pendingInvitation]);
+  }, [pendingInvitation, showOwnerDetails]);
 
   useEffect(() => {
     if (presence.currentUserIsOwner && (presence.memberCount <= 1 || revealInvitationManagement)) {
@@ -341,7 +348,10 @@ export function PeoplePanel({
               size="sm"
               data-testid="people-create-invitation"
               disabled={actionBusy || pendingInvitation !== null}
-              onClick={() => void onCreateInvitation()}
+              onClick={() => {
+                setShowOwnerDetails(true);
+                void onCreateInvitation();
+              }}
             >
               {t("peopleCreateInvitation")}
             </Button>
@@ -438,16 +448,10 @@ export function PeoplePanel({
       <div className="flex min-w-0 flex-col gap-5">
         <div className="min-w-0">
           <section
-            aria-labelledby="people-members-heading"
+            aria-label={t("peopleMembers")}
             data-testid="people-members-section"
             className="min-w-0 border-b border-border/70"
           >
-            <h3
-              id="people-members-heading"
-              className="border-b border-border/60 px-1 pb-3 text-sm font-semibold text-text-strong"
-            >
-              {t("peopleMembers")}
-            </h3>
             {members.length === 0 ? (
               <div
                 className="px-1 py-5 text-xs text-muted-foreground"
@@ -472,12 +476,18 @@ export function PeoplePanel({
                       <div className="flex min-w-0 items-center gap-3 px-1 py-3.5">
                         <MemberAvatar initials={member.initials} label={member.displayName} />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold text-text-strong">
-                            {member.displayName}
-                            {member.isCurrentUser ? (
-                              <span className="ml-1 text-muted-foreground">({t("peopleYou")})</span>
-                            ) : null}
-                          </div>
+                          {member.isCurrentUser ? (
+                            <OwnDisplayNameControl
+                              member={member}
+                              actionBusy={actionBusy}
+                              t={t}
+                              onUpdate={onUpdateOwnDisplayName}
+                            />
+                          ) : (
+                            <div className="truncate text-sm font-semibold text-text-strong">
+                              {member.displayName}
+                            </div>
+                          )}
                           <div className="mt-0.5 text-xs text-muted-foreground">
                             {member.role === "owner" ? t("peopleRoleOwner") : t("peopleRoleMember")}
                           </div>
@@ -585,7 +595,7 @@ export function PeoplePanel({
           <section
             aria-labelledby="people-owner-heading"
             data-testid="people-owner-section"
-            className="min-w-0 border-b border-border/70"
+            className="min-w-0"
           >
             <Button
               type="button"

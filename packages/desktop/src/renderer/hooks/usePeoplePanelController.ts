@@ -64,6 +64,7 @@ export type UsePeoplePanelControllerResult = {
   viewInvitation: (invitationId: string) => Promise<CollaborationInvitationHandoffView | null>;
   revokeInvitation: (invitationId: string) => Promise<boolean>;
   revokeInvitations: (invitationIds: readonly string[]) => Promise<boolean>;
+  updateOwnDisplayName: (displayName: string) => Promise<boolean>;
   promoteMember: (humanPrincipalId: string) => Promise<boolean>;
   demoteMember: (humanPrincipalId: string) => Promise<boolean>;
   removeMember: (humanPrincipalId: string) => Promise<boolean>;
@@ -297,6 +298,13 @@ export function usePeoplePanelController(
           setPendingInvitation((current) =>
             current && revokedIds.has(current.invitation.invitationId) ? null : current
           );
+        },
+        { refreshDetails: false }
+      ),
+    updateOwnDisplayName: async (displayName) =>
+      runAction(
+        async () => {
+          await api!.updateOwnCollaborationDisplayName({ displayName });
         },
         { refreshDetails: false }
       ),

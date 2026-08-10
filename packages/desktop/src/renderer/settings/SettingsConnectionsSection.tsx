@@ -1,26 +1,36 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { ArrowRightIcon, ServerIcon, UsersIcon, WaypointsIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ServerIcon, WaypointsIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DesktopServerExposureView } from "../../shared/deploymentExposure";
 import { collaborationBridge } from "../bridge";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 import { useCollaborationStatus } from "../hooks/useCollaborationStatus";
-import { useHostAdministrationController } from "../hooks/useHostAdministrationController";
+import {
+  type HostAdministrationController,
+  useHostAdministrationController
+} from "../hooks/useHostAdministrationController";
 import type { createTranslator } from "../i18n";
-import { SettingsServerSection, type SettingsServerSectionProps } from "./SettingsServerSection";
+import { SettingsServerSection } from "./SettingsServerSection";
 
-const HostAdministrationSection = lazy(() =>
-  import("./HostAdministrationSection").then((module) => ({
-    default: module.HostAdministrationSection
+let hostAdministrationContentPromise: Promise<typeof import("./HostAdministrationSection")> | null =
+  null;
+
+const loadHostAdministrationContent = () => {
+  hostAdministrationContentPromise ??= import("./HostAdministrationSection");
+  return hostAdministrationContentPromise;
+};
+
+const HostAdministrationContent = lazy(() =>
+  loadHostAdministrationContent().then((module) => ({
+    default: module.HostAdministrationContent
   }))
 );
 
 type ConnectionsTab = "overview" | "devices" | "advanced";
 
-type SettingsConnectionsSectionProps = Omit<SettingsServerSectionProps, "t" | "showHeader"> & {
+type SettingsConnectionsSectionProps = {
   diagnosticsEnabled?: boolean;
+  onTabChange?: () => void;
   t: ReturnType<typeof createTranslator>;
 };
 
@@ -36,15 +46,13 @@ function StatusDot({ state }: { state: "ready" | "pending" | "error" | "idle" })
   return <span aria-hidden="true" className={`size-2 rounded-full ${className}`} />;
 }
 
-function ConnectionLayer({
-  description,
+function ConnectionStatus({
   icon: Icon,
   label,
   state,
   status,
   testId
 }: {
-  description: string;
   icon: typeof ServerIcon;
   label: string;
   state: "ready" | "pending" | "error" | "idle";
@@ -52,32 +60,27 @@ function ConnectionLayer({
   testId: string;
 }) {
   return (
-    <div
-      className="min-w-0 flex-1 rounded-xl border border-border/80 bg-surface-raised px-4 py-4 shadow-sm"
-      data-testid={testId}
-    >
-      <div className="flex items-center gap-2 text-sm font-semibold text-text-strong">
+    <div className="flex min-w-0 items-center gap-3 py-4" data-testid={testId}>
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle">
         <Icon className="size-4 text-text-muted" />
-        {label}
       </div>
-      <div className="mt-3 flex items-center gap-2">
+      <span className="min-w-0 flex-1 text-sm font-medium text-text-strong">{label}</span>
+      <div className="flex min-w-0 items-center gap-2">
         <StatusDot state={state} />
-        <span className="truncate text-sm text-text-strong">{status}</span>
+        <span className="max-w-[28rem] truncate text-sm text-text-muted">{status}</span>
       </div>
-      <p className="mt-2 text-xs leading-5 text-text-muted">{description}</p>
     </div>
   );
 }
 
 function ConnectionsOverview({
-  onSelectTab,
+  controller,
   t
 }: {
-  onSelectTab: (tab: ConnectionsTab) => void;
+  controller: HostAdministrationController;
   t: ReturnType<typeof createTranslator>;
 }) {
-  const { status, loading: workspaceLoading, error: workspaceError } = useCollaborationStatus();
-  const hostController = useHostAdministrationController();
+  const { status } = useCollaborationStatus();
   const [exposure, setExposure] = useState<DesktopServerExposureView | null>(null);
 
   useEffect(() => {
@@ -101,10 +104,10 @@ function ConnectionsOverview({
     };
   }, []);
 
-  const activeWorkspaceProfile = status?.activeProfileId
+  const activeServerProfile = status?.activeProfileId
     ? (status.profiles.find((profile) => profile.profileId === status.activeProfileId) ?? null)
     : null;
-  const remoteServerConnected = isCollaborationSessionConnected(status) && activeWorkspaceProfile;
+  const remoteServerConnected = isCollaborationSessionConnected(status) && activeServerProfile;
   const serverState =
     exposure?.lifecycle === "ready" || remoteServerConnected
       ? "ready"
@@ -114,7 +117,7 @@ function ConnectionsOverview({
           ? "error"
           : "idle";
   const serverStatus = remoteServerConnected
-    ? activeWorkspaceProfile.serverBaseUrl
+    ? activeServerProfile.serverBaseUrl
     : exposure?.lifecycle === "ready"
       ? (exposure.advertisedOrigin ?? t("settingsConnectionsServerReady"))
       : exposure?.lifecycle === "preparing"
@@ -123,82 +126,43 @@ function ConnectionsOverview({
           ? t("settingsConnectionsServerError")
           : t("settingsConnectionsServerStopped");
 
-  const workspaceConnection = status?.workspaceConnection;
-  const workspaceConnected = isCollaborationSessionConnected(status);
-  const workspaceState = workspaceError
-    ? "error"
-    : workspaceLoading || workspaceConnection?.status === "reconnecting"
-      ? "pending"
-      : workspaceConnected
-        ? "ready"
-        : "idle";
-  const workspaceStatus = workspaceError
-    ? t("settingsConnectionsWorkspaceError")
-    : workspaceLoading || workspaceConnection?.status === "reconnecting"
-      ? t("settingsConnectionsWorkspaceConnecting")
-      : workspaceConnected
-        ? (workspaceConnection?.workspaceDisplayName ?? t("settingsConnectionsWorkspaceConnected"))
-        : workspaceConnection?.status === "local_only"
-          ? t("settingsConnectionsWorkspaceLocal")
-          : t("settingsConnectionsWorkspaceDisconnected");
-
   const activeHosts = useMemo(
-    () => hostController.hosts.filter((host) => !host.revokedAt),
-    [hostController.hosts]
+    () => controller.hosts.filter((host) => !host.revokedAt),
+    [controller.hosts]
   );
   const onlineHosts = activeHosts.filter((host) => host.online).length;
   const devicesState =
-    hostController.error || hostController.loadState === "unavailable"
+    controller.error || controller.loadState === "unavailable"
       ? "error"
-      : hostController.loadState === "loading" || hostController.hostsLoading
+      : controller.loadState === "loading" || controller.hostsLoading
         ? "pending"
         : onlineHosts > 0
           ? "ready"
           : "idle";
   const devicesStatus =
-    hostController.error || hostController.loadState === "unavailable"
+    controller.error || controller.loadState === "unavailable"
       ? t("settingsConnectionsDevicesUnavailable")
-      : hostController.loadState === "loading" || hostController.hostsLoading
+      : controller.loadState === "loading" || controller.hostsLoading
         ? t("settingsConnectionsDevicesLoading")
         : t("settingsConnectionsDevicesOnline")
             .replace("{online}", String(onlineHosts))
             .replace("{total}", String(activeHosts.length));
 
   return (
-    <div className="flex flex-col gap-6" data-testid="settings-connections-overview">
-      <div>
-        <h2 className="text-base font-semibold text-text-strong">
-          {t("settingsConnectionsOverviewTitle")}
-        </h2>
-        <p className="mt-1 text-sm leading-6 text-text-muted">
-          {t("settingsConnectionsOverviewDescription")}
-        </p>
-      </div>
+    <div className="flex max-w-4xl flex-col gap-5" data-testid="settings-connections-overview">
+      <h2 className="text-base font-semibold text-text-strong">
+        {t("settingsConnectionsOverviewTitle")}
+      </h2>
 
-      <div
-        className="flex flex-col items-stretch gap-2 lg:flex-row lg:items-center"
-        data-testid="settings-connections-rail"
-      >
-        <ConnectionLayer
-          description={t("settingsConnectionsServerDescription")}
+      <div className="divide-y divide-border/70 border-y border-border/70">
+        <ConnectionStatus
           icon={ServerIcon}
           label={t("settingsConnectionsServer")}
           state={serverState}
           status={serverStatus}
           testId="settings-connections-server-state"
         />
-        <ArrowRightIcon className="mx-1 hidden size-4 shrink-0 text-text-muted/60 lg:block" />
-        <ConnectionLayer
-          description={t("settingsConnectionsWorkspaceDescription")}
-          icon={UsersIcon}
-          label={t("settingsConnectionsWorkspace")}
-          state={workspaceState}
-          status={workspaceStatus}
-          testId="settings-connections-workspace-state"
-        />
-        <ArrowRightIcon className="mx-1 hidden size-4 shrink-0 text-text-muted/60 lg:block" />
-        <ConnectionLayer
-          description={t("settingsConnectionsDevicesDescription")}
+        <ConnectionStatus
           icon={WaypointsIcon}
           label={t("settingsConnectionsDevices")}
           state={devicesState}
@@ -206,43 +170,32 @@ function ConnectionsOverview({
           testId="settings-connections-devices-state"
         />
       </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg border border-border/70 px-4 py-3">
-          <Badge variant="secondary">{t("settingsConnectionsMemberScopeLabel")}</Badge>
-          <p className="mt-2 text-sm leading-6 text-text-muted">
-            {t("settingsConnectionsMemberScope")}
-          </p>
-        </div>
-        <div className="rounded-lg border border-border/70 px-4 py-3">
-          <Badge variant="secondary">{t("settingsConnectionsOwnerFleetScopeLabel")}</Badge>
-          <p className="mt-2 text-sm leading-6 text-text-muted">
-            {t("settingsConnectionsOwnerFleetScope")}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => onSelectTab("devices")}>
-          {t("settingsConnectionsManageDevices")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => onSelectTab("advanced")}>
-          {t("settingsConnectionsManageAdvanced")}
-        </Button>
-      </div>
     </div>
   );
 }
 
 export function SettingsConnectionsSection({
   diagnosticsEnabled = false,
-  t,
-  ...serverProps
+  onTabChange,
+  t
 }: SettingsConnectionsSectionProps) {
   const [tab, setTab] = useState<ConnectionsTab>("overview");
+  const previousTabRef = useRef(tab);
+  const hostController = useHostAdministrationController();
+
+  useEffect(() => {
+    void loadHostAdministrationContent();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (previousTabRef.current === tab) return;
+    previousTabRef.current = tab;
+    onTabChange?.();
+  }, [onTabChange, tab]);
 
   const selectTab = (value: string) => {
     if (value === "overview" || value === "devices" || value === "advanced") {
+      if (value === tab) return;
       setTab(value);
     }
   };
@@ -272,9 +225,9 @@ export function SettingsConnectionsSection({
         </TabsList>
 
         <TabsContent value="overview" className="pt-4">
-          <ConnectionsOverview onSelectTab={setTab} t={t} />
+          <ConnectionsOverview controller={hostController} t={t} />
         </TabsContent>
-        <TabsContent value="devices" className="pt-4">
+        <TabsContent value="devices" className="pt-0">
           <Suspense
             fallback={
               <div className="text-sm text-text-muted" data-testid="host-admin-loading">
@@ -282,7 +235,8 @@ export function SettingsConnectionsSection({
               </div>
             }
           >
-            <HostAdministrationSection
+            <HostAdministrationContent
+              controller={hostController}
               diagnosticsEnabled={diagnosticsEnabled}
               showDeploymentConnection={false}
               showHeader={false}
@@ -291,7 +245,7 @@ export function SettingsConnectionsSection({
           </Suspense>
         </TabsContent>
         <TabsContent value="advanced" className="pt-4">
-          <SettingsServerSection {...serverProps} showHeader={false} t={t} />
+          <SettingsServerSection showHeader={false} t={t} />
         </TabsContent>
       </Tabs>
     </section>

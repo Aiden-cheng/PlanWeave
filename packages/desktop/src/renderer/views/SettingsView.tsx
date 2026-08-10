@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { CollaborationContentBootstrapResult } from "../../shared/collaboration.js";
 import type {
   DesktopAgentDetection,
   DesktopGraphViewModel,
@@ -44,11 +43,6 @@ type SettingsViewProps = {
   updateGlobalPrompt?: (markdown: string) => Promise<void>;
   updateSettings: (update: DesktopSettingsUpdate) => void;
   updateSettingsAndWait: (update: DesktopSettingsUpdate) => Promise<void>;
-  updateCollaborationScopeLayout?: (
-    patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>
-  ) => void;
-  onContentMaterialized?: () => Promise<void>;
-  onContentReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
 };
 
 export function SettingsView({
@@ -74,16 +68,14 @@ export function SettingsView({
   updateProjectPromptPolicy,
   updateGlobalPrompt,
   updateSettingsAndWait,
-  updateSettings,
-  updateCollaborationScopeLayout = () => undefined,
-  onContentMaterialized,
-  onContentReplicaReady
+  updateSettings
 }: SettingsViewProps) {
   const [section, setSection] = useState<SettingsSection>("general");
   const [projectPromptDraft, setProjectPromptDraft] = useState(projectPromptMarkdown ?? "");
   const [projectPromptSaving, setProjectPromptSaving] = useState(false);
   const [globalPromptDraft, setGlobalPromptDraft] = useState(globalPromptMarkdown ?? "");
   const [globalPromptSaving, setGlobalPromptSaving] = useState(false);
+  const settingsViewportRef = useRef<HTMLDivElement>(null);
   const projectPromptAvailable = Boolean(selectedProject && updateProjectPrompt);
   const projectPromptPolicyAvailable = Boolean(
     selectedProject && projectPromptPolicy && updateProjectPromptPolicy
@@ -100,6 +92,12 @@ export function SettingsView({
   useEffect(() => {
     setGlobalPromptDraft(globalPromptMarkdown ?? "");
   }, [globalPromptMarkdown]);
+
+  const resetSettingsViewport = useCallback(() => {
+    const viewport = settingsViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = 0;
+  }, []);
 
   const selectProject = (projectId: string) => {
     const project = projects.find((item) => item.projectId === projectId);
@@ -134,7 +132,8 @@ export function SettingsView({
         <div className="app-drag-region h-11 shrink-0 border-b border-border/80 bg-app-topbar" />
         <ScrollArea
           className="min-h-0 min-w-0 flex-1 bg-app-canvas"
-          viewportClassName="h-full [&>div]:!block [&>div]:!min-h-full [&>div]:!w-full"
+          viewportRef={settingsViewportRef}
+          viewportClassName="h-full [overflow-anchor:none] [&>div]:!block [&>div]:!min-h-full [&>div]:!w-full"
         >
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-12 py-10 pb-16">
             {section === "general" ? (
@@ -197,13 +196,7 @@ export function SettingsView({
               <SettingsConnectionsSection
                 t={t}
                 diagnosticsEnabled={settings.developerMode}
-                localProjectId={selectedProject?.projectId ?? null}
-                canvasId={selectedCanvasId}
-                collaborationScopeLayout={settings.layout.collaborationScope}
-                onCollaborationScopeLayoutChange={updateCollaborationScopeLayout}
-                onContentMaterialized={onContentMaterialized}
-                onContentReplicaReady={onContentReplicaReady}
-                onManageInvitations={() => setActiveView("people")}
+                onTabChange={resetSettingsViewport}
               />
             ) : null}
           </div>

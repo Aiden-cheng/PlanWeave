@@ -41,7 +41,7 @@ export function HostBootstrapCard({
 
   return (
     <section
-      className="border-t border-border/70 py-8"
+      className="py-8"
       data-testid="host-admin-bootstrap"
       data-handoff-state={resolvedHandoffState}
     >

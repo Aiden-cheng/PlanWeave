@@ -107,6 +107,7 @@ describe("PeoplePanel", () => {
     const onRemove = vi.fn().mockResolvedValue(true);
     const onRevokeInvitation = vi.fn().mockResolvedValue(true);
     const onRevokeDevice = vi.fn().mockResolvedValue(true);
+    const onUpdateOwnDisplayName = vi.fn().mockResolvedValue(true);
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     const { rerender } = render(
@@ -121,7 +122,6 @@ describe("PeoplePanel", () => {
         actionError={null}
         actionBusy={false}
         pendingInvitation={null}
-        revealInvitationManagement
         t={t}
         onCreateInvitation={onCreateInvitation}
         onViewInvitation={onViewInvitation}
@@ -129,6 +129,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={onRevokeInvitation}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={onUpdateOwnDisplayName}
         onPromoteMember={onPromote}
         onDemoteMember={vi.fn()}
         onRemoveMember={onRemove}
@@ -142,8 +143,13 @@ describe("PeoplePanel", () => {
 
     expect(screen.getByTestId("people-panel")).toHaveAttribute("data-mode", "ready");
     expect(screen.getByTestId("people-toolbar")).not.toHaveClass("rounded-xl", "bg-background");
-    expect(screen.getByTestId("people-members-section")).toBeVisible();
-    expect(screen.getByTestId("people-members-section")).not.toHaveClass("rounded-xl", "border");
+    const membersSection = screen.getByTestId("people-members-section");
+    expect(membersSection).toBeVisible();
+    expect(membersSection).toHaveAccessibleName("Members");
+    expect(
+      within(membersSection).queryByRole("heading", { name: "Members" })
+    ).not.toBeInTheDocument();
+    expect(membersSection).not.toHaveClass("rounded-xl", "border");
     expect(screen.queryByTestId("people-hosts-section")).not.toBeInTheDocument();
     expect(screen.getByTestId("people-presence-summary")).toHaveTextContent("2 members");
     expect(screen.getByTestId("people-presence-summary")).not.toHaveTextContent("host");
@@ -155,8 +161,20 @@ describe("PeoplePanel", () => {
     await userEvent.click(screen.getByTestId("people-member-access-toggle"));
     expect(screen.getByTestId("member-access-slot")).toHaveTextContent("Member access");
     expect(screen.getByTestId("people-last-owner-guard")).toHaveTextContent("Last owner protected");
-    expect(screen.getByTestId("people-owner-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("people-owner-toggle")).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByTestId("people-owner-section")).not.toHaveClass("rounded-xl", "border");
+    expect(screen.getByTestId("people-owner-section")).not.toHaveClass("border-b");
+
+    await userEvent.click(screen.getByTestId("people-edit-own-name"));
+    const ownNameInput = screen.getByTestId("people-own-name-input");
+    await userEvent.clear(ownNameInput);
+    await userEvent.type(ownNameInput, "Ada Owner");
+    await userEvent.click(screen.getByTestId("people-save-own-name"));
+    expect(onUpdateOwnDisplayName).toHaveBeenCalledWith("Ada Owner");
+
+    await userEvent.click(screen.getByTestId("people-create-invitation"));
+    expect(onCreateInvitation).toHaveBeenCalled();
+    expect(screen.getByTestId("people-owner-toggle")).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("people-invitations-list")).toBeVisible();
     expect(screen.getByTestId("people-invitations-list")).not.toHaveClass("rounded-lg", "border");
 
@@ -165,9 +183,6 @@ describe("PeoplePanel", () => {
 
     expect(screen.getByTestId("people-devices-list")).toBeVisible();
     expect(screen.getByTestId("people-devices-list")).not.toHaveClass("rounded-lg", "border");
-
-    await userEvent.click(screen.getByTestId("people-create-invitation"));
-    expect(onCreateInvitation).toHaveBeenCalled();
 
     await userEvent.click(screen.getByTestId("people-invitation-view"));
     expect(onViewInvitation).toHaveBeenCalledWith("inv-1");
@@ -211,6 +226,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={onRevokeInvitation}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={onPromote}
         onDemoteMember={vi.fn()}
         onRemoveMember={onRemove}
@@ -263,6 +279,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -295,6 +312,8 @@ describe("PeoplePanel", () => {
       onCopyInvitationToken: vi.fn(),
       onDismissPendingInvitation: vi.fn(),
       onRevokeInvitation: vi.fn(),
+      onRevokeInvitations: vi.fn(),
+      onUpdateOwnDisplayName: vi.fn(),
       onPromoteMember: vi.fn(),
       onDemoteMember: vi.fn(),
       onRemoveMember: vi.fn(),
@@ -355,6 +374,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -397,6 +417,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -459,6 +480,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -518,6 +540,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -569,6 +592,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
         onRevokeInvitations={onRevokeInvitations}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
@@ -614,6 +638,7 @@ describe("PeoplePanel", () => {
           onDismissPendingInvitation={vi.fn()}
           onRevokeInvitation={vi.fn()}
           onRevokeInvitations={vi.fn()}
+          onUpdateOwnDisplayName={vi.fn()}
           onPromoteMember={vi.fn()}
           onDemoteMember={vi.fn()}
           onRemoveMember={vi.fn()}
@@ -630,6 +655,50 @@ describe("PeoplePanel", () => {
     expect(screen.getByTestId("people-invitation-revoke-selected")).toHaveTextContent(
       "Revoke selected (1)"
     );
+  });
+
+  it("lets a regular member edit only their own display name", async () => {
+    const onUpdateOwnDisplayName = vi.fn().mockResolvedValue(true);
+    render(
+      <PeoplePanel
+        mode="ready"
+        presence={{ ...presence, currentUserIsOwner: false }}
+        members={[
+          { ...members[0]!, isCurrentUser: false },
+          { ...members[1]!, isCurrentUser: true }
+        ]}
+        invitations={[]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={onUpdateOwnDisplayName}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId("people-owner-section")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("people-edit-own-name")).toHaveLength(1);
+
+    await userEvent.click(screen.getByTestId("people-edit-own-name"));
+    const input = screen.getByTestId("people-own-name-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "Ada Member");
+    await userEvent.click(screen.getByTestId("people-save-own-name"));
+
+    expect(onUpdateOwnDisplayName).toHaveBeenCalledWith("Ada Member");
   });
 
   it("shows forbidden state without owner mutation controls", () => {
@@ -651,6 +720,7 @@ describe("PeoplePanel", () => {
         onDismissPendingInvitation={vi.fn()}
         onRevokeInvitation={vi.fn()}
         onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}

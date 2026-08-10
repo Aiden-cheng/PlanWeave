@@ -290,6 +290,7 @@ describe("collaboration accessibility", () => {
           onDismissPendingInvitation={vi.fn()}
           onRevokeInvitation={vi.fn()}
           onRevokeInvitations={vi.fn()}
+          onUpdateOwnDisplayName={vi.fn()}
           onPromoteMember={vi.fn()}
           onDemoteMember={vi.fn()}
           onRemoveMember={vi.fn()}
@@ -457,16 +458,26 @@ describe("collaboration accessibility", () => {
     await user.click(advancedSetupToggle);
     expect(advancedSetupToggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("people-connect-setup-code")).toHaveAccessibleName("Setup code");
+    expect(screen.getByTestId("people-connect-mode-setup")).toHaveTextContent(
+      "Connect Server deployment"
+    );
     await user.click(screen.getByTestId("people-connect-mode-join"));
     expect(screen.getByTestId("people-connect-display-name")).toBeInTheDocument();
     expect(screen.getByTestId("people-connect-server-url")).toBeInTheDocument();
     expect(screen.getByTestId("people-connect-project-id")).toBeInTheDocument();
     expect(screen.getByTestId("people-connect-invitation-token")).toBeInTheDocument();
 
+    const advancedModeToggle = screen.getByTestId("people-connect-advanced-toggle");
+    expect(advancedModeToggle).toHaveClass("list-none");
+    expect(advancedModeToggle.querySelector("svg")).toBeInTheDocument();
+    await user.click(advancedModeToggle);
+    expect(screen.getByTestId("people-connect-advanced-modes")).toHaveAttribute("open");
+    expect(screen.queryByTestId("people-connect-mode-connect")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("people-connect-mode-bootstrap"));
     expect(screen.queryByTestId("people-connect-invitation-token")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("people-connect-mode-join"));
     expect(screen.getByTestId("people-connect-invitation-token")).toBeInTheDocument();
+    expect(screen.getByTestId("people-connect-advanced-modes")).not.toHaveAttribute("open");
   });
 
   it("does not introduce unbounded motion classes on collaboration surfaces", () => {

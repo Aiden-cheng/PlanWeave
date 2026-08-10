@@ -124,7 +124,11 @@ describe("DeploymentConnectionCard", () => {
       <DeploymentConnectionCard presentation="plain" t={createTranslator("en")} />
     );
 
-    expect(screen.getByRole("heading", { name: "Server connection" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Remote access" })).toBeVisible();
+    expect(screen.getByLabelText("Access method")).toBeVisible();
+    expect(
+      screen.queryByText(/Changing the connection only changes how Server is reached/)
+    ).not.toBeInTheDocument();
     expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
   });
 });

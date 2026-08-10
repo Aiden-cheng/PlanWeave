@@ -50,6 +50,7 @@ export function LocalCollaborationServerPanel({
   scopeLayout,
   onScopeLayoutChange,
   copyText,
+  showInvitationControls = true,
   invitationHandoff,
   onInvitationHandoffChange,
   onManageInvitations,
@@ -65,6 +66,7 @@ export function LocalCollaborationServerPanel({
   scopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
   onScopeLayoutChange: (patch: Partial<DesktopUiSettings["layout"]["collaborationScope"]>) => void;
   copyText: (text: string) => Promise<void>;
+  showInvitationControls?: boolean;
   invitationHandoff: string | null;
   onInvitationHandoffChange: (handoff: string | null) => void;
   onManageInvitations?: () => void;
@@ -279,14 +281,16 @@ export function LocalCollaborationServerPanel({
         </span>
       )}
 
-      {invitationPreparationAvailable ? (
+      {showInvitationControls && invitationPreparationAvailable ? (
         <div
           className={
             appearance === "settings"
               ? "border-b border-border/70 pb-5"
               : "border-t border-border/70 px-1 py-5"
           }
-        >          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        >
+          {" "}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="text-sm font-semibold text-text-strong">
                 {t("localServerInvitationSectionTitle")}
@@ -353,9 +357,8 @@ export function LocalCollaborationServerPanel({
       ) : null}
 
       <div
-        className={
-          appearance === "settings" ? "pt-1" : "border-y border-border/70 px-1 py-5"
-        }
+        className={appearance === "settings" ? "pt-1" : "border-t border-border/70 px-1 py-5"}
+        data-testid="local-collaboration-scope-section"
       >
         <button
           type="button"

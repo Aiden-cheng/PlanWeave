@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from "react";
-import { ServerIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, ServerIcon } from "lucide-react";
 import { parseCollaborationSetupHandoffV1 } from "@planweave-ai/collaboration-protocol/handoff/setup";
 import {
   type ActiveWorkspaceConnectionView,
@@ -40,6 +40,8 @@ export type CollaborationConnectFormProps = {
   initialMode?: ConnectMode;
   /** Lock the form to one product flow and hide the protocol-oriented mode switcher. */
   fixedMode?: ConnectMode;
+  /** Limit an embedded surface to joining or changing Workspace membership. */
+  workspaceConnectionOnly?: boolean;
   /** Embedded onboarding already supplies the section heading. */
   showHeader?: boolean;
   /** Embedded onboarding does not need the stored Workspace summary. */
@@ -93,20 +95,26 @@ export function CollaborationConnectForm({
   onRequestClose,
   initialMode = "setup",
   fixedMode,
+  workspaceConnectionOnly = false,
   showHeader = true,
   showConnectionSummary = true,
   copyText,
   diagnosticsEnabled = false
 }: CollaborationConnectFormProps) {
   const formId = useId();
-  const [mode, setMode] = useState<ConnectMode>(fixedMode ?? initialMode);
+  const initialSelectedMode = fixedMode ?? (workspaceConnectionOnly ? "join" : initialMode);
+  const [mode, setMode] = useState<ConnectMode>(initialSelectedMode);
+  const [advancedModesOpen, setAdvancedModesOpen] = useState(
+    initialSelectedMode === "connect" || initialSelectedMode === "bootstrap"
+  );
+  const [connectionEditorOpen, setConnectionEditorOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [serverBaseUrl, setServerBaseUrl] = useState("https://");
   const [projectId, setProjectId] = useState("");
   const [invitationToken, setInvitationToken] = useState("");
   const [invitationDetails, setInvitationDetails] = useState("");
   const [manualJoinOpen, setManualJoinOpen] = useState(
-    !fixedMode && (fixedMode ?? initialMode) === "join"
+    !fixedMode && initialSelectedMode === "join"
   );
   const [manualSetupOpen, setManualSetupOpen] = useState(false);
   const setupHandoffInputRef = useRef<HTMLTextAreaElement>(null);
@@ -123,6 +131,11 @@ export function CollaborationConnectForm({
     profiles[0] ??
     null;
   const workspaceConnection = status?.workspaceConnection ?? null;
+  const workspaceConnected = workspaceConnection?.status === "connected";
+  const showConnectionEditor =
+    fixedMode !== undefined || !workspaceConnected || connectionEditorOpen;
+  const workspaceServerBaseUrl =
+    workspaceConnection?.profile?.serverBaseUrl ?? activeProfile?.serverBaseUrl ?? null;
   const workspacePickerItems: WorkspacePickerItem[] = status?.workspacePicker?.items ?? [];
   const diagnosticReport =
     status && diagnosticsEnabled ? buildCollaborationDiagnosticReport(status) : null;
@@ -347,19 +360,6 @@ export function CollaborationConnectForm({
     }
   };
 
-  const disconnectWorkspace = async () => {
-    if (!api || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.disconnectWorkspaceConnection();
-    } catch (disconnectError) {
-      setError(collaborationErrorMessage(disconnectError));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const retryWorkspace = async () => {
     if (!api || busy) return;
     setBusy(true);
@@ -384,6 +384,15 @@ export function CollaborationConnectForm({
     }
   };
 
+  const toggleConnectionEditor = () => {
+    const nextOpen = !connectionEditorOpen;
+    setConnectionEditorOpen(nextOpen);
+    if (nextOpen) {
+      setMode("join");
+      setAdvancedModesOpen(false);
+    }
+  };
+
   return (
     <section
       className="max-w-4xl"
@@ -392,55 +401,65 @@ export function CollaborationConnectForm({
       aria-labelledby={showHeader ? "people-remote-workspace-title" : undefined}
     >
       {showHeader ? (
-        <div className="flex items-start gap-3 border-b border-border/70 pb-5">
-          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center text-sky-700 dark:text-sky-300">
+        <div className="flex items-start gap-3 pb-6">
+          <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-sky-700 dark:text-sky-300">
             <ServerIcon className="size-4" aria-hidden="true" />
           </div>
           <div>
             <h2
               id="people-remote-workspace-title"
-              className="text-sm font-semibold text-text-strong"
+              className="text-2xl font-semibold tracking-[-0.02em] text-text-strong"
             >
               {t("peopleRemoteWorkspaceTitle")}
             </h2>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-text-muted">
               {t("peopleRemoteWorkspaceDescription")}
             </p>
           </div>
         </div>
       ) : null}
-      <div className="flex flex-col gap-5 pt-5">
+      <div className={`flex flex-col gap-6 ${showHeader ? "" : "pt-0"}`}>
         {showConnectionSummary ? (
           <div
-            className="border-l-2 border-border px-3 py-1 text-xs"
+            className="flex flex-col gap-3 border-y border-border/70 py-4 text-sm sm:flex-row sm:items-center sm:justify-between"
             data-testid="people-workspace-connection-status"
             data-status={workspaceConnection?.status ?? "local_only"}
             role="status"
           >
-            <div className="font-medium text-text-strong">
-              {workspaceStatusLabel(workspaceConnection, t)}
+            <div className="flex min-w-0 items-start gap-3">
+              <span
+                aria-hidden="true"
+                className={`mt-1.5 size-2 shrink-0 rounded-full ${
+                  workspaceConnection?.status === "connected"
+                    ? "bg-emerald-500"
+                    : workspaceConnection?.status === "error"
+                      ? "bg-destructive"
+                      : "bg-muted-foreground/50"
+                }`}
+              />
+              <div className="min-w-0">
+                <div className="font-semibold text-text-strong">
+                  {workspaceStatusLabel(workspaceConnection, t)}
+                </div>
+                <div className="mt-0.5 truncate text-sm text-text-muted">
+                  {workspaceConnection?.workspaceDisplayName ?? t("peopleWorkspaceLocalOnlyHint")}
+                </div>
+                {workspaceServerBaseUrl ? (
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {workspaceServerBaseUrl}
+                  </div>
+                ) : null}
+                {workspaceConnection?.status === "error" && workspaceConnection.error ? (
+                  <div
+                    className="mt-1 text-xs text-destructive"
+                    data-testid="people-workspace-connection-error"
+                  >
+                    {workspaceConnection.error.message ?? workspaceConnection.error.code}
+                  </div>
+                ) : null}
+              </div>
             </div>
-            {workspaceConnection?.workspaceDisplayName ? (
-              <div className="text-muted-foreground">
-                {workspaceConnection.workspaceDisplayName}
-              </div>
-            ) : (
-              <div className="text-muted-foreground">{t("peopleWorkspaceLocalOnlyHint")}</div>
-            )}
-            {workspaceConnection?.profile?.serverBaseUrl ? (
-              <div className="text-muted-foreground">
-                {workspaceConnection.profile.serverBaseUrl}
-              </div>
-            ) : null}
-            {workspaceConnection?.status === "error" && workspaceConnection.error ? (
-              <div
-                className="mt-1 text-destructive"
-                data-testid="people-workspace-connection-error"
-              >
-                {workspaceConnection.error.message ?? workspaceConnection.error.code}
-              </div>
-            ) : null}
-            <div className="mt-2 flex flex-wrap gap-1">
+            <div className="flex shrink-0 flex-wrap gap-2">
               {workspaceConnection?.status === "error" && workspaceConnection.error?.retryable ? (
                 <Button
                   type="button"
@@ -453,264 +472,323 @@ export function CollaborationConnectForm({
                   {t("peopleWorkspaceRetry")}
                 </Button>
               ) : null}
-              {workspaceConnection && workspaceConnection.status !== "local_only" ? (
+              {workspaceConnected && !fixedMode ? (
                 <Button
                   type="button"
                   size="sm"
-                  variant="ghost"
-                  data-testid="people-workspace-disconnect"
+                  variant="outline"
+                  data-testid="people-workspace-change-connection"
                   disabled={busy || !api}
-                  onClick={() => void disconnectWorkspace()}
+                  onClick={toggleConnectionEditor}
                 >
-                  {t("peopleWorkspaceStayLocal")}
+                  {connectionEditorOpen
+                    ? t("peopleWorkspaceHideConnection")
+                    : t("peopleWorkspaceChangeConnection")}
                 </Button>
               ) : null}
             </div>
           </div>
         ) : null}
 
-        {showConnectionSummary && workspacePickerItems.length > 0 ? (
-          <div
-            className="flex flex-col gap-1"
-            data-testid="people-workspace-picker"
-            role="listbox"
-            aria-label={t("peopleWorkspacePicker")}
-          >
-            <div className="text-xs font-medium text-text-strong">{t("peopleWorkspacePicker")}</div>
-            {workspacePickerItems.map((item) => (
-              <button
-                key={item.workspaceId}
-                type="button"
-                role="option"
-                data-testid={`people-workspace-picker-item-${item.workspaceId}`}
-                className="rounded-md border border-border/70 bg-background px-2 py-1.5 text-left text-xs hover:bg-muted/40"
-                disabled={busy || !api}
-                onClick={() => void selectWorkspace(item.workspaceId)}
+        {showConnectionEditor ? (
+          <>
+            {showConnectionSummary && workspacePickerItems.length > 0 ? (
+              <div
+                className="flex flex-col"
+                data-testid="people-workspace-picker"
+                role="listbox"
+                aria-label={t("peopleWorkspacePicker")}
               >
-                <div className="font-medium text-text-strong">{item.displayName}</div>
-                <div className="text-muted-foreground">
-                  {item.role ?? t("peopleWorkspaceRoleUnknown")}
-                  {item.membershipActive ? "" : ` · ${t("peopleWorkspaceMembershipInactive")}`}
+                <div className="pb-2 text-sm font-semibold text-text-strong">
+                  {t("peopleWorkspacePicker")}
                 </div>
-              </button>
-            ))}
-          </div>
-        ) : null}
+                <div className="divide-y divide-border/60 border-y border-border/70">
+                  {workspacePickerItems.map((item) => (
+                    <button
+                      key={item.workspaceId}
+                      type="button"
+                      role="option"
+                      data-testid={`people-workspace-picker-item-${item.workspaceId}`}
+                      className="flex w-full items-center justify-between gap-4 px-1 py-3 text-left hover:bg-muted/20"
+                      disabled={busy || !api}
+                      onClick={() => void selectWorkspace(item.workspaceId)}
+                    >
+                      <div className="font-medium text-text-strong">{item.displayName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {item.role ?? t("peopleWorkspaceRoleUnknown")}
+                        {item.membershipActive
+                          ? ""
+                          : ` · ${t("peopleWorkspaceMembershipInactive")}`}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
-        <p className="text-xs text-muted-foreground" data-testid="people-invite-trust-note">
-          {mode === "setup" ? t("peopleSetupCodeTrustNote") : t("peopleInvitationBearerTrustNote")}
-        </p>
-        {status?.credentialStorage === "unavailable" || status?.nonPersistenceWarning ? (
-          <p
-            className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-900 dark:text-amber-100"
-            data-testid="people-session-only-warning"
-            role="status"
-          >
-            {t("peopleSessionOnlyCredentialWarning")}
-          </p>
-        ) : null}
-
-        {!fixedMode ? (
-          <div
-            className="flex max-w-full flex-wrap gap-x-6 border-b border-border/70"
-            role="tablist"
-            aria-label={t("peopleConnectModes")}
-          >
-            {(
-              [
-                ["setup", "peopleConnectSetupCode"],
-                ["join", "peopleConnectJoin"],
-                ["bootstrap", "peopleConnectBootstrap"],
-                ["connect", "peopleConnectExisting"]
-              ] as const
-            ).map(([value, labelKey]) => (
-              <Button
-                key={value}
-                type="button"
-                role="tab"
-                size="sm"
-                variant="ghost"
-                className={`relative rounded-none px-0 pb-2.5 text-xs hover:bg-transparent ${
-                  mode === value
-                    ? "text-text-strong after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-text-strong"
-                    : "text-muted-foreground"
-                }`}
-                data-testid={`people-connect-mode-${value}`}
-                aria-selected={mode === value}
-                onClick={() => {
-                  setMode(value);
-                  if (value === "join") setManualJoinOpen(true);
-                }}
+            {mode === "setup" || mode === "join" ? (
+              <p className="text-xs text-muted-foreground" data-testid="people-invite-trust-note">
+                {mode === "setup"
+                  ? t("peopleSetupCodeTrustNote")
+                  : t("peopleInvitationBearerTrustNote")}
+              </p>
+            ) : null}
+            {status?.credentialStorage === "unavailable" || status?.nonPersistenceWarning ? (
+              <p
+                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-900 dark:text-amber-100"
+                data-testid="people-session-only-warning"
+                role="status"
               >
-                {t(labelKey)}
-              </Button>
-            ))}
-          </div>
-        ) : null}
+                {t("peopleSessionOnlyCredentialWarning")}
+              </p>
+            ) : null}
 
-        {mode === "setup" ? (
-          <CollaborationSetupHandoffFields
-            formId={formId}
-            t={t}
-            handoffInputRef={setupHandoffInputRef}
-            setupCodeInputRef={setupCodeInputRef}
-            displayName={displayName}
-            manualOpen={manualSetupOpen}
-            serverBaseUrl={serverBaseUrl}
-            allowInsecureTransport={allowInsecureTransport}
-            onDisplayNameChange={setDisplayName}
-            onManualOpenChange={setManualSetupOpen}
-            onServerBaseUrlChange={setServerBaseUrl}
-            onAllowInsecureTransportChange={setAllowInsecureTransport}
-          />
-        ) : null}
-
-        {mode === "join" ? (
-          <CollaborationInvitationJoinFields
-            formId={formId}
-            t={t}
-            invitationDetails={invitationDetails}
-            displayName={displayName}
-            manualJoinOpen={manualJoinOpen}
-            serverBaseUrl={serverBaseUrl}
-            projectId={projectId}
-            invitationToken={invitationToken}
-            allowInsecureTransport={allowInsecureTransport}
-            onInvitationDetailsChange={setInvitationDetails}
-            onDisplayNameChange={setDisplayName}
-            onManualJoinOpenChange={setManualJoinOpen}
-            onServerBaseUrlChange={setServerBaseUrl}
-            onProjectIdChange={setProjectId}
-            onInvitationTokenChange={setInvitationToken}
-            onAllowInsecureTransportChange={setAllowInsecureTransport}
-          />
-        ) : null}
-
-        {mode === "bootstrap" ? (
-          <div className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor={`${formId}-name-legacy`}>{t("peopleDisplayName")}</Label>
-              <Input
-                id={`${formId}-name-legacy`}
-                data-testid="people-connect-display-name"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                autoComplete="nickname"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor={`${formId}-url-legacy`}>{t("peopleServerUrl")}</Label>
-              <Input
-                id={`${formId}-url-legacy`}
-                data-testid="people-connect-server-url"
-                value={serverBaseUrl}
-                onChange={(event) => setServerBaseUrl(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor={`${formId}-project`}>{t("peopleProjectId")}</Label>
-              <Input
-                id={`${formId}-project`}
-                data-testid="people-connect-project-id"
-                value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground md:col-span-2">
-              <input
-                type="checkbox"
-                data-testid="people-connect-allow-insecure"
-                checked={allowInsecureTransport}
-                onChange={(event) => setAllowInsecureTransport(event.target.checked)}
-              />
-              {t("peopleAllowInsecureTransport")}
-            </label>
-          </div>
-        ) : null}
-
-        {mode === "connect" ? (
-          <div className="border-y border-border/70 py-3 text-xs">
-            {activeProfile || workspaceConnection?.profile ? (
-              <div data-testid="people-connect-active-profile">
-                <div className="font-medium text-text-strong">
-                  {workspaceConnection?.workspaceDisplayName ?? activeProfile?.displayName}
-                </div>
-                <div className="text-muted-foreground">
-                  {workspaceConnection?.profile?.serverBaseUrl ?? activeProfile?.serverBaseUrl}
-                </div>
-                {activeProfile?.projectId ? (
-                  <div className="text-muted-foreground">{activeProfile.projectId}</div>
-                ) : null}
-                {workspaceConnection?.workspaceId ? (
-                  <div className="text-muted-foreground">{workspaceConnection.workspaceId}</div>
-                ) : null}
-                <div className="text-muted-foreground">
-                  {activeProfile?.hasDeviceCredential ||
-                  workspaceConnection?.status === "connected" ||
-                  workspaceConnection?.status === "disconnected"
-                    ? t("peopleCredentialPresent")
-                    : t("peopleMissingCredential")}
-                </div>
-                {activeProfile ? (
-                  <div className="mt-3 flex flex-col gap-1">
-                    <Label htmlFor={`${formId}-existing-server-url`}>
-                      {t("peopleExistingServerUrl")}
-                    </Label>
-                    <Input
-                      id={`${formId}-existing-server-url`}
-                      data-testid="people-connect-existing-server-url"
-                      value={existingServerBaseUrl}
-                      readOnly
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <p className="text-muted-foreground">
-                      {activeProfile.connectionState === "reconnect_required"
-                        ? t("peopleProfileReconnectRequired")
-                        : t("peopleExistingServerUrlHint")}
-                    </p>
+            {!fixedMode && !workspaceConnectionOnly ? (
+              <div className="flex flex-col gap-3">
+                <fieldset className="flex max-w-full flex-wrap gap-x-8 border-b border-border/70">
+                  <legend className="sr-only">{t("peopleConnectModes")}</legend>
+                  {(
+                    [
+                      ["join", "peopleConnectJoin"],
+                      ["setup", "peopleConnectSetupCode"]
+                    ] as const
+                  ).map(([value, labelKey]) => (
+                    <Button
+                      key={value}
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className={`relative rounded-none px-0 pb-3 text-sm font-semibold hover:bg-transparent ${
+                        mode === value
+                          ? "text-text-strong after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-text-strong"
+                          : "text-muted-foreground"
+                      }`}
+                      data-testid={`people-connect-mode-${value}`}
+                      aria-pressed={mode === value}
+                      onClick={() => {
+                        setMode(value);
+                        setAdvancedModesOpen(false);
+                        if (value === "join") setManualJoinOpen(true);
+                      }}
+                    >
+                      {t(labelKey)}
+                    </Button>
+                  ))}
+                </fieldset>
+                <details
+                  className="text-xs"
+                  open={advancedModesOpen}
+                  onToggle={(event) => setAdvancedModesOpen(event.currentTarget.open)}
+                  data-testid="people-connect-advanced-modes"
+                >
+                  <summary
+                    className="flex cursor-pointer list-none items-center gap-2 select-none text-muted-foreground hover:text-text-strong [&::-webkit-details-marker]:hidden"
+                    data-testid="people-connect-advanced-toggle"
+                  >
+                    {advancedModesOpen ? (
+                      <ChevronDownIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <ChevronRightIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                    )}
+                    {t("peopleConnectAdvanced")}
+                  </summary>
+                  <div className="mt-2 flex flex-wrap gap-2 border-l border-border/70 pl-3">
+                    {activeProfile || workspaceConnection?.profile ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={mode === "connect" ? "secondary" : "ghost"}
+                        className="h-8 px-2.5 text-xs"
+                        data-testid="people-connect-mode-connect"
+                        aria-pressed={mode === "connect"}
+                        onClick={() => setMode("connect")}
+                      >
+                        {t("peopleConnectExisting")}
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={mode === "bootstrap" ? "secondary" : "ghost"}
+                      className="h-8 px-2.5 text-xs"
+                      data-testid="people-connect-mode-bootstrap"
+                      aria-pressed={mode === "bootstrap"}
+                      onClick={() => setMode("bootstrap")}
+                    >
+                      {t("peopleConnectBootstrap")}
+                    </Button>
                   </div>
+                </details>
+              </div>
+            ) : null}
+
+            {mode === "setup" ? (
+              <CollaborationSetupHandoffFields
+                formId={formId}
+                t={t}
+                handoffInputRef={setupHandoffInputRef}
+                setupCodeInputRef={setupCodeInputRef}
+                displayName={displayName}
+                manualOpen={manualSetupOpen}
+                serverBaseUrl={serverBaseUrl}
+                allowInsecureTransport={allowInsecureTransport}
+                onDisplayNameChange={setDisplayName}
+                onManualOpenChange={setManualSetupOpen}
+                onServerBaseUrlChange={setServerBaseUrl}
+                onAllowInsecureTransportChange={setAllowInsecureTransport}
+              />
+            ) : null}
+
+            {mode === "join" ? (
+              <CollaborationInvitationJoinFields
+                formId={formId}
+                t={t}
+                invitationDetails={invitationDetails}
+                displayName={displayName}
+                manualJoinOpen={manualJoinOpen}
+                serverBaseUrl={serverBaseUrl}
+                projectId={projectId}
+                invitationToken={invitationToken}
+                allowInsecureTransport={allowInsecureTransport}
+                onInvitationDetailsChange={setInvitationDetails}
+                onDisplayNameChange={setDisplayName}
+                onManualJoinOpenChange={setManualJoinOpen}
+                onServerBaseUrlChange={setServerBaseUrl}
+                onProjectIdChange={setProjectId}
+                onInvitationTokenChange={setInvitationToken}
+                onAllowInsecureTransportChange={setAllowInsecureTransport}
+              />
+            ) : null}
+
+            {mode === "bootstrap" ? (
+              <div className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={`${formId}-name-legacy`}>{t("peopleDisplayName")}</Label>
+                  <Input
+                    id={`${formId}-name-legacy`}
+                    data-testid="people-connect-display-name"
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    autoComplete="nickname"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={`${formId}-url-legacy`}>{t("peopleServerUrl")}</Label>
+                  <Input
+                    id={`${formId}-url-legacy`}
+                    data-testid="people-connect-server-url"
+                    value={serverBaseUrl}
+                    onChange={(event) => setServerBaseUrl(event.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={`${formId}-project`}>{t("peopleProjectId")}</Label>
+                  <Input
+                    id={`${formId}-project`}
+                    data-testid="people-connect-project-id"
+                    value={projectId}
+                    onChange={(event) => setProjectId(event.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground md:col-span-2">
+                  <input
+                    type="checkbox"
+                    data-testid="people-connect-allow-insecure"
+                    checked={allowInsecureTransport}
+                    onChange={(event) => setAllowInsecureTransport(event.target.checked)}
+                  />
+                  {t("peopleAllowInsecureTransport")}
+                </label>
+              </div>
+            ) : null}
+
+            {mode === "connect" ? (
+              <div className="border-y border-border/70 py-3 text-xs">
+                {activeProfile || workspaceConnection?.profile ? (
+                  <div data-testid="people-connect-active-profile">
+                    <div className="font-medium text-text-strong">
+                      {workspaceConnection?.workspaceDisplayName ?? activeProfile?.displayName}
+                    </div>
+                    <div className="text-muted-foreground">
+                      {workspaceConnection?.profile?.serverBaseUrl ?? activeProfile?.serverBaseUrl}
+                    </div>
+                    {activeProfile?.projectId ? (
+                      <div className="text-muted-foreground">{activeProfile.projectId}</div>
+                    ) : null}
+                    {workspaceConnection?.workspaceId ? (
+                      <div className="text-muted-foreground">{workspaceConnection.workspaceId}</div>
+                    ) : null}
+                    <div className="text-muted-foreground">
+                      {activeProfile?.hasDeviceCredential ||
+                      workspaceConnection?.status === "connected" ||
+                      workspaceConnection?.status === "disconnected"
+                        ? t("peopleCredentialPresent")
+                        : t("peopleMissingCredential")}
+                    </div>
+                    {activeProfile ? (
+                      <div className="mt-3 flex flex-col gap-1">
+                        <Label htmlFor={`${formId}-existing-server-url`}>
+                          {t("peopleExistingServerUrl")}
+                        </Label>
+                        <Input
+                          id={`${formId}-existing-server-url`}
+                          data-testid="people-connect-existing-server-url"
+                          value={existingServerBaseUrl}
+                          readOnly
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <p className="text-muted-foreground">
+                          {activeProfile.connectionState === "reconnect_required"
+                            ? t("peopleProfileReconnectRequired")
+                            : t("peopleExistingServerUrlHint")}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div data-testid="people-connect-no-profile">{t("peopleNoProfileToConnect")}</div>
+                )}
+                {diagnosticReport ? (
+                  <details
+                    className="mt-3 border-t border-border/70 pt-3"
+                    data-testid="people-connection-diagnostics"
+                  >
+                    <summary className="cursor-pointer select-none font-medium text-text-strong">
+                      {t("peopleConnectionDiagnostics")}
+                    </summary>
+                    <p className="mt-2 text-muted-foreground">
+                      {t("peopleConnectionDiagnosticsHint")}
+                    </p>
+                    <pre
+                      className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/40 p-2 font-mono text-[11px] leading-5 text-text-strong"
+                      data-testid="people-connection-diagnostics-report"
+                    >
+                      {diagnosticReport}
+                    </pre>
+                    {copyText ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="mt-2"
+                        data-testid="people-connection-diagnostics-copy"
+                        onClick={() => void copyDiagnostics()}
+                      >
+                        {diagnosticsCopied
+                          ? t("peopleConnectionDiagnosticsCopied")
+                          : t("peopleConnectionDiagnosticsCopy")}
+                      </Button>
+                    ) : null}
+                  </details>
                 ) : null}
               </div>
-            ) : (
-              <div data-testid="people-connect-no-profile">{t("peopleNoProfileToConnect")}</div>
-            )}
-            {diagnosticReport ? (
-              <details
-                className="mt-3 border-t border-border/70 pt-3"
-                data-testid="people-connection-diagnostics"
-              >
-                <summary className="cursor-pointer select-none font-medium text-text-strong">
-                  {t("peopleConnectionDiagnostics")}
-                </summary>
-                <p className="mt-2 text-muted-foreground">{t("peopleConnectionDiagnosticsHint")}</p>
-                <pre
-                  className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/40 p-2 font-mono text-[11px] leading-5 text-text-strong"
-                  data-testid="people-connection-diagnostics-report"
-                >
-                  {diagnosticReport}
-                </pre>
-                {copyText ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="mt-2"
-                    data-testid="people-connection-diagnostics-copy"
-                    onClick={() => void copyDiagnostics()}
-                  >
-                    {diagnosticsCopied
-                      ? t("peopleConnectionDiagnosticsCopied")
-                      : t("peopleConnectionDiagnosticsCopy")}
-                  </Button>
-                ) : null}
-              </details>
             ) : null}
-          </div>
+          </>
         ) : null}
 
         {error ? (
@@ -732,22 +810,24 @@ export function CollaborationConnectForm({
           </div>
         ) : null}
 
-        <div className="flex justify-end gap-2">
-          {onRequestClose ? (
-            <Button type="button" size="sm" variant="ghost" onClick={onRequestClose}>
-              {t("peopleClose")}
+        {showConnectionEditor ? (
+          <div className="flex justify-end gap-2">
+            {onRequestClose ? (
+              <Button type="button" size="sm" variant="ghost" onClick={onRequestClose}>
+                {t("peopleClose")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || !api}
+              data-testid="people-connect-submit"
+              onClick={() => void submit()}
+            >
+              {busy ? t("peopleWorking") : submitLabel}
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || !api}
-            data-testid="people-connect-submit"
-            onClick={() => void submit()}
-          >
-            {busy ? t("peopleWorking") : submitLabel}
-          </Button>
-        </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );
