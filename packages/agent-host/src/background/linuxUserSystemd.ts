@@ -45,7 +45,7 @@ function unitText(input: AgentHostBackgroundInstall): string {
     ]
       .map(quoteSystemd)
       .join(" ")}`,
-    "Restart=on-failure",
+    "Restart=always",
     "RestartSec=5s",
     "TimeoutStopSec=30s",
     "",

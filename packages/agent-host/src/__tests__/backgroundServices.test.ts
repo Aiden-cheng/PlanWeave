@@ -173,6 +173,8 @@ describe("Agent Host background adapters", () => {
     expect(unit).toContain(
       'ExecStart="/opt/Node Runtime/bin/node" "/opt/PlanWeave package/dist/bin.js" "run" "--config" "/home/user/.planweave/agent-host/instances/workspace-1/config.json"'
     );
+    expect(unit).toContain("Restart=always");
+    expect(unit).not.toContain("Restart=on-failure");
     expect(unit).not.toMatch(/pw_(?:enroll|host)_/);
     expect(runner).toHaveBeenNthCalledWith(1, "systemctl", ["--user", "daemon-reload"]);
     expect(runner).toHaveBeenNthCalledWith(2, "systemctl", [

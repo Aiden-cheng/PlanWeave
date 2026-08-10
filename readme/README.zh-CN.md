@@ -286,7 +286,7 @@ planweave-agent-host service logs --config <absolute-config-path>
 
 5. Host 报告就绪后，暴露的远程 Agent Endpoint 会自动进入 Desktop 的统一 Agent selector，不需要再选择第二个 Host。
 
-Linux 后台模式使用当前用户的 user-systemd；管理员可能需要为该用户启用 linger。Windows 使用当前用户的 `ONLOGON` Scheduled Task，而不是 Windows SCM service，因此需要该用户登录后才会运行。Windows 的 `service logs` 只指向 Task Scheduler diagnostics，不捕获 Host stdout。完整生命周期与非交互命令见 [Agent Host 包指南](../packages/agent-host/README.md)。
+Linux 后台模式使用当前用户的 user-systemd；无人值守的 VPS 必须为该用户启用 linger，才能让 Host 在退出登录后继续运行并随系统启动。Windows 使用当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 启动项，而不是 Windows SCM service，因此需要该用户登录后才会运行。Windows 的 `service logs` 返回启动项标识，不捕获 Host stdout；交互式诊断应使用前台 `run` 模式。npm/source Agent Host 支持 Windows 与 Linux，但 `pack:agent-host:vps` 生成的归档仅适用于 Linux。安装方式与完整生命周期见 [Agent Host 包指南](../packages/agent-host/README.md)。
 
 入驻 handoff 只能使用一次且会过期。ACP 凭证、ACP 命令路径和环境变量值留在 Host 上，不会上传 PlanWeave Server。Host credential token 的明文只持久化在 Host 私有存储中，但 enrollment 和后续 Bearer 认证会把它发送给所配置的 Server；Server 持久化的是其单向哈希。不要把 handoff 或 token 写进项目文件、聊天或日志。Tailscale HTTPS 与 direct HTTPS 都只使用一个由 Desktop 和 Host 共用的 PlanWeave Server Origin；LAN HTTP 仅用于显式启用的不安全开发模式。
 

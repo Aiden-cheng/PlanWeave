@@ -14,15 +14,23 @@ Tailscale HTTPS and direct HTTPS are supported connection topologies; either top
 
 ## Install
 
-This source tree does not assert that `@planweave-ai/agent-host` is already available from the npm registry. For pre-release testing from a source checkout, install workspace dependencies and build the Host:
+The npm package and source build are cross-platform and support Windows and Linux. The archive produced by `pnpm pack:agent-host:vps` is a Linux/VPS bundle: its `install.sh`, Unix paths, and symlink-based launcher are not a Windows installer and must not be copied to Windows.
+
+This source tree does not assert that `@planweave-ai/agent-host` is already available from the npm registry. For pre-release testing from a source checkout, install workspace dependencies and build the Host together with its workspace dependencies:
 
 ```bash
 pnpm install
-pnpm --dir packages/agent-host build
+pnpm --filter @planweave-ai/agent-host... build
 node packages/agent-host/dist/bin.js --help
 ```
 
-When using a source checkout, replace `planweave-agent-host` in the commands below with `node <absolute-repository-path>/packages/agent-host/dist/bin.js`. After an npm registry release is available, `npm install -g @planweave-ai/agent-host` provides the shorter global command shown in this guide.
+The same commands work in PowerShell; use a Windows absolute path when invoking the built entrypoint:
+
+```powershell
+node C:\absolute\path\to\PlanWeave\packages\agent-host\dist\bin.js --help
+```
+
+When using a source checkout, replace `planweave-agent-host` in the commands below with `node <absolute-repository-path>/packages/agent-host/dist/bin.js`. After an npm registry release is available, `npm install -g @planweave-ai/agent-host` provides the shorter global command shown in this guide on both Windows and Linux.
 
 Install and sign in to the selected ACP agent before enrolling the Host. PlanWeave does not start the agent's interactive login flow for you.
 
@@ -117,19 +125,27 @@ planweave-agent-host revoke --config <absolute-path>
 
 ### Linux
 
-Background mode installs a user-systemd unit for the current user and manages it with `systemctl --user`. It is not a system-wide root service. If the Host must continue without an interactive login session, an administrator may need to enable linger for the owning user:
+Background mode installs a user-systemd unit for the current user and manages it with `systemctl --user`. The unit restarts the Host after either an unexpected failure or a clean process exit; an explicit `service uninstall` or `systemctl --user stop` still leaves it stopped.
+
+This is not a system-wide root service. On a VPS or other unattended Linux host, enable linger for the owning user so the user service starts at boot and remains available without an interactive login session:
 
 ```bash
 sudo loginctl enable-linger <user>
 ```
 
+Without linger, the Host may appear offline after the owning user's login session or user-systemd manager ends even though the VPS itself is still running.
+
 `service logs` returns the matching `journalctl --user` command for the unit.
 
 ### Windows
 
-Background mode creates a current-user `ONLOGON` Scheduled Task with limited privileges and starts it immediately. This is not a Windows SCM service: the task runs after that user signs in.
+Background mode writes a current-user startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` and starts the Host immediately as a detached process. It is not a Windows SCM service and does not run before that user signs in. `service status` checks both the startup entry and the matching running process.
 
-`service logs` returns the task name and the `Microsoft-Windows-TaskScheduler/Operational` diagnostic log. The Scheduled Task integration does not capture Host stdout, so this command must not be treated as a Host output log.
+`service logs` reports the startup registry value name and explicitly reports that Host stdout is not captured. For interactive diagnosis, stop the background instance and run `planweave-agent-host run --config <absolute-path>` in a PowerShell terminal.
+
+Install and authenticate the ACP agent under the same Windows account that owns the Host. npm-installed `.cmd` shims are resolved through Windows `Path` and `PATHEXT`, and ACP child processes are managed with Windows PowerShell and Job Objects. Always run `agents list`, `agents expose`, and `preflight` on that account before relying on background execution.
+
+Owner Fleet workspaces are created below the configured Windows `workspaceRoot`. Remote task prompts must still be portable: Linux-only paths such as `/home/...` and Linux shell commands are not translated into Windows equivalents.
 
 ## Security boundary
 
