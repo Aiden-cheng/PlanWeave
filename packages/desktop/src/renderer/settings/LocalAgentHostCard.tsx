@@ -87,28 +87,29 @@ export function LocalAgentHostCard({
     );
   }, [status]);
 
+  const activeProfileHostedByThisDesktop = Boolean(activeProfile?.hostedByThisDesktop);
+  const activeLocalServerReady = localServerHosted && activeProfileHostedByThisDesktop;
   const hasDirectRegistration = Boolean(
     status?.supported &&
+      !activeProfileHostedByThisDesktop &&
       activeProfile?.hasOperatorCredential &&
       activeProfile.endpoint &&
       activeProfile.endpoint.tlsTrust !== "configured_ca"
   );
   const canRegisterWithAdmin = Boolean(
-    !localServerHosted && hasDirectRegistration && selected.length > 0 && !busy && !loading
+    hasDirectRegistration && selected.length > 0 && !busy && !loading
   );
   const canEnroll = Boolean(
-    !localServerHosted &&
-      status?.supported &&
+    status?.supported &&
       status.state === "not_registered" &&
       handoff.trim().length > 0 &&
       selected.length > 0 &&
       !busy &&
       !loading
   );
-  const canUpdate =
-    !localServerHosted && status?.state !== "not_registered" && hasDirectRegistration;
+  const canUpdate = status?.state !== "not_registered" && hasDirectRegistration;
   const canRegisterDirectly =
-    !localServerHosted && status?.state === "not_registered" && hasDirectRegistration;
+    status?.state === "not_registered" && hasDirectRegistration;
 
   return (
     <section className="border-t border-border/70 py-8" data-testid="host-admin-local-agent-host">
@@ -135,7 +136,7 @@ export function LocalAgentHostCard({
               </p>
             ) : null}
             <p className="text-xs text-text-muted" data-testid="host-admin-local-status">
-              {localServerHosted
+              {activeLocalServerReady && status.state === "not_registered"
                 ? t("hostAdminLocalHostUsesLocalServer")
                 : status.state === "ready"
                   ? t("hostAdminLocalHostReady")
@@ -143,7 +144,7 @@ export function LocalAgentHostCard({
                     ? t("hostAdminLocalHostSetupRequired")
                     : t("hostAdminLocalHostNotRegistered")}
             </p>
-            {!localServerHosted && status.state !== "not_registered" ? (
+            {status.state !== "not_registered" ? (
               <div
                 className="grid gap-1.5 rounded-md border border-border/60 bg-surface/40 px-3 py-2.5 text-xs leading-5 text-text-muted"
                 data-testid="host-admin-local-connection-panel"
@@ -175,7 +176,7 @@ export function LocalAgentHostCard({
                 ) : null}
               </div>
             ) : null}
-            {!localServerHosted && status.state === "not_registered" ? (
+            {status.state === "not_registered" ? (
               <div className="grid gap-2">
                 <p className="text-xs leading-5 text-text-muted">
                   {t("hostAdminLocalHostHandoffPrompt")}
@@ -201,11 +202,9 @@ export function LocalAgentHostCard({
                 </label>
               </div>
             ) : null}
-            {!localServerHosted ? (
-              <p className="text-sm font-medium text-text-strong">
-                {t("hostAdminLocalHostAgentSelectionLabel")}
-              </p>
-            ) : null}
+            <p className="text-sm font-medium text-text-strong">
+              {t("hostAdminLocalHostAgentSelectionLabel")}
+            </p>
             <div className="divide-y divide-border/60 border-y border-border/60">
               {status.agents.map((agent) => (
                 <label
@@ -220,7 +219,7 @@ export function LocalAgentHostCard({
                     type="checkbox"
                     data-testid={`host-admin-local-agent-${agent.profileId}`}
                     checked={selected.includes(agent.profileId)}
-                    disabled={localServerHosted || busy || loading}
+                    disabled={busy || loading}
                     onChange={(event) =>
                       setSelected((current) =>
                         event.target.checked
@@ -232,10 +231,8 @@ export function LocalAgentHostCard({
                 </label>
               ))}
             </div>
-            {!localServerHosted ? (
-              <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
-            ) : null}
-            {!localServerHosted && status.state !== "not_registered" ? (
+            <p className="text-xs text-text-muted">{t("hostAdminLocalHostCredentialBoundary")}</p>
+            {status.state !== "not_registered" ? (
               <Button
                 type="button"
                 className="w-fit"
@@ -248,7 +245,7 @@ export function LocalAgentHostCard({
                   : t("hostAdminStartLocalHost")}
               </Button>
             ) : null}
-            {!localServerHosted && status.state === "not_registered" ? (
+            {status.state === "not_registered" ? (
               <div className="grid gap-3">
                 <Button
                   type="button"

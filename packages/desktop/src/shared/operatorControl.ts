@@ -345,6 +345,8 @@ export type OperatorProfileView = {
   displayName: string;
   serverBaseUrl: string;
   allowInsecureTransport: boolean;
+  /** Main-derived identity; renderer must not infer this from URLs or profile ids. */
+  hostedByThisDesktop: boolean;
   endpoint?: z.infer<typeof deploymentEndpointSchema>;
   operatorId: string | null;
   hasOperatorCredential: boolean;

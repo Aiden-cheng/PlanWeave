@@ -39,6 +39,7 @@ const status = () => ({
       displayName: "Production admin",
       serverBaseUrl: "https://server.example/",
       allowInsecureTransport: false,
+      hostedByThisDesktop: false,
       endpoint: {
         topology: "public_https" as const,
         serverOrigin: "https://server.example",
@@ -216,10 +217,10 @@ afterEach(() => {
 });
 
 describe("Agent Host settings", () => {
-  it("keeps local Agent selection disabled while this computer hosts the Server", () => {
+  it("still allows handoff enrollment while this computer hosts its own Server", () => {
     render(
       <LocalAgentHostCard
-        activeProfile={status().profiles[0]}
+        activeProfile={{ ...status().profiles[0], hostedByThisDesktop: true }}
         busy={false}
         localServerHosted={true}
         loading={false}
@@ -244,12 +245,41 @@ describe("Agent Host settings", () => {
       />
     );
 
-    expect(screen.getByTestId("host-admin-local-agent-codex-acp")).toBeDisabled();
-    expect(screen.getByTestId("host-admin-local-status")).toHaveTextContent(
-      "Local agents are already available"
-    );
+    expect(screen.getByTestId("host-admin-local-agent-codex-acp")).toBeEnabled();
     expect(screen.queryByTestId("host-admin-register-local")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("host-admin-local-handoff")).not.toBeInTheDocument();
+    expect(screen.getByTestId("host-admin-local-handoff")).toBeInTheDocument();
+  });
+
+  it("allows direct registration to an external profile while the local Server is running", () => {
+    render(
+      <LocalAgentHostCard
+        activeProfile={status().profiles[0]}
+        busy={false}
+        localServerHosted={true}
+        loading={false}
+        status={{
+          supported: true,
+          state: "not_registered",
+          agents: [
+            {
+              profileId: "codex-acp",
+              agentId: "codex",
+              displayName: "Codex",
+              detected: true,
+              exposed: true,
+              ready: false
+            }
+          ]
+        }}
+        register={vi.fn()}
+        repair={vi.fn()}
+        enroll={vi.fn()}
+        t={createTranslator("en")}
+      />
+    );
+
+    expect(screen.getByTestId("host-admin-register-local")).toBeEnabled();
+    expect(screen.getByTestId("host-admin-local-handoff")).toBeInTheDocument();
   });
 
   it("always shows the explicit enrollment input on a remote computer", () => {

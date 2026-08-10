@@ -769,6 +769,7 @@ describe("Desktop operator control trust boundary", () => {
     await expect(
       service.listAgentEndpoints({ profileId: "planweave-local-loopback" })
     ).resolves.toEqual({ schemaVersion: "agent-endpoint-list/v1", items: [] });
+    expect((await service.getStatus()).profiles[0]?.hostedByThisDesktop).toBe(true);
     expect(seenBases).toEqual(["http://127.0.0.1:50653/"]);
   });
 
@@ -812,6 +813,7 @@ describe("Desktop operator control trust boundary", () => {
       schemaVersion: "agent-endpoint-list/v1",
       items: []
     });
+    expect((await service.getStatus()).profiles[0]?.hostedByThisDesktop).toBe(false);
     expect(seenBases).toEqual(["https://remote-operator.example/"]);
   });
 

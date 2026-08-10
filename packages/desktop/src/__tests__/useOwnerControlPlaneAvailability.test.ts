@@ -8,6 +8,7 @@ function profile(overrides: Partial<OperatorProfileView> = {}): OperatorProfileV
     displayName: "Owner",
     serverBaseUrl: "https://example.test",
     allowInsecureTransport: false,
+    hostedByThisDesktop: false,
     operatorId: "operator-1",
     hasOperatorCredential: true,
     operatorCredentialPersistence: "persisted",

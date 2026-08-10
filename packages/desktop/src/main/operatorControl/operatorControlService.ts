@@ -43,6 +43,7 @@ import {
   type OperatorControlClientOptions
 } from "./OperatorControlClient.js";
 import {
+  isLocalOwnedOperatorProfile,
   resolveEffectiveOperatorServerBaseUrl,
   type LocalOperatorBackendPort
 } from "./localOperatorBackend.js";
@@ -101,6 +102,7 @@ function localAgentHostErrorFromUnknown(error: unknown): OperatorControlError {
 
 function toPublicProfile(
   profile: OperatorControlProfile & { updatedAt: string },
+  hostedByThisDesktop: boolean,
   credential: {
     hasOperatorCredential: boolean;
     operatorCredentialPersistence: OperatorCredentialPersistence;
@@ -112,6 +114,7 @@ function toPublicProfile(
     displayName: profile.displayName,
     serverBaseUrl: profile.serverBaseUrl,
     allowInsecureTransport: profile.allowInsecureTransport,
+    hostedByThisDesktop,
     ...(profile.endpoint ? { endpoint: profile.endpoint } : {}),
     operatorId: credential.operatorId ?? profile.operatorId ?? null,
     hasOperatorCredential: credential.hasOperatorCredential,
@@ -171,12 +174,13 @@ export class OperatorControlService {
 
   private async buildStatus(): Promise<OperatorControlStatus> {
     const profiles = await this.profiles.list();
+    const localBackendSnapshot = this.localOperatorBackend?.getSnapshot() ?? null;
     const views: OperatorProfileView[] = [];
     for (const profile of profiles) {
       const persistence = await this.vault.persistenceFor(profile.profileId);
       const metadata = await this.vault.getMetadata(profile.profileId);
       views.push(
-        toPublicProfile(profile, {
+        toPublicProfile(profile, isLocalOwnedOperatorProfile(profile, localBackendSnapshot), {
           hasOperatorCredential: persistence !== "missing",
           operatorCredentialPersistence: persistence,
           operatorId: metadata?.operatorId ?? null
