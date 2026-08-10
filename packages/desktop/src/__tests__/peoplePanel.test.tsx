@@ -147,6 +147,10 @@ describe("PeoplePanel", () => {
     expect(screen.queryByTestId("people-hosts-section")).not.toBeInTheDocument();
     expect(screen.getByTestId("people-presence-summary")).toHaveTextContent("2 members");
     expect(screen.getByTestId("people-presence-summary")).not.toHaveTextContent("host");
+    expect(screen.getByTestId("people-workspace-summary")).toHaveTextContent(
+      "Connected to Workspace"
+    );
+    expect(screen.getByText("Member devices (1)")).toBeVisible();
     expect(screen.getAllByTestId("people-member-access-toggle")).toHaveLength(1);
     await userEvent.click(screen.getByTestId("people-member-access-toggle"));
     expect(screen.getByTestId("member-access-slot")).toHaveTextContent("Member access");

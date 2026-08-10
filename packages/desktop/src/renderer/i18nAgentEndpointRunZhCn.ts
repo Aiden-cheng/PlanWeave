@@ -24,19 +24,18 @@ export const agentEndpointRunZhCnCatalog = {
     "块 {block} 的远程运行以 {state} 结束。请检查 Host/operation 详情后重试。[{code}]",
   remoteAgentFailureError: "{message} 请处理该块的 Host/远程失败后重试。[{code}]",
   collaborationRuntimeStatusUnavailableError:
-    "协作运行时状态不可用。请打开设置 → Server，发布或同步权威内容后再重跑。[{code}]",
+    "协作运行时状态不可用。请打开设置 → 连接与设备 → 高级连接，发布或同步权威内容后再重跑。[{code}]",
   collaborationRuntimeTaskStatusUnavailableError:
     "任务 {task} 的协作状态缺失。请刷新画布或重新连接后再重跑。[{code}]",
   collaborationRuntimeBlockStatusUnavailableError:
     "块 {block} 的协作状态缺失。请刷新画布或重新连接后再重跑。[{code}]",
   agentEndpointFleetCredentialMissing:
-    "列出远程 Agent Host 需要 server-admin 凭证。请打开设置 → Server 并导入 operator token。[{code}]",
+    "列出远程 Agent Host 需要 server-admin 凭证。请打开设置 → 连接与设备并导入 operator token。[{code}]",
   agentEndpointFleetProfileNotActive:
-    "请在设置 → Server 中选择 server-admin 配置文件以列出远程 Agent Host。[{code}]",
+    "请在设置 → 连接与设备中选择 server-admin 配置文件以列出远程 Agent Host。[{code}]",
   agentEndpointFleetBridgeUnavailable:
     "Desktop 无法访问 server-admin 控制面。请重启 Desktop 后重试。[{code}]",
-  agentEndpointFleetLocalServerNotReady:
-    "本地协作 Server 仍在启动中，请稍候再试。[{code}]",
+  agentEndpointFleetLocalServerNotReady: "本地协作 Server 仍在启动中，请稍候再试。[{code}]",
   agentEndpointFleetLoadFailed:
-    "无法加载远程 Agent Host endpoint。请检查设置 → Server 后重试。[{code}]"
+    "无法加载远程 Agent Host endpoint。请检查设置 → 连接与设备后重试。[{code}]"
 } satisfies Record<keyof typeof agentEndpointRunEnCatalog, string>;

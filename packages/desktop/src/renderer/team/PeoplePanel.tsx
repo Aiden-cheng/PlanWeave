@@ -289,6 +289,15 @@ export function PeoplePanel({
         : mode === "offline"
           ? t("peopleOffline")
           : t("peopleError");
+  const workspaceStatusText =
+    presence.sessionPhase === "connected"
+      ? t("peopleWorkspaceConnected")
+      : presence.sessionPhase === "connecting"
+        ? t("peopleWorkspaceConnecting")
+        : presence.sessionPhase === "error"
+          ? t("peopleWorkspaceError")
+          : t("peopleWorkspaceDisconnected");
+  const activeDeviceCount = devices.filter((device) => !device.isRevoked).length;
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="people-panel" data-mode={mode}>
@@ -303,6 +312,27 @@ export function PeoplePanel({
           <p className="text-sm text-muted-foreground" data-testid="people-presence-summary">
             {memberStateText}
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/70 px-2 py-0.5"
+              data-testid="people-workspace-summary"
+            >
+              <span
+                aria-hidden="true"
+                className={`size-1.5 rounded-full ${
+                  presence.sessionPhase === "connected"
+                    ? "bg-emerald-500"
+                    : presence.sessionPhase === "error"
+                      ? "bg-destructive"
+                      : "bg-muted-foreground/50"
+                }`}
+              />
+              {workspaceStatusText}
+            </span>
+            <span className="rounded-full border border-border/70 px-2 py-0.5">
+              {t("peopleMemberDevices")} ({activeDeviceCount})
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {presence.currentUserIsOwner ? (

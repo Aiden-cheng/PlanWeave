@@ -4,8 +4,7 @@ import {
   BotIcon,
   CableIcon,
   GitPullRequestIcon,
-  ServerIcon,
-  ServerCogIcon,
+  NetworkIcon,
   SettingsIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,8 +17,7 @@ export type SettingsSection =
   | "review"
   | "agents"
   | "mcp"
-  | "server"
-  | "hosts";
+  | "connections";
 
 type SettingsNavProps = {
   section: SettingsSection;
@@ -35,8 +33,7 @@ export function SettingsNav({ section, setSection, onBackToApp, t }: SettingsNav
     { key: "review", label: t("settingsReview"), icon: GitPullRequestIcon },
     { key: "agents", label: t("settingsAgents"), icon: BotIcon },
     { key: "mcp", label: t("settingsMcpTunnel"), icon: CableIcon },
-    { key: "server", label: t("settingsServer"), icon: ServerIcon },
-    { key: "hosts", label: t("settingsHosts"), icon: ServerCogIcon }
+    { key: "connections", label: t("settingsConnections"), icon: NetworkIcon }
   ] satisfies Array<{ key: SettingsSection; label: string; icon: typeof SettingsIcon }>;
 
   return (

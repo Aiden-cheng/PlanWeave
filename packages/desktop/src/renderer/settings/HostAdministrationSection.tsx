@@ -1,9 +1,10 @@
 import type { OperatorHostView } from "@planweave-ai/agent-host-protocol";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DesktopServerExposureView } from "../../shared/deploymentExposure";
 import type { createTranslator } from "../i18n";
+import { collaborationBridge } from "../bridge";
 import { useHostAdministrationController } from "../hooks/useHostAdministrationController";
 import { HostBootstrapCard } from "./HostBootstrapCard";
 import { LocalAgentHostCard } from "./LocalAgentHostCard";
@@ -12,6 +13,8 @@ import { DeploymentConnectionCard } from "./DeploymentConnectionCard";
 
 type HostAdministrationSectionProps = {
   diagnosticsEnabled?: boolean;
+  showDeploymentConnection?: boolean;
+  showHeader?: boolean;
   t: ReturnType<typeof createTranslator>;
 };
 
@@ -90,6 +93,8 @@ function errorLabel(code: string | null, t: ReturnType<typeof createTranslator>)
 
 export function HostAdministrationSection({
   diagnosticsEnabled = false,
+  showDeploymentConnection = true,
+  showHeader = true,
   t
 }: HostAdministrationSectionProps) {
   const controller = useHostAdministrationController();
@@ -97,6 +102,27 @@ export function HostAdministrationSection({
     useState<DesktopServerExposureView | null>(null);
   const handleExposureChange = useCallback((exposure: DesktopServerExposureView) => {
     setDesktopServerExposure(exposure);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !collaborationBridge ||
+      typeof collaborationBridge.getDesktopServerExposure !== "function"
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void collaborationBridge.getDesktopServerExposure().then(
+      (exposure) => {
+        if (!cancelled) setDesktopServerExposure(exposure);
+      },
+      () => {
+        if (!cancelled) setDesktopServerExposure(null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
   }, []);
   const {
     activeProfile,
@@ -127,27 +153,29 @@ export function HostAdministrationSection({
 
   return (
     <div className="flex flex-col" data-testid="host-administration">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-text-strong">
-            {t("hostAdminTitle")}
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-text-muted">
-            {t("hostAdminDescription")}
-          </p>
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          data-testid="host-admin-refresh"
-          disabled={busy || loadState === "loading"}
-          onClick={() => void refresh().then(refreshHosts)}
-        >
-          <RefreshCwIcon data-icon="inline-start" />
-          {t("hostAdminRefresh")}
-        </Button>
-      </header>
+      {showHeader ? (
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-[-0.02em] text-text-strong">
+              {t("hostAdminTitle")}
+            </h1>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-text-muted">
+              {t("hostAdminDescription")}
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="host-admin-refresh"
+            disabled={busy || loadState === "loading"}
+            onClick={() => void refresh().then(refreshHosts)}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            {t("hostAdminRefresh")}
+          </Button>
+        </header>
+      ) : null}
 
       {loadState === "unavailable" ? (
         <div
@@ -173,11 +201,13 @@ export function HostAdministrationSection({
         </div>
       ) : null}
 
-      <DeploymentConnectionCard
-        presentation="section"
-        t={t}
-        onExposureChange={handleExposureChange}
-      />
+      {showDeploymentConnection ? (
+        <DeploymentConnectionCard
+          presentation="section"
+          t={t}
+          onExposureChange={handleExposureChange}
+        />
+      ) : null}
 
       <LocalAgentHostCard
         activeProfile={activeProfile}

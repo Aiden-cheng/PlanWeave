@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { CollaborationContentBootstrapResult } from "../../shared/collaboration.js";
 import type {
@@ -16,15 +16,9 @@ import { SettingsNav } from "../settings/SettingsNav";
 import type { SettingsSection } from "../settings/SettingsNav";
 import { SettingsMcpSection } from "../settings/SettingsMcpSection";
 import { SettingsReviewSection } from "../settings/SettingsReviewSection";
-import { SettingsServerSection } from "../settings/SettingsServerSection";
+import { SettingsConnectionsSection } from "../settings/SettingsConnectionsSection";
 import type { createTranslator, Language } from "../i18n";
 import type { AppView, DesktopSettingsUpdate, DesktopUiSettings } from "../types";
-
-const HostAdministrationSection = lazy(() =>
-  import("../settings/HostAdministrationSection").then((module) => ({
-    default: module.HostAdministrationSection
-  }))
-);
 
 type SettingsViewProps = {
   agentDetectionRefreshing: boolean;
@@ -199,9 +193,10 @@ export function SettingsView({
               />
             ) : null}
             {section === "mcp" ? <SettingsMcpSection setError={setError} t={t} /> : null}
-            {section === "server" ? (
-              <SettingsServerSection
+            {section === "connections" ? (
+              <SettingsConnectionsSection
                 t={t}
+                diagnosticsEnabled={settings.developerMode}
                 localProjectId={selectedProject?.projectId ?? null}
                 canvasId={selectedCanvasId}
                 collaborationScopeLayout={settings.layout.collaborationScope}
@@ -210,17 +205,6 @@ export function SettingsView({
                 onContentReplicaReady={onContentReplicaReady}
                 onManageInvitations={() => setActiveView("people")}
               />
-            ) : null}
-            {section === "hosts" ? (
-              <Suspense
-                fallback={
-                  <div className="text-sm text-text-muted" data-testid="host-admin-loading">
-                    {t("hostAdminLoading")}
-                  </div>
-                }
-              >
-                <HostAdministrationSection diagnosticsEnabled={settings.developerMode} t={t} />
-              </Suspense>
             ) : null}
           </div>
         </ScrollArea>

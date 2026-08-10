@@ -218,7 +218,7 @@ describe("desktop renderer settings interactions", () => {
     expect(container.querySelector('[data-slot="scroll-area-viewport"]')).toHaveClass("h-full");
   });
 
-  it("exposes a dedicated Settings Server section for connection and content authority", async () => {
+  it("groups Server and Agent Hosts under Connections & Devices", async () => {
     stubLayoutApis();
     render(
       <SettingsView
@@ -238,14 +238,25 @@ describe("desktop renderer settings interactions", () => {
       />
     );
 
-    await userEvent.click(screen.getByTestId("settings-nav-server"));
+    expect(screen.queryByTestId("settings-nav-server")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-nav-hosts")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("settings-nav-connections"));
+    expect(await screen.findByTestId("settings-connections-overview")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Connections & Devices" })).toHaveClass("text-2xl");
+    expect(screen.getByTestId("settings-connections-rail")).toBeVisible();
+
+    await userEvent.click(screen.getByTestId("settings-connections-tab-advanced"));
     expect(await screen.findByTestId("settings-server-section")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Server" })).toHaveClass("text-2xl");
     expect(screen.getByTestId("settings-server-connection-block")).toBeVisible();
     expect(screen.getByTestId("settings-server-hosting-block")).toBeVisible();
     expect(screen.getByTestId("settings-server-content-block")).toBeVisible();
     expect(screen.getByTestId("settings-server-content-needs-session")).toBeVisible();
     expect(screen.getByTestId("settings-server-open-people")).toBeVisible();
+
+    await userEvent.click(screen.getByTestId("settings-connections-tab-devices"));
+    expect(await screen.findByTestId("host-administration")).toBeVisible();
+    expect(screen.queryByTestId("deployment-connection")).not.toBeInTheDocument();
   });
 
   it("normalizes invalid legacy migration appearance and window material settings", () => {

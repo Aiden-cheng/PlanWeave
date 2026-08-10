@@ -68,10 +68,11 @@ export type SettingsServerSectionProps = {
   onContentReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
   /** Navigate to People so operators can manage invitations. */
   onManageInvitations?: () => void;
+  showHeader?: boolean;
 };
 
 /**
- * Settings → Server: connection topology, local hosted Server, and content authority sync.
+ * Settings → Connections & Devices → Advanced connection: topology, local Server, and content authority.
  * Layout matches General / MCP: page title + SettingGroup (h2 + FieldGroup).
  */
 export function SettingsServerSection({
@@ -84,7 +85,8 @@ export function SettingsServerSection({
   onCollaborationScopeLayoutChange,
   onContentMaterialized,
   onContentReplicaReady,
-  onManageInvitations
+  onManageInvitations,
+  showHeader = true
 }: SettingsServerSectionProps) {
   const api = apiProp === undefined ? collaborationBridge : apiProp;
   const [desktopServerExposure, setDesktopServerExposure] =
@@ -93,16 +95,19 @@ export function SettingsServerSection({
   const [localServerRunning, setLocalServerRunning] = useState(false);
   const desktopServerExposureRef = useRef<DesktopServerExposureView | null>(null);
 
-  const handleDesktopServerExposureChange = useCallback((nextExposure: DesktopServerExposureView) => {
-    const previousExposure = desktopServerExposureRef.current;
-    const endpointChanged =
-      previousExposure !== null &&
-      (previousExposure.mode !== nextExposure.mode ||
-        previousExposure.advertisedOrigin !== nextExposure.advertisedOrigin);
-    desktopServerExposureRef.current = nextExposure;
-    setDesktopServerExposure(nextExposure);
-    if (endpointChanged) setLocalInvitationHandoff(null);
-  }, []);
+  const handleDesktopServerExposureChange = useCallback(
+    (nextExposure: DesktopServerExposureView) => {
+      const previousExposure = desktopServerExposureRef.current;
+      const endpointChanged =
+        previousExposure !== null &&
+        (previousExposure.mode !== nextExposure.mode ||
+          previousExposure.advertisedOrigin !== nextExposure.advertisedOrigin);
+      desktopServerExposureRef.current = nextExposure;
+      setDesktopServerExposure(nextExposure);
+      if (endpointChanged) setLocalInvitationHandoff(null);
+    },
+    []
+  );
 
   const { status, refresh: refreshCollaborationStatus } = useCollaborationStatus({ api });
   const [sessionReconnectBusy, setSessionReconnectBusy] = useState(false);
@@ -177,12 +182,14 @@ export function SettingsServerSection({
 
   return (
     <section data-testid="settings-server-section" className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-normal text-text-strong">
-          {t("settingsServer")}
-        </h1>
-        <p className="mt-1 text-sm text-text-muted">{t("settingsServerHint")}</p>
-      </div>
+      {showHeader ? (
+        <div>
+          <h1 className="text-2xl font-semibold tracking-normal text-text-strong">
+            {t("settingsServer")}
+          </h1>
+          <p className="mt-1 text-sm text-text-muted">{t("settingsServerHint")}</p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-6" data-testid="settings-server-panels">
         <SettingGroup
