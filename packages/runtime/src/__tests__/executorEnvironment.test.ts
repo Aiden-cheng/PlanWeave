@@ -195,7 +195,7 @@ const WSL_LIFECYCLE_PROCESS_SCRIPT = [
   'printf "PLANWEAVE_PARENT_PID=%s\\n" "$$"',
   "trap 'exit 0' TERM",
   "wait"
-].join("; ");
+].join("\n");
 
 describe("executor environment", () => {
   const requireWslTests = process.env.PLANWEAVE_REQUIRE_WSL_TESTS === "1";
