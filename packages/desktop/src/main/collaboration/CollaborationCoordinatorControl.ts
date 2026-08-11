@@ -24,7 +24,6 @@ import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import type { OperatorSafeStoragePort } from "../operatorControl/operatorCredentialVault.js";
 import { OperatorCredentialVault } from "../operatorControl/operatorCredentialVault.js";
-import { getOperatorControlService } from "../operatorControl/operatorControlHandlers.js";
 import type { OperatorControlService } from "../operatorControl/operatorControlService.js";
 import {
   LOCAL_OPERATOR_BACKEND_READY_TIMEOUT_MS,
@@ -779,6 +778,9 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       .update(target.endpoint.serverOrigin)
       .digest("hex")
       .slice(0, 32)}`;
+    const { getOperatorControlService } = await import(
+      "../operatorControl/operatorControlHandlers.js"
+    );
     const operatorService = getOperatorControlService();
     const operatorToken = await operatorService.ensureDeploymentProfile({
       profile: {
