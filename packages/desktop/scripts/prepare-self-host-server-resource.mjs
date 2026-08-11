@@ -37,11 +37,11 @@ await rm(outputRoot, { recursive: true, force: true });
 await mkdir(imageRoot, { recursive: true });
 await run("pnpm", [
   "--config.node-linker=hoisted",
+  "--config.inject-workspace-packages=true",
   "--filter",
   "@planweave-ai/server",
   "--prod",
   "deploy",
-  "--legacy",
   stagingAppRoot
 ]);
 await cp(stagingAppRoot, resolve(imageRoot, "app"), { recursive: true, dereference: true });
