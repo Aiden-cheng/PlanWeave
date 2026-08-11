@@ -113,6 +113,7 @@ describe("switchLocalCollaborationExposure", () => {
       adoptWorkspaceAuthority: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       activeHumanPrincipalId: vi.fn(async () => "human-owner"),
+      migrateLegacyLocalOwnerDisplayName: vi.fn(async () => false),
       bootstrapOwner: vi.fn(),
       connectSession: vi.fn(async () => undefined),
       clearActiveProfile: vi.fn(async () => undefined)
@@ -127,6 +128,9 @@ describe("switchLocalCollaborationExposure", () => {
       expect.objectContaining({ serverBaseUrl: "https://planweave.example.ts.net/" })
     );
     expect(service.connectSession).toHaveBeenCalledWith({ profileId: "local-project-1" });
+    expect(service.migrateLegacyLocalOwnerDisplayName).toHaveBeenCalledWith({
+      humanPrincipalId: "human-owner"
+    });
   });
 
   it("restores the previous mode when activation fails", async () => {
