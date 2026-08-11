@@ -5,11 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAgentHostTlsTrust } from "../tls/trust.js";
 
 const directories: string[] = [];
-const originalTlsRejection = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
 
 afterEach(async () => {
-  if (originalTlsRejection === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  else process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalTlsRejection;
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
   );
@@ -17,8 +14,9 @@ afterEach(async () => {
 
 describe("Agent Host TLS trust", () => {
   it("rejects globally disabled certificate verification", async () => {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-    await expect(createAgentHostTlsTrust()).rejects.toThrow("agent_host_tls_verification_disabled");
+    await expect(
+      createAgentHostTlsTrust(undefined, { NODE_TLS_REJECT_UNAUTHORIZED: "0" })
+    ).rejects.toThrow("agent_host_tls_verification_disabled");
   });
 
   it("uses fixed error codes for unreadable and invalid CA files", async () => {

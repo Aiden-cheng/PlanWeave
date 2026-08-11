@@ -12,9 +12,10 @@ export type AgentHostTlsTrust = {
 };
 
 export async function createAgentHostTlsTrust(
-  caCertificatePath?: string
+  caCertificatePath?: string,
+  environment: { readonly NODE_TLS_REJECT_UNAUTHORIZED?: string } = process.env
 ): Promise<AgentHostTlsTrust> {
-  if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+  if (environment.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
     throw new Error("agent_host_tls_verification_disabled");
   }
   if (!caCertificatePath) {
