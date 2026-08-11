@@ -22,6 +22,14 @@ function run(command, args) {
   });
 }
 
+function pnpmInvocation(args) {
+  const pnpmCliPath = process.env.npm_execpath;
+  if (!pnpmCliPath) {
+    throw new Error("self-host resource build must be invoked through pnpm");
+  }
+  return { command: process.execPath, args: [pnpmCliPath, ...args] };
+}
+
 async function assertPortableDirectory(directory) {
   for (const entry of await readdir(directory)) {
     const path = resolve(directory, entry);
@@ -35,8 +43,7 @@ async function assertPortableDirectory(directory) {
 
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(imageRoot, { recursive: true });
-await run("pnpm", [
-  "--config.node-linker=hoisted",
+const deploy = pnpmInvocation([
   "--config.inject-workspace-packages=true",
   "--filter",
   "@planweave-ai/server",
@@ -44,6 +51,7 @@ await run("pnpm", [
   "deploy",
   stagingAppRoot
 ]);
+await run(deploy.command, deploy.args);
 await cp(stagingAppRoot, resolve(imageRoot, "app"), { recursive: true, dereference: true });
 await rm(stagingAppRoot, { recursive: true, force: true });
 await assertPortableDirectory(resolve(imageRoot, "app"));

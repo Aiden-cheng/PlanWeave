@@ -82,6 +82,17 @@ describe("desktop release configuration", () => {
     expect(coordinator).toContain(".planweave-workspace-consumer-build.lock");
   });
 
+  it("runs the self-host deploy through the active pnpm CLI without changing node linker mode", async () => {
+    const source = await readFile(
+      resolve(desktopRoot, "scripts/prepare-self-host-server-resource.mjs"),
+      "utf8"
+    );
+    expect(source).toContain("process.env.npm_execpath");
+    expect(source).toContain("process.execPath");
+    expect(source).not.toContain('run("pnpm"');
+    expect(source).not.toContain("--config.node-linker=hoisted");
+  });
+
   it("keeps local pack and dist commands explicitly unsigned", async () => {
     const packageJson = JSON.parse(
       await readFile(resolve(desktopRoot, "package.json"), "utf8")
@@ -576,7 +587,7 @@ process.exit(2);
     expect(workflow).toContain("pnpm test:platform --maxWorkers=2");
     expect(workflow).not.toContain("pnpm test:platform -- --maxWorkers=2");
     expect(workflow).toContain("name: Windows WSL execution-host integration");
-    expect(workflow).toContain("runs-on: windows-2022");
+    expect(workflow).toContain("runs-on: windows-2025");
     expect(workflow).toContain('PLANWEAVE_REQUIRE_WSL_TESTS: "1"');
     expect(workflow).toContain("function Invoke-WslCommand");
     expect(workflow).toContain("$startInfo.UseShellExecute = $false");
@@ -586,9 +597,6 @@ process.exit(2);
     expect(workflow).toContain("$managementEncoding = [Text.Encoding]::Unicode");
     expect(workflow).toContain(
       'Invoke-WslCommand -Arguments @("--set-default-version", "1") -OutputEncoding $managementEncoding'
-    );
-    expect(workflow).toContain(
-      'Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch") -OutputEncoding $managementEncoding'
     );
     expect(workflow).toContain(
       'Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch", "--web-download") -OutputEncoding $managementEncoding'
@@ -603,7 +611,7 @@ process.exit(2);
       'Invoke-WslCommand -Arguments @("--distribution", "Ubuntu", "--exec", "sh", "-lc", $probeScript) -OutputEncoding ([Text.Encoding]::UTF8)'
     );
     expect(workflow).toContain("function Get-WslFailureSummary");
-    expect(workflow).toContain("Initial attempt: $initialInstallFailure Web download retry:");
+    expect(workflow).not.toContain("$initialInstallFailure");
     expect(workflow).not.toContain("cmd.exe /d /u /c");
     expect(workflow).toContain("PLANWEAVE_WSL_CI_SENTINEL");
     expect(workflow).toContain('test "$WSL_DISTRO_NAME" = "Ubuntu"');
@@ -614,7 +622,7 @@ process.exit(2);
       '--testNamePattern="does not import a sentinel Windows credential named by WSLENV"'
     );
     expect(workflow).toContain(
-      'throw "Failed to install the Ubuntu WSL distribution. Initial attempt:'
+      'throw "Failed to install the Ubuntu WSL distribution: $(Get-WslFailureSummary $installUbuntu)"'
     );
     expect(workflow).toContain('throw "Ubuntu WSL execution probe failed:');
     expect(workflow).toContain("name: Windows unsigned packaged smoke");

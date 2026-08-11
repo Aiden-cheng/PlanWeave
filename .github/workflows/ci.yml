@@ -282,7 +282,7 @@ jobs:
 
   windows-wsl-integration:
     name: Windows WSL execution-host integration
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 30
     env:
       PLANWEAVE_REQUIRE_WSL_TESTS: "1"
@@ -342,13 +342,9 @@ jobs:
           if ($installed.ExitCode -ne 0) { throw "Failed to list installed WSL distributions: $(Get-WslFailureSummary $installed)" }
 
           if (-not (($installed.Output -split "\r?\n" | ForEach-Object { $_.Trim() }) -contains "Ubuntu")) {
-            $installUbuntu = Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch") -OutputEncoding $managementEncoding
+            $installUbuntu = Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch", "--web-download") -OutputEncoding $managementEncoding
             if ($installUbuntu.ExitCode -ne 0) {
-              $initialInstallFailure = Get-WslFailureSummary $installUbuntu
-              $installUbuntu = Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch", "--web-download") -OutputEncoding $managementEncoding
-            }
-            if ($installUbuntu.ExitCode -ne 0) {
-              throw "Failed to install the Ubuntu WSL distribution. Initial attempt: $initialInstallFailure Web download retry: $(Get-WslFailureSummary $installUbuntu)"
+              throw "Failed to install the Ubuntu WSL distribution: $(Get-WslFailureSummary $installUbuntu)"
             }
           }
 
