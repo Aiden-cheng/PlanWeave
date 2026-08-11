@@ -15,6 +15,8 @@ import {
   operatorEnrollmentGrantRequestSchema,
   operatorEnrollmentGrantResponseSchema,
   operatorHostPageSchema,
+  operatorHostRenewalRequestSchema,
+  operatorHostRenewalResponseSchema,
   operatorHostViewSchema,
   operatorPageQuerySchema
 } from "@planweave-ai/agent-host-protocol";
@@ -37,6 +39,8 @@ export {
   operatorEnrollmentGrantRequestSchema,
   operatorEnrollmentGrantResponseSchema,
   operatorHostPageSchema,
+  operatorHostRenewalRequestSchema,
+  operatorHostRenewalResponseSchema,
   operatorHostViewSchema,
   operatorPageQuerySchema
 };

@@ -34,7 +34,9 @@ function control(): OperatorControlPort {
   return {
     createEnrollmentGrant: vi.fn(() => ({
       enrollmentCode: "pw_enroll_test",
-      expiresAt: "2030-01-01T00:00:00.000Z"
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     })),
     listHosts: vi.fn(() => ({ items: [], nextCursor: null })),
     listAgentEndpoints: vi.fn(() => ({
@@ -43,6 +45,17 @@ function control(): OperatorControlPort {
     })),
     getHost: vi.fn(),
     revokeHost: vi.fn(),
+    requestHostCredentialRenewal: vi.fn(() => ({
+      id: "host-1",
+      displayName: "Host 1",
+      capabilities: [],
+      capacity: 1,
+      online: true,
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
+      credentialRenewalRequestedAt: "2030-01-01T00:00:00.000Z",
+      availability: { status: "unavailable", reason: "readiness_not_reported" }
+    })),
     dispatch: vi.fn(async (_principal, request) => {
       if ((request as { projectId?: string }).projectId === "project-b") {
         throw new Error("operator_project_forbidden");
@@ -362,6 +375,31 @@ describe("operator HTTP boundary", () => {
     await expect((await fetch(`${fixture.origin}/version`)).json()).resolves.toMatchObject({
       limits: { maxArtifactBytes: 1024, maxWebSocketPayloadBytes: 2048 }
     });
+  });
+
+  it("accepts a strict server-admin request to renew one Host credential", async () => {
+    const fixture = await setup(true);
+    const response = await fetch(`${fixture.origin}/api/v1/hosts/host-1/credential-renewal`, {
+      method: "POST",
+      headers: { ...authorization, "content-type": "application/json" },
+      body: "{}"
+    });
+    expect(response.status).toBe(202);
+    expect(fixture.service.requestHostCredentialRenewal).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorId: "operator-1", serverAdmin: true }),
+      "host-1",
+      {}
+    );
+
+    const malformed = await fetch(
+      `${fixture.origin}/api/v1/hosts/host-1/credential-renewal?unexpected=1`,
+      {
+        method: "POST",
+        headers: { ...authorization, "content-type": "application/json" },
+        body: "{}"
+      }
+    );
+    expect(malformed.status).toBe(400);
   });
 
   it("returns 503 readiness while startup reconciliation is incomplete", async () => {

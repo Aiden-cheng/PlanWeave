@@ -1,29 +1,33 @@
 import {
+  hostCredentialPolicySchema,
   hostCredentialTokenSchema,
   hostReadinessObservationSchema,
   type HostReadinessObservation,
+  type HostCredentialPolicy,
+  type HostCredentialRotationResponse,
   type OperatorHostAvailability
 } from "@planweave-ai/agent-host-protocol";
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  HostCredentialLifecycleRepository,
+  type HostCredentialAuthenticationKind,
+  type HostCredentialRenewalState
+} from "./hostCredentialLifecycleRepository.js";
 import { WorkspaceIdentityRepository } from "./identity/workspaceRepository.js";
+import { HostInstallationRepository } from "./hostInstallationRepository.js";
+import { toAgentHost, type AgentHost, type HostRow } from "./hostRecord.js";
 import { capabilitiesSchema } from "./protocol.js";
 import type { SqliteDatabase } from "./sqlite.js";
 
-export type AgentHost = {
-  id: string;
-  displayName: string;
-  capabilities: string[];
-  capacity: number;
-  lastSeenAt?: string;
-  lastAcknowledgedSequence: number;
-  revokedAt?: string;
-  credentialExpiresAt?: string;
-  readinessObservation?: HostReadinessObservation;
-};
+export type { AgentHost } from "./hostRecord.js";
 
 export type RegisteredAgentHost = {
   host: AgentHost;
   token: string;
+};
+
+export type RegisteredAgentHostGeneration = RegisteredAgentHost & {
+  supersededHostId?: string;
 };
 
 export const DEFAULT_HOST_OFFLINE_AFTER_MS = 60_000;
@@ -68,10 +72,7 @@ export function operatorHostAvailability(
 }
 
 /** Server-scoped fleet readiness without collaboration workspace mapping requirements. */
-export function fleetHostAvailability(
-  host: AgentHost,
-  online: boolean
-): OperatorHostAvailability {
+export function fleetHostAvailability(host: AgentHost, online: boolean): OperatorHostAvailability {
   if (host.revokedAt) return { status: "unavailable", reason: "revoked" };
   if (!online) return { status: "unavailable", reason: "offline" };
   const observation = host.readinessObservation;
@@ -175,48 +176,19 @@ export function isAgentHostOnline(
   );
 }
 
-type HostRow = Record<string, unknown> & {
-  id: string;
-  display_name: string;
-  credential_hash: string;
-  capabilities_json: string;
-  capacity: number;
-  last_seen_at: string | null;
-  last_acknowledged_sequence: number;
-  revoked_at: string | null;
-  credential_expires_at: string | null;
-  readiness_json?: string | null;
-};
-
-function hashToken(token: string): Buffer {
-  return createHash("sha256").update(token).digest();
-}
-
-function toHost(row: HostRow): AgentHost {
-  return {
-    id: row.id,
-    displayName: row.display_name,
-    capabilities: capabilitiesSchema.parse(JSON.parse(row.capabilities_json)),
-    capacity: Number(row.capacity),
-    lastSeenAt: row.last_seen_at ?? undefined,
-    lastAcknowledgedSequence: Number(row.last_acknowledged_sequence),
-    revokedAt: row.revoked_at ?? undefined,
-    credentialExpiresAt: row.credential_expires_at ?? undefined,
-    readinessObservation: row.readiness_json
-      ? hostReadinessObservationSchema.parse(JSON.parse(row.readiness_json))
-      : undefined
-  };
-}
-
 export class AgentHostRepository {
   constructor(
     private readonly database: SqliteDatabase,
     private readonly clock: () => Date = () => new Date()
   ) {
     this.workspaceIdentity = new WorkspaceIdentityRepository(database);
+    this.credentials = new HostCredentialLifecycleRepository(database, clock);
+    this.installations = new HostInstallationRepository(database);
   }
 
   private readonly workspaceIdentity: WorkspaceIdentityRepository;
+  private readonly credentials: HostCredentialLifecycleRepository;
+  private readonly installations: HostInstallationRepository;
 
   private syncWorkspaceHost(hostId: string): void {
     this.workspaceIdentity.synchronizeHost(hostId);
@@ -245,41 +217,107 @@ export class AgentHostRepository {
     token: string,
     capabilities: readonly string[],
     capacity: number,
-    credentialExpiresAt?: string
+    credentialExpiresAt?: string,
+    credentialPolicy?: HostCredentialPolicy
   ): RegisteredAgentHost {
-    const parsedToken = hostCredentialTokenSchema.parse(token);
-    const parsedCapabilities = capabilitiesSchema.parse(capabilities);
-    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 128) {
+    return this.insertWithCredential({
+      id: randomUUID(),
+      displayName,
+      token,
+      capabilities,
+      capacity,
+      credentialExpiresAt,
+      credentialPolicy
+    });
+  }
+
+  /** Register a fresh execution identity while retiring the prior generation of one installation. */
+  registerInstallationGeneration(input: {
+    installationId: string;
+    supersedesHostId?: string;
+    displayName: string;
+    token: string;
+    capabilities: readonly string[];
+    capacity: number;
+    credentialExpiresAt: string;
+    credentialPolicy: HostCredentialPolicy;
+  }): RegisteredAgentHostGeneration {
+    const nextHostId = randomUUID();
+    const transition = this.installations.replaceCurrentGenerationInCallerTransaction({
+      installationId: input.installationId,
+      supersedesHostId: input.supersedesHostId,
+      nextHostId,
+      supersededAt: this.clock().toISOString()
+    });
+    if (transition.supersededHostId) this.syncWorkspaceHost(transition.supersededHostId);
+
+    const registered = this.insertWithCredential({
+      id: nextHostId,
+      installationId: transition.installationId,
+      displayName: input.displayName,
+      token: input.token,
+      capabilities: input.capabilities,
+      capacity: input.capacity,
+      credentialExpiresAt: input.credentialExpiresAt,
+      credentialPolicy: input.credentialPolicy
+    });
+    return {
+      ...registered,
+      ...(transition.supersededHostId ? { supersededHostId: transition.supersededHostId } : {})
+    };
+  }
+
+  private insertWithCredential(input: {
+    id: string;
+    installationId?: string;
+    displayName: string;
+    token: string;
+    capabilities: readonly string[];
+    capacity: number;
+    credentialExpiresAt?: string;
+    credentialPolicy?: HostCredentialPolicy;
+  }): RegisteredAgentHost {
+    const parsedToken = hostCredentialTokenSchema.parse(input.token);
+    const parsedCapabilities = capabilitiesSchema.parse(input.capabilities);
+    const parsedPolicy =
+      input.credentialPolicy === undefined
+        ? undefined
+        : hostCredentialPolicySchema.parse(input.credentialPolicy);
+    if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 128) {
       throw new Error("agent_host_capacity_invalid");
     }
     if (
-      credentialExpiresAt !== undefined &&
-      (!Number.isFinite(Date.parse(credentialExpiresAt)) ||
-        Date.parse(credentialExpiresAt) <= this.clock().getTime())
+      input.credentialExpiresAt !== undefined &&
+      (!Number.isFinite(Date.parse(input.credentialExpiresAt)) ||
+        Date.parse(input.credentialExpiresAt) <= this.clock().getTime())
     ) {
       throw new Error("agent_host_credential_expiry_invalid");
     }
-    const normalizedName = displayName.trim();
+    const normalizedName = input.displayName.trim();
     if (!normalizedName || normalizedName.length > 128) {
       throw new Error("Host display name must contain between 1 and 128 characters.");
     }
-    const id = randomUUID();
     const createdAt = this.clock().toISOString();
     this.database
       .prepare(
-        "INSERT INTO agent_hosts(id,display_name,credential_hash,capabilities_json,capacity,credential_expires_at,created_at) VALUES (?,?,?,?,?,?,?)"
+        `INSERT INTO agent_hosts(
+           id,display_name,credential_hash,capabilities_json,capacity,credential_expires_at,
+           credential_lifetime_days,installation_id,created_at
+         ) VALUES (?,?,?,?,?,?,?,?,?)`
       )
       .run(
-        id,
+        input.id,
         normalizedName,
-        hashToken(parsedToken).toString("hex"),
+        createHash("sha256").update(parsedToken).digest("hex"),
         JSON.stringify(parsedCapabilities),
-        capacity,
-        credentialExpiresAt ?? null,
+        input.capacity,
+        input.credentialExpiresAt ?? null,
+        parsedPolicy?.lifetimeDays ?? null,
+        input.installationId ?? null,
         createdAt
       );
-    const host = this.getRequired(id);
-    this.syncWorkspaceHost(id);
+    const host = this.getRequired(input.id);
+    this.syncWorkspaceHost(input.id);
     return { host, token: parsedToken };
   }
 
@@ -287,7 +325,7 @@ export class AgentHostRepository {
     const row = this.database.prepare("SELECT * FROM agent_hosts WHERE id=?").get(hostId) as
       | HostRow
       | undefined;
-    return row ? toHost(row) : undefined;
+    return row ? toAgentHost(row) : undefined;
   }
 
   getRequired(hostId: string): AgentHost {
@@ -305,9 +343,12 @@ export class AgentHostRepository {
     }
     return (
       this.database
-        .prepare("SELECT * FROM agent_hosts ORDER BY display_name,id LIMIT ? OFFSET ?")
+        .prepare(
+          `SELECT * FROM agent_hosts WHERE superseded_at IS NULL
+           ORDER BY display_name,id LIMIT ? OFFSET ?`
+        )
         .all(limit, offset) as HostRow[]
-    ).map(toHost);
+    ).map(toAgentHost);
   }
 
   /**
@@ -328,12 +369,13 @@ export class AgentHostRepository {
         .prepare(
           `SELECT * FROM agent_hosts
            WHERE revoked_at IS NULL
+             AND superseded_at IS NULL
              AND (credential_expires_at IS NULL OR credential_expires_at > ?)
            ORDER BY created_at ASC, id ASC
            LIMIT ? OFFSET ?`
         )
         .all(nowIso, limit, offset) as HostRow[]
-    ).map(toHost);
+    ).map(toAgentHost);
   }
 
   /**
@@ -352,28 +394,44 @@ export class AgentHostRepository {
              GROUP BY host_id
              HAVING COUNT(*)=1
            ) binding ON binding.host_id=h.id
-           WHERE binding.workspace_id=?
+           WHERE binding.workspace_id=? AND h.superseded_at IS NULL
            ORDER BY h.display_name,h.id`
         )
         .all(workspaceId) as HostRow[]
-    ).map(toHost);
+    ).map(toAgentHost);
+  }
+
+  authenticateCredential(
+    hostId: string,
+    token: string,
+    workspaceId?: string
+  ): { host: AgentHost; kind: HostCredentialAuthenticationKind } | undefined {
+    const kind = this.credentials.authenticate(hostId, token);
+    if (!kind) return undefined;
+    if (!this.workspaceIdentity.hostUsable(hostId, this.clock(), workspaceId)) return undefined;
+    if (kind === "promoted") this.syncWorkspaceHost(hostId);
+    return { host: this.getRequired(hostId), kind };
   }
 
   authenticate(hostId: string, token: string, workspaceId?: string): AgentHost | undefined {
-    const row = this.database.prepare("SELECT * FROM agent_hosts WHERE id=?").get(hostId) as
-      | HostRow
-      | undefined;
-    if (
-      !row ||
-      row.revoked_at ||
-      (row.credential_expires_at && Date.parse(row.credential_expires_at) <= this.clock().getTime())
-    )
-      return undefined;
-    if (!this.workspaceIdentity.hostUsable(hostId, this.clock(), workspaceId)) return undefined;
-    const expected = Buffer.from(row.credential_hash, "hex");
-    const actual = hashToken(token);
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return undefined;
-    return toHost(row);
+    return this.authenticateCredential(hostId, token, workspaceId)?.host;
+  }
+
+  credentialRenewalState(hostId: string): HostCredentialRenewalState {
+    return this.credentials.renewalState(hostId);
+  }
+
+  requestCredentialRenewal(hostId: string): AgentHost {
+    this.credentials.requestRenewal(hostId);
+    return this.getRequired(hostId);
+  }
+
+  registerCredentialRotation(
+    hostId: string,
+    rotationId: string,
+    nextCredentialToken: string
+  ): HostCredentialRotationResponse {
+    return this.credentials.registerRotation(hostId, rotationId, nextCredentialToken);
   }
 
   reportOnline(
@@ -452,7 +510,7 @@ export class AgentHostRepository {
       HostRow & { active_dispatches: number }
     >;
     return rows
-      .map((row) => ({ ...toHost(row), activeDispatches: Number(row.active_dispatches) }))
+      .map((row) => ({ ...toAgentHost(row), activeDispatches: Number(row.active_dispatches) }))
       .filter(
         (host) =>
           host.activeDispatches < host.capacity &&

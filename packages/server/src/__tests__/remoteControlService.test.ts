@@ -203,6 +203,43 @@ describe("RemoteControlService owner fleet control plane", () => {
     return run();
   });
 
+  it("lets only a server admin request immediate renewal for a renewable fleet Host", async () => {
+    const fixture = await setup();
+    const registration = fixture.coordination.hosts.registerWithCredential(
+      "Renewable Fleet Host",
+      `pw_host_${"H".repeat(43)}`,
+      ["acp.codex"],
+      1,
+      "2027-02-01T00:00:00.000Z",
+      { lifetimeDays: 180, renewal: "automatic" }
+    );
+
+    const requested = fixture.service.requestHostCredentialRenewal(
+      fixture.principal,
+      registration.host.id,
+      {}
+    );
+    expect(requested).toMatchObject({
+      id: registration.host.id,
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
+      credentialRenewalRequestedAt: now.toISOString()
+    });
+
+    const forbidden = await fetch(
+      `${fixture.origin}/api/v1/hosts/${registration.host.id}/credential-renewal`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${memberToken}`,
+          "content-type": "application/json"
+        },
+        body: "{}"
+      }
+    );
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toEqual({ error: "operator_admin_required" });
+  });
+
   it("lists server-scoped agent endpoints without projectId and keeps project-scoped compat", () => {
     const run = async () => {
       const fixture = await setup();

@@ -218,8 +218,8 @@ describe("distributed server composition Stage H contracts", () => {
       method: "POST",
       headers: jsonHeaders(adminToken),
       body: JSON.stringify({
-        expiresAt: "2030-01-01T00:00:00.000Z",
-        credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+        expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     });
     expect(enrollment.status).toBe(201);

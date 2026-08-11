@@ -18,6 +18,7 @@ import { handleCommentActivityHttpRequest } from "./comments/index.js";
 import type { CommentService } from "./comments/service.js";
 import type { DispatchService } from "./dispatches.js";
 import { handleHostEnrollmentRequest } from "./hostEnrollmentHttp.js";
+import { handleHostCredentialRenewalRequest } from "./hostCredentialRenewalHttp.js";
 import type { HostEnrollmentService } from "./hostEnrollment.js";
 import { handleHumanRemoteHttpRequest } from "./humanRemoteHttp.js";
 import type { HumanRemoteControlService } from "./humanRemoteControlService.js";
@@ -104,6 +105,7 @@ function requiresAdmission(request: IncomingMessage): boolean {
   const pathname = new URL(request.url ?? "/", "http://planweave.invalid").pathname;
   return (
     pathname === "/agent-hosts/enrollments/exchange" ||
+    /^\/agent-hosts\/[^/]+\/credential-renewal$/.test(pathname) ||
     pathname === "/api/v1/host-enrollments" ||
     pathname === "/api/v1/setup-codes/redeem" ||
     (pathname.startsWith("/api/v1/workspaces/") && pathname.includes("/setup-codes")) ||
@@ -221,6 +223,14 @@ export function createDistributedHttpRequestListener(
           repository: options.humanIdentity,
           workspaceIdentity: options.workspaceIdentity,
           projectAuthority: options.projectAuthority,
+          transportAdmission: options.transportAdmission,
+          clock: options.clock
+        })
+      )
+        return;
+      if (
+        await handleHostCredentialRenewalRequest(request, response, {
+          hosts: options.hosts,
           transportAdmission: options.transportAdmission,
           clock: options.clock
         })

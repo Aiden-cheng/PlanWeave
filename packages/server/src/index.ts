@@ -1,6 +1,10 @@
 export { ArtifactStore, type ArtifactMetadata } from "./artifacts.js";
 export { artifactMediaTypeSchema } from "./artifactMediaType.js";
 export {
+  handleHostCredentialRenewalRequest,
+  type HostCredentialRenewalHttpOptions
+} from "./hostCredentialRenewalHttp.js";
+export {
   HumanRemoteControlError,
   HumanRemoteControlService,
   type HumanRemoteControlServiceOptions

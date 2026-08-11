@@ -338,7 +338,7 @@ describe("setup code issue/redeem/revoke", () => {
     const grant = enrollments.createGrant({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     expect(grant.enrollmentCode).toMatch(/^pw_enroll_/);
   });
@@ -576,7 +576,7 @@ describe("setup code issue/redeem/revoke", () => {
     const grant = enrollments.createGrant({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     applyMigrations(database);
     const row = database

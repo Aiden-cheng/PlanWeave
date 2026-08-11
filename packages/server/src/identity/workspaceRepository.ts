@@ -389,10 +389,12 @@ export class WorkspaceIdentityRepository {
     this.assertReadCutover(parsedWorkspaceId);
     const rows = this.database
       .prepare(
-        `SELECT workspace_id,host_id,display_name,capabilities_json,capacity,last_seen_at,
-                credential_expires_at,revoked_at
-         FROM workspace_agent_hosts
-         WHERE workspace_id=? ORDER BY display_name,host_id LIMIT ? OFFSET ?`
+        `SELECT wh.workspace_id,wh.host_id,wh.display_name,wh.capabilities_json,wh.capacity,
+                wh.last_seen_at,wh.credential_expires_at,wh.revoked_at
+         FROM workspace_agent_hosts wh
+         JOIN agent_hosts h ON h.id=wh.host_id
+         WHERE wh.workspace_id=? AND h.superseded_at IS NULL
+         ORDER BY wh.display_name,wh.host_id LIMIT ? OFFSET ?`
       )
       .all(parsedWorkspaceId, limit, offset) as Array<{
       workspace_id: string;

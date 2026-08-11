@@ -46,6 +46,11 @@ export type OperatorControlPort = {
   listAgentEndpoints(principal: OperatorPrincipal, query: unknown): unknown;
   getHost(principal: OperatorPrincipal, hostId: string): unknown;
   revokeHost(principal: OperatorPrincipal, hostId: string): unknown;
+  requestHostCredentialRenewal(
+    principal: OperatorPrincipal,
+    hostId: string,
+    request: unknown
+  ): unknown;
   dispatch(principal: OperatorPrincipal, request: unknown): Promise<unknown>;
   observeOperation(principal: OperatorPrincipal, operationId: string): Promise<unknown>;
   executeAction(
@@ -69,7 +74,7 @@ type OperatorRoute =
   | { kind: "create_enrollment" }
   | { kind: "list_hosts" }
   | { kind: "list_agent_endpoints" }
-  | { kind: "get_host" | "revoke_host"; hostId: string }
+  | { kind: "get_host" | "revoke_host" | "renew_host_credential"; hostId: string }
   | { kind: "dispatch" }
   | {
       kind: "get_operation" | "action" | "events" | "interactions" | "settle_interaction";
@@ -100,12 +105,17 @@ function route(request: IncomingMessage, pathname: string): OperatorRoute | unde
   if (request.method === "POST" && pathname === "/api/v1/remote-operations") {
     return { kind: "dispatch" };
   }
-  const host = /^\/api\/v1\/hosts\/([^/]+)(\/revoke)?$/.exec(pathname);
+  const host = /^\/api\/v1\/hosts\/([^/]+)(\/(?:revoke|credential-renewal))?$/.exec(pathname);
   if (host) {
     const hostId = decodeIdentifier(host[1]);
     if (!hostId) return undefined;
     if (request.method === "GET" && !host[2]) return { kind: "get_host", hostId };
-    if (request.method === "POST" && host[2]) return { kind: "revoke_host", hostId };
+    if (request.method === "POST" && host[2] === "/revoke") {
+      return { kind: "revoke_host", hostId };
+    }
+    if (request.method === "POST" && host[2] === "/credential-renewal") {
+      return { kind: "renew_host_credential", hostId };
+    }
   }
   const operation =
     /^\/api\/v1\/remote-operations\/([^/]+)(?:\/(actions|events|interactions)(\/respond)?)?$/.exec(
@@ -355,6 +365,18 @@ export async function handleOperatorHttpRequest(
       case "revoke_host":
         query(url, []);
         respond(response, 200, options.service.revokeHost(principal, matched.hostId));
+        break;
+      case "renew_host_credential":
+        query(url, []);
+        respond(
+          response,
+          202,
+          options.service.requestHostCredentialRenewal(
+            principal,
+            matched.hostId,
+            await readJson(request)
+          )
+        );
         break;
       case "dispatch":
         query(url, []);

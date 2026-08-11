@@ -427,7 +427,7 @@ export async function runRemoteVpsScenario(options: {
         },
         body: JSON.stringify({
           expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
-          credentialExpiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString()
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         })
       });
       if (grantResponse.status !== 201) {

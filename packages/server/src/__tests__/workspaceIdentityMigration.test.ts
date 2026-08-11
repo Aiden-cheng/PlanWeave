@@ -370,8 +370,8 @@ describe("workspace identity migration recovery", () => {
     const enrollmentService = new HostEnrollmentService(database, identityClock);
     const enrollment = enrollmentService.createGrant({
       workspaceId,
-      expiresAt: new Date("2030-01-01T00:00:00.000Z"),
-      credentialExpiresAt: new Date("2030-01-02T00:00:00.000Z")
+      expiresAt: new Date("2026-07-27T00:15:00.000Z"),
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     const operatorToken = `pw_operator_${"R".repeat(43)}`;
     const operatorSessions = new OperatorSessionStore(database, identityClock);

@@ -7,6 +7,7 @@ import {
   operatorEventReplaySchema,
   operatorHostViewSchema,
   operatorHostPageSchema,
+  operatorHostRenewalRequestSchema,
   operatorInteractionPageSchema,
   operatorInteractionResponseSchema,
   operatorInteractionViewSchema,
@@ -86,7 +87,7 @@ export class RemoteControlService {
       this.options.enrollments.createGrant({
         ...(workspaceId === undefined ? {} : { workspaceId }),
         expiresAt: new Date(request.expiresAt),
-        credentialExpiresAt: new Date(request.credentialExpiresAt)
+        credentialPolicy: request.credentialPolicy
       })
     );
   }
@@ -146,6 +147,16 @@ export class RemoteControlService {
     this.options.hosts.revoke(hostId);
     this.options.disconnectHost(hostId);
     return this.toOperatorHostView(this.options.hosts.getRequired(hostId), workspaceId);
+  }
+
+  requestHostCredentialRenewal(principal: OperatorPrincipal, hostId: string, rawRequest: unknown) {
+    this.options.authorization.requireServerAdmin(principal);
+    operatorHostRenewalRequestSchema.parse(rawRequest);
+    const workspaceId = this.authorizeHostAccess(principal, hostId);
+    return this.toOperatorHostView(
+      this.options.hosts.requestCredentialRenewal(hostId),
+      workspaceId
+    );
   }
 
   async dispatch(principal: OperatorPrincipal, rawRequest: unknown) {
@@ -359,6 +370,8 @@ function toOperatorHostView(
     lastSeenAt: host.lastSeenAt,
     revokedAt: host.revokedAt,
     credentialExpiresAt: host.credentialExpiresAt,
+    credentialPolicy: host.credentialPolicy,
+    credentialRenewalRequestedAt: host.credentialRenewalRequestedAt,
     readinessObservation: host.readinessObservation,
     availability
   });

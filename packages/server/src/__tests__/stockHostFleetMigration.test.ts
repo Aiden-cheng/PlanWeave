@@ -30,13 +30,13 @@ async function openMigratedDatabase(): Promise<SqliteDatabase> {
 async function openDatabaseBeforeStockHostFleetMigration(): Promise<SqliteDatabase> {
   const database = await openMigratedDatabase();
   database.prepare("DELETE FROM schema_migrations WHERE version=46").run();
-  expect(centralSchemaVersion(database)).toBe(45);
+  expect(centralSchemaVersion(database)).toBe(48);
   return database;
 }
 
 describe("stock host fleet migration v46", () => {
   it("registers as latest schema version", () => {
-    expect(latestCentralSchemaVersion).toBe(46);
+    expect(latestCentralSchemaVersion).toBe(48);
   });
 
   it("preserves legacy exclusive workspace bindings and lifts hosts to server-scoped usability", async () => {
@@ -47,7 +47,7 @@ describe("stock host fleet migration v46", () => {
     const grant = enrollment.createGrant({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     const credentialToken = token();
     const completed = enrollment.exchange({
@@ -55,6 +55,7 @@ describe("stock host fleet migration v46", () => {
       protocolVersion: 1,
       enrollmentCode: grant.enrollmentCode,
       enrollmentAttemptId: "stock-host-fleet-migration",
+      installationId: "2c15f707-d76c-4d85-8af5-8635792d65b1",
       credentialToken,
       displayName: "Legacy Bound Host",
       capabilities: ["linux"],
@@ -73,7 +74,7 @@ describe("stock host fleet migration v46", () => {
     expect(identity.hostUsable(hostId, new Date(), workspaceId)).toBe(true);
 
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(46);
+    expect(centralSchemaVersion(database)).toBe(48);
 
     expect(
       database
@@ -90,7 +91,7 @@ describe("stock host fleet migration v46", () => {
     expect(hosts.getRequired(hostId).capabilities).toEqual(["linux"]);
 
     applyMigrations(database);
-    expect(centralSchemaVersion(database)).toBe(46);
+    expect(centralSchemaVersion(database)).toBe(48);
     expect(
       database.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version=46").get()
     ).toEqual({ count: 1 });

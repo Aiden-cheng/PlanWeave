@@ -366,7 +366,9 @@ export async function createDistributedServerComposition(
     const { coordination, server } = lifecycle;
     const schemaVersion = server.readiness().schemaVersion;
     readiness.transition("reconciling", schemaVersion);
-    const enrollments = new HostEnrollmentService(server.database, clock);
+    const enrollments = new HostEnrollmentService(server.database, clock, (hostId) =>
+      webSockets?.disconnectHost(hostId)
+    );
     const setupCodes = new SetupCodeService({
       database: server.database,
       serverBaseUrl: config.transport.advertisedOrigin.endsWith("/")

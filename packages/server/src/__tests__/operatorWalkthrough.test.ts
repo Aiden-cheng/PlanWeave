@@ -265,14 +265,13 @@ describe("remote operator walkthrough", () => {
     });
 
     const enrollmentExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-    const credentialExpiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
     const grantResponse = await fetch(`${origin}/api/v1/host-enrollments`, {
       method: "POST",
       headers: { ...authorization, "content-type": "application/json" },
       body: JSON.stringify({
         workspaceId: legacyWorkspaceIdForProject(workspace.init.workspace.id),
         expiresAt: enrollmentExpiresAt,
-        credentialExpiresAt
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     });
     expect(grantResponse.status).toBe(201);

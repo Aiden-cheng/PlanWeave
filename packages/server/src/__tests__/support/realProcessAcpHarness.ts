@@ -829,7 +829,6 @@ export class RealProcessAcpHarness {
   async enrollHost(): Promise<void> {
     if (this.disposed) throw new Error("real_process_harness_disposed");
     const enrollmentExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-    const credentialExpiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
     const grantResponse = await fetch(`${this.origin}/api/v1/host-enrollments`, {
       method: "POST",
       headers: {
@@ -839,7 +838,7 @@ export class RealProcessAcpHarness {
       body: JSON.stringify({
         workspaceId: legacyWorkspaceIdForProject(this.projectId),
         expiresAt: enrollmentExpiresAt,
-        credentialExpiresAt
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     });
     if (grantResponse.status !== 201) {
@@ -974,7 +973,6 @@ export class RealProcessAcpHarness {
     this.secondaryHosts.set(key, { handle, child: undefined, enrolled: false });
 
     const enrollmentExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-    const credentialExpiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
     const grantResponse = await fetch(`${this.origin}/api/v1/host-enrollments`, {
       method: "POST",
       headers: {
@@ -984,7 +982,7 @@ export class RealProcessAcpHarness {
       body: JSON.stringify({
         workspaceId: legacyWorkspaceIdForProject(this.projectId),
         expiresAt: enrollmentExpiresAt,
-        credentialExpiresAt
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     });
     if (grantResponse.status !== 201) {

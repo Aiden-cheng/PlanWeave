@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   directHttpsTransportAdmission,
   loopbackHttpTransportAdmission
@@ -55,6 +55,7 @@ function request(
     protocolVersion: 1,
     enrollmentCode,
     enrollmentAttemptId,
+    installationId: randomUUID(),
     credentialToken,
     displayName: "Linux Build Host",
     capabilities: ["linux", "workspace.git"],
@@ -75,7 +76,7 @@ describe("Agent Host enrollment", () => {
     const service = new HostEnrollmentService(store.database);
     const grant = service.createGrant({
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     expect(grant.workspaceId).toBeUndefined();
     expect(grant.enrollmentCode).toMatch(/^pw_enroll_/);
@@ -90,7 +91,7 @@ describe("Agent Host enrollment", () => {
     const service = new HostEnrollmentService(store.database);
     const grant = service.createGrant({
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     const credentialToken = token();
     const input = request(grant.enrollmentCode, credentialToken);
@@ -118,6 +119,83 @@ describe("Agent Host enrollment", () => {
     expect(persisted).not.toContain(credentialToken);
   });
 
+  it("registers one visible generation per stable installation and retires the prior Host", async () => {
+    const store = await setup();
+    const superseded: string[] = [];
+    const service = new HostEnrollmentService(
+      store.database,
+      () => new Date(),
+      (hostId) => superseded.push(hostId)
+    );
+    const installationId = randomUUID();
+    const firstGrant = service.createGrant({
+      expiresAt: new Date(Date.now() + 60_000),
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+    });
+    const firstToken = token();
+    const firstRequest = {
+      ...request(firstGrant.enrollmentCode, firstToken, "attempt-generation-one"),
+      installationId
+    };
+    const first = service.exchange(firstRequest);
+
+    const secondGrant = service.createGrant({
+      expiresAt: new Date(Date.now() + 60_000),
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+    });
+    const secondToken = token();
+    const secondRequest = {
+      ...request(secondGrant.enrollmentCode, secondToken, "attempt-generation-two"),
+      installationId,
+      supersedesHostId: first.hostId
+    };
+    const second = service.exchange(secondRequest);
+    expect(service.exchange(secondRequest)).toEqual(second);
+
+    const hosts = new AgentHostRepository(store.database);
+    expect(second.hostId).not.toBe(first.hostId);
+    expect(hosts.authenticate(first.hostId, firstToken)).toBeUndefined();
+    expect(hosts.authenticate(second.hostId, secondToken)?.id).toBe(second.hostId);
+    expect(hosts.list().map((host) => host.id)).toEqual([second.hostId]);
+    expect(superseded).toEqual([first.hostId]);
+    expect(
+      store.database
+        .prepare(
+          "SELECT installation_id,superseded_at,superseded_by_host_id FROM agent_hosts WHERE id=?"
+        )
+        .get(first.hostId)
+    ).toEqual({
+      installation_id: installationId,
+      superseded_at: expect.any(String),
+      superseded_by_host_id: second.hostId
+    });
+  });
+
+  it("rejects a stale Host generation that conflicts with the current installation", async () => {
+    const store = await setup();
+    const service = new HostEnrollmentService(store.database);
+    const installationId = randomUUID();
+    const firstGrant = service.createGrant({
+      expiresAt: new Date(Date.now() + 60_000),
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+    });
+    service.exchange({
+      ...request(firstGrant.enrollmentCode, token(), "attempt-current-generation"),
+      installationId
+    });
+    const conflictingGrant = service.createGrant({
+      expiresAt: new Date(Date.now() + 60_000),
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+    });
+    expect(() =>
+      service.exchange({
+        ...request(conflictingGrant.enrollmentCode, token(), "attempt-stale-generation"),
+        installationId,
+        supersedesHostId: "host-that-is-not-current"
+      })
+    ).toThrow("Agent Host enrollment was rejected.");
+  });
+
   it("exchanges once with legacy workspace binding when grant is workspace-scoped", async () => {
     const store = await setup();
     const workspaceId = new WorkspaceIdentityRepository(
@@ -127,7 +205,7 @@ describe("Agent Host enrollment", () => {
     const grant = service.createGrant({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     const credentialToken = token();
     const input = request(grant.enrollmentCode, credentialToken);
@@ -213,7 +291,7 @@ describe("Agent Host enrollment", () => {
     const service = new HostEnrollmentService(store.database);
     const grant = service.createGrant({
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     const credentialToken = token();
     const input = request(grant.enrollmentCode, credentialToken);
@@ -238,7 +316,7 @@ describe("Agent Host enrollment", () => {
       service.createGrant({
         workspaceId,
         expiresAt: new Date(Date.now() + 60_000),
-        credentialExpiresAt: new Date(Date.now() + 3_600_000)
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       });
     const used = create();
     const input = request(used.enrollmentCode);
@@ -271,7 +349,7 @@ describe("Agent Host enrollment", () => {
     const grant = service.createGrant({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     const server = createServer();
     servers.push(server);
@@ -325,7 +403,7 @@ describe("Agent Host enrollment", () => {
     const revokedGrant = service.createGrant({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     service.revokeGrant(revokedGrant.enrollmentCode);
     const revoked = await fetch(endpoint, {
@@ -339,7 +417,7 @@ describe("Agent Host enrollment", () => {
     const expiredGrant = service.createGrant({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000)
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     });
     store.database
       .prepare("UPDATE agent_host_enrollment_grants SET expires_at=? WHERE expires_at=?")

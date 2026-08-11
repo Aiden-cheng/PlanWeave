@@ -19,6 +19,8 @@ import { exposureLeaseMigration } from "./exposure.js";
 import { endpointSelectionMigration } from "./endpointSelection.js";
 import { remoteAttemptCancellationMigration } from "./remoteAttemptCancellation.js";
 import { stockHostFleetMigration } from "./stockHostFleet.js";
+import { hostCredentialLifecycleMigration } from "./hostCredentialLifecycle.js";
+import { hostInstallationIdentityMigration } from "./hostInstallationIdentity.js";
 import type { Migration, MigrationModule } from "./types.js";
 
 const identityModule: MigrationModule = { name: "identity", migrations: identityMigrations };
@@ -50,7 +52,9 @@ export const migrationModules: readonly MigrationModule[] = [
   { name: "server-exposure", migrations: [exposureLeaseMigration] },
   { name: "endpoint-selection", migrations: [endpointSelectionMigration] },
   { name: "remote-attempt-cancellation", migrations: [remoteAttemptCancellationMigration] },
-  { name: "stock-host-fleet", migrations: [stockHostFleetMigration] }
+  { name: "stock-host-fleet", migrations: [stockHostFleetMigration] },
+  { name: "host-credential-lifecycle", migrations: [hostCredentialLifecycleMigration] },
+  { name: "host-installation-identity", migrations: [hostInstallationIdentityMigration] }
 ];
 
 const flattened = migrationModules.flatMap((module) => module.migrations);

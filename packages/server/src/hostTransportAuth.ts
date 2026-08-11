@@ -1,13 +1,14 @@
 import type { IncomingMessage } from "node:http";
 import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
 import { AgentHostRepository, type AgentHost } from "./hosts.js";
+import type { HostCredentialAuthenticationKind } from "./hostCredentialLifecycleRepository.js";
 import {
   humanNetworkTransportAllowed,
   type TransportAdmissionPolicy
 } from "./insecureTransport.js";
 
 export type HostTransportAuthentication =
-  | { ok: true; host: AgentHost }
+  | { ok: true; host: AgentHost; credentialKind: HostCredentialAuthenticationKind }
   | {
       ok: false;
       status: 401 | 403 | 426;
@@ -56,11 +57,7 @@ export function authenticateAgentHostRequest(
     return { ok: false, status: 426, message: "Upgrade Required" };
   }
   const requestedWorkspaceId = workspaceScope(request);
-  if (
-    requestedWorkspaceId &&
-    expectedWorkspaceId &&
-    requestedWorkspaceId !== expectedWorkspaceId
-  ) {
+  if (requestedWorkspaceId && expectedWorkspaceId && requestedWorkspaceId !== expectedWorkspaceId) {
     return { ok: false, status: 403, message: "Forbidden" };
   }
   if (hasWorkspaceScopeParameter(request) && !requestedWorkspaceId) {
@@ -71,14 +68,24 @@ export function authenticateAgentHostRequest(
 
   const workspaceId = requestedWorkspaceId ?? expectedWorkspaceId;
   if (workspaceId) {
-    const host = hosts.authenticate(hostId, token);
-    const scopedHost = host ? hosts.authenticate(hostId, token, workspaceId) : undefined;
-    if (scopedHost) return { ok: true, host: scopedHost };
-    return host
+    const authentication = hosts.authenticateCredential(hostId, token);
+    const scopedAuthentication = authentication
+      ? hosts.authenticateCredential(hostId, token, workspaceId)
+      : undefined;
+    if (scopedAuthentication) {
+      return {
+        ok: true,
+        host: scopedAuthentication.host,
+        credentialKind: scopedAuthentication.kind
+      };
+    }
+    return authentication
       ? { ok: false, status: 401, message: "Unauthorized", reason: "workspace_mismatch" }
       : { ok: false, status: 401, message: "Unauthorized" };
   }
 
-  const host = hosts.authenticate(hostId, token);
-  return host ? { ok: true, host } : { ok: false, status: 401, message: "Unauthorized" };
+  const authentication = hosts.authenticateCredential(hostId, token);
+  return authentication
+    ? { ok: true, host: authentication.host, credentialKind: authentication.kind }
+    : { ok: false, status: 401, message: "Unauthorized" };
 }
