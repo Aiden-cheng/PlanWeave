@@ -389,6 +389,15 @@ jobs:
         timeout-minutes: 10
         run: pnpm exec vitest run packages/runtime/src/__tests__/executorEnvironment.test.ts --config vitest.integration-core.config.ts --testNamePattern="cancels a WSL execution and finalizes executor lifecycle"
 
+      - name: Stop Ubuntu WSL
+        if: always()
+        shell: pwsh
+        run: |
+          wsl.exe --terminate Ubuntu
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to stop the Ubuntu WSL distribution."
+          }
+
   windows-packaged-smoke:
     name: Windows unsigned packaged smoke
     runs-on: windows-latest
