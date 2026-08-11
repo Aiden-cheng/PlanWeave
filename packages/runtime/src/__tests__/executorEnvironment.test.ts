@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -42,27 +41,29 @@ function readWslLifecyclePids(output: string): { parentPid: number; childPid: nu
 }
 
 async function waitForWslLifecyclePids(
-  distribution: string,
   statePath: string
 ): Promise<{ parentPid: number; childPid: number }> {
   const deadline = Date.now() + WSL_LIFECYCLE_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const pids = readWslLifecyclePids(await readWslTextFile(distribution, statePath));
-    if (pids) {
-      return pids;
+    try {
+      const pids = readWslLifecyclePids(await readFile(statePath, "utf8"));
+      if (pids) {
+        return pids;
+      }
+    } catch {
+      // The WSL process has not written this readiness marker yet.
     }
     await sleep(25);
   }
-  throw new Error("Timed out waiting for WSL lifecycle process markers on stdout.");
+  throw new Error(`Timed out waiting for WSL lifecycle process markers: ${statePath}`);
 }
 
 async function waitForWslLifecyclePidsWhileRunning(
-  distribution: string,
   statePath: string,
   running: Promise<unknown>
 ): Promise<{ parentPid: number; childPid: number }> {
   return Promise.race([
-    waitForWslLifecyclePids(distribution, statePath),
+    waitForWslLifecyclePids(statePath),
     running.then(
       () => {
         throw new Error("WSL process exited before reporting its lifecycle process markers.");
@@ -72,27 +73,6 @@ async function waitForWslLifecyclePidsWhileRunning(
       }
     )
   ]);
-}
-
-function readWslTextFile(distribution: string, path: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "wsl.exe",
-      ["--distribution", distribution, "--exec", "cat", "--", path],
-      { encoding: "utf8", windowsHide: true, timeout: WSL_LIFECYCLE_TIMEOUT_MS },
-      (error, stdout) => {
-        if (!error) {
-          resolve(String(stdout).replaceAll("\0", ""));
-          return;
-        }
-        if (typeof error.code === "number") {
-          resolve("");
-          return;
-        }
-        reject(error);
-      }
-    );
-  });
 }
 
 async function waitForFile(
@@ -299,9 +279,8 @@ describe("executor environment", () => {
       }
 
       const runDir = await mkdtemp(join(homedir(), ".planweave-wsl-lifecycle-"));
-      const stateToken = randomUUID();
-      const statePath = `/tmp/planweave-lifecycle-${stateToken}.state`;
-      const childPidPath = `/tmp/planweave-lifecycle-${stateToken}.child`;
+      const statePath = join(runDir, "lifecycle.state");
+      const childPidPath = join(runDir, "child.pid");
       const stdoutPath = join(runDir, "stdout.log");
       const abort = new AbortController();
       let parentPid: number | undefined;
@@ -319,6 +298,7 @@ describe("executor environment", () => {
             statePath,
             childPidPath
           ],
+          pathArgIndexes: [3, 4],
           cwd: runDir,
           stdin: "",
           host: { kind: "wsl", distribution: WSL_DISTRIBUTION },
@@ -336,11 +316,7 @@ describe("executor environment", () => {
           running,
           WSL_LAUNCH_TIMEOUT_MS
         );
-        ({ parentPid, childPid } = await waitForWslLifecyclePidsWhileRunning(
-          WSL_DISTRIBUTION,
-          statePath,
-          running
-        ));
+        ({ parentPid, childPid } = await waitForWslLifecyclePidsWhileRunning(statePath, running));
         await assertWslProcessGroup({
           distribution: WSL_DISTRIBUTION,
           parentPid,
@@ -387,11 +363,7 @@ describe("executor environment", () => {
               }
             }
           } finally {
-            try {
-              await wslExitCode(WSL_DISTRIBUTION, 'rm -f -- "$@"', [statePath, childPidPath]);
-            } finally {
-              await rm(runDir, { recursive: true, force: true });
-            }
+            await rm(runDir, { recursive: true, force: true });
           }
         }
       }
