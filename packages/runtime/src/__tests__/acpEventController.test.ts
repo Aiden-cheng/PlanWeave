@@ -95,7 +95,35 @@ function retentionPolicyForArtifactLog(calibrationLines: string[]) {
   });
 }
 
+async function persistedEvents(root: string) {
+  const content = await readFile(join(root, "events.ndjson"), "utf8");
+  return content
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { body: Record<string, unknown> });
+}
+
 describe("ACP event controller durability and producers", () => {
+  it("releases an event model created here when metadata persistence notification fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-acp-metadata-notification-"));
+    const readModels = new AcpEventReadModelRegistry();
+    const controller = new AcpSessionController(
+      new ActiveAgentRunRegistry(),
+      createAcpConnection,
+      readModels
+    );
+
+    await expect(
+      controller.execute(run(root, "artifact-implementation"), {
+        onMetadataPersisted: async () => {
+          throw new Error("metadata notification failed");
+        }
+      })
+    ).rejects.toThrow("metadata notification failed");
+    expect(readModels.get(root)).toBeNull();
+  });
+
   it("records only the selected authentication method without spawn secrets or protocol metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-acp-auth-events-"));
     const variable = "PLANWEAVE_T002_TEST_API_KEY";
@@ -342,11 +370,12 @@ describe("ACP event controller durability and producers", () => {
     await expect(
       controller.execute(run(root, "artifact-implementation"), { timeoutMs: 1_000 })
     ).resolves.toMatchObject({ kind: "block", exitCode: 0 });
-    const snapshot = readModels.get(root)?.replay(0);
-    const kinds = snapshot?.events.map((event) => event.body.kind) ?? [];
+    expect(readModels.get(root)).toBeNull();
+    const events = await persistedEvents(root);
+    const kinds = events.map((event) => event.body.kind);
     expect(kinds).toContain("artifact");
     expect(kinds.indexOf("artifact")).toBeLessThan(kinds.indexOf("terminal"));
-    expect(snapshot?.events.find((event) => event.body.kind === "artifact")).toMatchObject({
+    expect(events.find((event) => event.body.kind === "artifact")).toMatchObject({
       body: {
         kind: "artifact",
         artifact: { kind: "implementation", relativePath: "report.md" }
@@ -363,7 +392,7 @@ describe("ACP event controller durability and producers", () => {
     await expect(
       controller.execute(run(root, "artifact-implementation"), { timeoutMs: 1_000 })
     ).rejects.toThrow("Runner terminal cleanup did not complete cleanly");
-    const events = readModels.get(root)?.replay(0).events ?? [];
+    const events = await persistedEvents(root);
     expect(events.map((event) => event.body.kind)).toEqual(
       expect.arrayContaining(["artifact", "diagnostic", "terminal"])
     );
@@ -457,7 +486,7 @@ describe("ACP event controller durability and producers", () => {
       failure instanceof AggregateError &&
         failure.errors.some((error) => error instanceof AcpEventStoreLimitError)
     ).toBe(true);
-    const events = readModels.get(root)?.replay(0).events ?? [];
+    const events = await persistedEvents(root);
     const boundedArtifactIndex = events.findIndex((event) => event.body.kind === "artifact");
     expect(events.slice(boundedArtifactIndex + 1).map((event) => event.body.kind)).toEqual([
       "terminal"
@@ -511,7 +540,7 @@ describe("ACP event controller durability and producers", () => {
     await promptStarted;
     rejectPrompt(new AcpOperationTimeoutError("prompt", 200));
     await expect(execution).rejects.toThrow("timed out");
-    const events = readModels.get(root)?.replay(0).events ?? [];
+    const events = await persistedEvents(root);
     const runningIndex = events.findIndex(
       (event) => event.body.kind === "lifecycle" && event.body.state === "running"
     );
@@ -605,16 +634,9 @@ describe("ACP event controller durability and producers", () => {
     await expect(
       controller.execute(run(root, "protocol-error"), { timeoutMs: 1_000 })
     ).rejects.toThrow();
-    expect(
-      readModels
-        .get(root)
-        ?.replay(0)
-        .events.some((event) => event.body.kind === "artifact")
-    ).toBe(false);
-    const terminal = readModels
-      .get(root)
-      ?.replay(0)
-      .events.find((event) => event.body.kind === "terminal");
+    const events = await persistedEvents(root);
+    expect(events.some((event) => event.body.kind === "artifact")).toBe(false);
+    const terminal = events.find((event) => event.body.kind === "terminal");
     expect(
       terminal?.body.kind === "terminal" ? terminal.body.outcome.nextActions?.actions : []
     ).toEqual([
@@ -644,12 +666,8 @@ describe("ACP event controller durability and producers", () => {
     setTimeout(() => abort.abort(new Error("cancel before artifact validation")), 25);
 
     await expect(execution).rejects.toThrow("cancel before artifact validation");
-    expect(
-      readModels
-        .get(root)
-        ?.replay(0)
-        .events.some((event) => event.body.kind === "artifact")
-    ).toBe(false);
+    const events = await persistedEvents(root);
+    expect(events.some((event) => event.body.kind === "artifact")).toBe(false);
     const metadata = await readFile(join(root, "metadata.json"), "utf8");
     expect(metadata).toContain('"status": "cancelled"');
     expect(metadata).not.toContain('"executionOutcome": "succeeded"');

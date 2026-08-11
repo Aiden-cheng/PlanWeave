@@ -299,32 +299,32 @@ export class AcpSessionController {
       }
       throwAgentRunCleanupFailures(failures, "Runner terminal cleanup did not complete cleanly.");
     };
-    await writeState("running", {
-      sessionId: null,
-      capabilities: null,
-      pid: null,
-      diagnosticArtifacts: {
-        protocol: "protocol.ndjson",
-        events: "events.ndjson",
-        conversationJson: "conversation.json",
-        conversationMarkdown: "conversation.md"
-      }
-    });
-    await options?.onMetadataPersisted?.();
-    heartbeatTimer = setInterval(() => {
-      void ownerState.heartbeat().catch((error) => {
-        const failure = new RunnerInteractionChannelError(
-          "interaction_persistence_failed",
-          "ACP owner heartbeat could not be persisted.",
-          { cause: error }
-        );
-        interactionFailure ??= failure;
-        abortController.abort(failure);
-      });
-    }, 5_000);
-    heartbeatTimer.unref();
     const currentHandle = (): ActiveAgentRunHandle | null => handle;
     try {
+      await writeState("running", {
+        sessionId: null,
+        capabilities: null,
+        pid: null,
+        diagnosticArtifacts: {
+          protocol: "protocol.ndjson",
+          events: "events.ndjson",
+          conversationJson: "conversation.json",
+          conversationMarkdown: "conversation.md"
+        }
+      });
+      await options?.onMetadataPersisted?.();
+      heartbeatTimer = setInterval(() => {
+        void ownerState.heartbeat().catch((error) => {
+          const failure = new RunnerInteractionChannelError(
+            "interaction_persistence_failed",
+            "ACP owner heartbeat could not be persisted.",
+            { cause: error }
+          );
+          interactionFailure ??= failure;
+          abortController.abort(failure);
+        });
+      }, 5_000);
+      heartbeatTimer.unref();
       if (abortController.signal.aborted) {
         throw new ExecutorCancelledError(diagnostic(abortController.signal.reason));
       }
@@ -956,6 +956,7 @@ export class AcpSessionController {
     } finally {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       options?.signal?.removeEventListener("abort", relayAbort);
+      this.eventReadModels.release(run.runDir);
     }
   }
 }
