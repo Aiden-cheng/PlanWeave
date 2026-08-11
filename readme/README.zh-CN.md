@@ -39,6 +39,7 @@ PlanWeave 可以把模糊目标或通过 Chat 生成的计划落到任务图里�
 - **有边界的图上下文**：Agent 执行时拿到当前 block 和相关任务图上下文，需要时可以继续查看更多信息。
 - **职责聚焦**：每次 claim 都把一个聚焦 block 交给一个专门的 Agent，减少无关计划、陈旧讨论和额外 token 对上下文的污染。
 - **不同节点和块可指定不同 Agent**：实现块可以用 Codex，也可以把某些块交给 Claude Code、OpenCode、Pi 或 Grok，确定性检查可以交给本地命令。
+- **多人协作与远程 Agent**：成员可以在共享工作区中协作、指派任务和讨论进展，也可以通过其他设备上的 Agent Host 执行 block。
 - **通过 MCP 让 ChatGPT 生成计划**：把 ChatGPT 连接到 PlanWeave 本机 MCP server、headless systemd tunnel 或桌面端 secure tunnel 后，可以让它创建画布、任务、Blocks、Review Pipeline 和依赖关系。
 - **全自动一站式完成任务流**：从 claim block、执行、记录报告、Review、生成反馈到继续修复，形成闭环。
 - **Review 和反馈是一等公民**：Review block 可以产出结构化反馈，再回到实现 block 自动修复。

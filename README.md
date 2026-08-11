@@ -39,6 +39,7 @@ That makes PlanWeave a better fit for complex engineering work: parallel impleme
 - **Scoped graph context**: agents receive the current block plus relevant task graph context, and can inspect more when needed.
 - **Focused responsibilities**: each claim hands one focused block to one agent, keeping context clean and avoiding unrelated plans, stale discussion, and wasted tokens.
 - **Per-node and per-block agent routing**: use Codex for one block, Claude Code, OpenCode, Pi, or Grok for another, and use local review scripts where deterministic checks are enough.
+- **Team collaboration and remote agents**: collaborate with members in shared workspaces, assign work, discuss progress, and execute blocks through Agent Hosts running on other devices.
 - **MCP authoring for ChatGPT**: connect ChatGPT to PlanWeave through the local MCP server, a headless systemd tunnel, or the desktop secure tunnel, then ask it to create canvases, tasks, blocks, review pipelines, and dependencies.
 - **Full auto-run workflow**: PlanWeave can claim blocks, run agents, collect reports, handle review feedback, and continue the task flow.
 - **Review and feedback as first-class work**: review blocks can produce structured feedback that returns to implementation blocks.
