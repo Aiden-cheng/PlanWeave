@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { DesktopProjectSummary } from "@planweave-ai/runtime";
 import {
   exampleBootstrapResponse,
-  exampleInvitationToken
+  exampleInvitationToken,
+  exampleMemberPage
 } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import { parseCollaborationInvitationHandoffV2 } from "@planweave-ai/collaboration-protocol/handoff/invitation";
 import {
@@ -1068,6 +1069,7 @@ describe("LocalCollaborationCoordinatorControl", () => {
             ...exampleBootstrapResponse,
             workspaceId: "workspace-2"
           }),
+          listMembers: vi.fn().mockResolvedValue(exampleMemberPage),
           verifyAccess: vi.fn().mockResolvedValue(undefined),
           startObserver: vi.fn(),
           stopObserver: vi.fn(),
