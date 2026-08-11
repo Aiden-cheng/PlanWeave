@@ -28,6 +28,10 @@ const useDetectedAgents = vi.hoisted(() => vi.fn());
 const useProjectWorkspace = vi.hoisted(() => vi.fn());
 const useResizableSidebarLayout = vi.hoisted(() => vi.fn());
 const useRuntimeTools = vi.hoisted(() => vi.fn());
+const bridgeMock = vi.hoisted(() => ({
+  readGlobalPrompt: vi.fn().mockResolvedValue(""),
+  updateGlobalPrompt: vi.fn(async (markdown: string) => markdown)
+}));
 
 vi.mock("../renderer/AppSettingsRoute", async () => {
   await settingsRouteModule.ready;
@@ -35,7 +39,7 @@ vi.mock("../renderer/AppSettingsRoute", async () => {
     AppSettingsRoute: () => <div data-testid="settings-route">Settings route</div>
   };
 });
-vi.mock("../renderer/bridge", () => ({ bridge: {} }));
+vi.mock("../renderer/bridge", () => ({ bridge: bridgeMock }));
 vi.mock("../renderer/i18n", () => ({ createTranslator: () => (key: string) => key }));
 vi.mock("../renderer/rendererPlatform", () => ({ detectRendererPlatform: () => "darwin" }));
 vi.mock("../renderer/hooks/useAppViewHistory", () => ({ useAppViewHistory }));
