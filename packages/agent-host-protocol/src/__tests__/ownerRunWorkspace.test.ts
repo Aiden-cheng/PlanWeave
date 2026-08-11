@@ -30,6 +30,14 @@ describe("ownerRunWorkspace", () => {
     ).toThrow(OwnerRunWorkspaceResolverError);
   });
 
+  it("resolves roots with repeated trailing separators in linear time", () => {
+    const resolved = resolveOwnerRunWorkspace({
+      workspaceRoot: `/var/agent-host/workspaces${"/".repeat(10_000)}`,
+      locator: ownerPackageLocatorForRun({ projectId: "p", canvasId: "c" })
+    });
+    expect(resolved.absolutePath).toBe("/var/agent-host/workspaces/fleet-runs/p/c");
+  });
+
   it("rejects absolute package paths on POSIX and Windows", () => {
     for (const relativePackagePath of ["/srv/package", "C:/package", "C:\\package"]) {
       expect(() =>

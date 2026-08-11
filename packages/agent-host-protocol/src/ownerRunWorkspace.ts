@@ -1,4 +1,4 @@
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import { ownerPackageLocatorSchema, type OwnerPackageLocator } from "./ownerPackageLocator.js";
 
@@ -39,7 +39,7 @@ export function resolveOwnerRunWorkspace(input: {
   if (!root || !isAbsolute(root)) {
     throw new OwnerRunWorkspaceResolverError("owner_fleet_workspace_root_missing");
   }
-  const absolutePath = `${root.replace(/\/+$/, "")}/${locator.relativePackagePath}`;
+  const absolutePath = resolve(root, locator.relativePackagePath);
   if (!contained(root, absolutePath)) {
     throw new OwnerRunWorkspaceResolverError("owner_fleet_workspace_escape");
   }
