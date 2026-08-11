@@ -86,14 +86,6 @@ export {
   type CollaborationClientFactory,
   type CollaborationServiceOptions
 } from "./collaborationService.js";
-export {
-  createCollaborationService,
-  getCollaborationService,
-  registerCollaborationHandlers,
-  setCollaborationServiceForTests,
-  shutdownCollaborationService,
-  shutdownLocalCollaborationCoordinator
-} from "./collaborationHandlers.js";
 export { redactCollaborationText, redactCollaborationValue } from "./redaction.js";
 export { reconnectDelay } from "./reconnectBackoff.js";
 export { ContentVersionFacade } from "./ContentVersionFacade.js";

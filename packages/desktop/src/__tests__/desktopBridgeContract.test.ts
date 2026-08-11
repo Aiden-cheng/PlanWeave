@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import * as collaborationClient from "../main/collaboration/index";
 import { runtimeBridgeHandlers } from "../main/runtimeBridgeHandlerRegistry";
 import { createDesktopBridgeInvokeApi } from "../preload/bridgeInvocation";
 import {
@@ -46,5 +47,10 @@ describe("desktop bridge end-to-end contract", () => {
       expect(desktopBridgeInvokeChannels[method]).toBe(`planweave:${method}`);
       expect(typeof (preloadApi[method] as InvokeForwarder)).toBe("function");
     }
+  });
+
+  it("keeps Electron handlers outside the collaboration client barrel", () => {
+    expect(collaborationClient).not.toHaveProperty("registerCollaborationHandlers");
+    expect(collaborationClient).not.toHaveProperty("shutdownCollaborationService");
   });
 });
