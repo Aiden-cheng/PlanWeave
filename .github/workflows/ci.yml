@@ -375,6 +375,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build protocol packages
+        run: pnpm --filter @planweave-ai/agent-host-protocol build && pnpm --filter @planweave-ai/collaboration-protocol build
+
       - name: Check test suite classification
         run: pnpm check:test-suites
 

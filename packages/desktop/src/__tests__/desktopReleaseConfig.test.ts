@@ -589,6 +589,9 @@ process.exit(2);
     expect(workflow).toContain("name: Windows WSL execution-host integration");
     expect(workflow).toContain("runs-on: windows-2025");
     expect(workflow).toContain('PLANWEAVE_REQUIRE_WSL_TESTS: "1"');
+    expect(workflow).toMatch(
+      /windows-wsl-integration:[\s\S]*?name: Build protocol packages[\s\S]*?pnpm --filter @planweave-ai\/agent-host-protocol build && pnpm --filter @planweave-ai\/collaboration-protocol build[\s\S]*?name: Run WSL execution-host integration test/
+    );
     expect(workflow).toContain("function Invoke-WslCommand");
     expect(workflow).toContain("$startInfo.UseShellExecute = $false");
     expect(workflow).toContain("$startInfo.ArgumentList.Add($argument)");
