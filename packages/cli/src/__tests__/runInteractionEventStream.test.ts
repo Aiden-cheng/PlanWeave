@@ -80,8 +80,10 @@ afterEach(async () => {
 
 function startEventStream(env: NodeJS.ProcessEnv) {
   const child = spawn(
-    join(repoRoot, "node_modules", ".bin", "tsx"),
+    process.execPath,
     [
+      "--import",
+      "tsx",
       join(repoRoot, "packages", "cli", "src", "index.ts"),
       "run",
       "--once",
