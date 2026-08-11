@@ -39,6 +39,7 @@ import { setLocalOperatorBackendPort } from "../operatorControl/localOperatorBac
 import { createCollaborationCoordinationQueue } from "./collaborationCoordinationQueue.js";
 import { switchLocalCollaborationExposure } from "./localCollaborationExposureSwitch.js";
 import { assertRendererProfileNamespace } from "./collaborationProfileEndpoint.js";
+import { restorePersistedCollaborationSession } from "./persistedCollaborationSessionRecovery.js";
 
 let service: CollaborationService | null = null;
 let coordinator: LocalCollaborationCoordinatorControl | null = null;
@@ -157,7 +158,12 @@ export function registerCollaborationHandlers(
   });
   const runCoordinationOperation = createCollaborationCoordinationQueue();
   const persistedWorkspaceReady = localReady
-    .then(() => runCoordinationOperation(() => localActivation.reconcile()))
+    .then(() =>
+      runCoordinationOperation(async () => {
+        await localActivation.reconcile();
+        await restorePersistedCollaborationSession(active);
+      })
+    )
     .catch((error: unknown) => {
       console.error("Failed to restore the persisted collaboration Workspace.", error);
     });

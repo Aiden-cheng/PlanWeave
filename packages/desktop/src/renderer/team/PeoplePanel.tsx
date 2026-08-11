@@ -255,6 +255,26 @@ export function PeoplePanel({
         {mode === "connecting" ? (
           <p className="text-xs text-muted-foreground">{t("peopleConnecting")}</p>
         ) : null}
+        {mode === "disconnected" ? (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3"
+            data-testid="people-panel-disconnected"
+          >
+            <p className="text-xs text-muted-foreground" role="status">
+              {t("peopleWorkspaceDisconnected")}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="people-refresh-details"
+              disabled={detailsLoading || actionBusy}
+              onClick={() => void onRefreshDetails()}
+            >
+              {t("peopleRefresh")}
+            </Button>
+          </div>
+        ) : null}
         {connectSlot}
         {diagnostics}
       </div>

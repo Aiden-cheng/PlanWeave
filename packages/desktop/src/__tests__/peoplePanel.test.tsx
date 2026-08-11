@@ -294,6 +294,42 @@ describe("PeoplePanel", () => {
     expect(screen.queryByText(/Not connected/i)).not.toBeInTheDocument();
   });
 
+  it("shows a reconnect action when a page shell hides the title and has no connect slot", async () => {
+    const onRefreshDetails = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PeoplePanel
+        mode="disconnected"
+        presence={{ ...presence, memberCount: 0, currentUserIsOwner: false }}
+        members={[]}
+        invitations={[]}
+        devices={[]}
+        detailsLoading={false}
+        detailsError={null}
+        actionError={null}
+        actionBusy={false}
+        pendingInvitation={null}
+        t={t}
+        onCreateInvitation={vi.fn()}
+        onViewInvitation={vi.fn()}
+        onCopyInvitationToken={vi.fn()}
+        onDismissPendingInvitation={vi.fn()}
+        onRevokeInvitation={vi.fn()}
+        onRevokeInvitations={vi.fn()}
+        onUpdateOwnDisplayName={vi.fn()}
+        onPromoteMember={vi.fn()}
+        onDemoteMember={vi.fn()}
+        onRemoveMember={vi.fn()}
+        onRevokeDevice={vi.fn()}
+        onRefreshDetails={onRefreshDetails}
+        showTitle={false}
+      />
+    );
+
+    expect(screen.getByTestId("people-panel-disconnected")).toBeVisible();
+    await userEvent.click(screen.getByTestId("people-refresh-details"));
+    expect(onRefreshDetails).toHaveBeenCalledOnce();
+  });
+
   it("keeps an empty workspace neutral and keeps advanced recovery collapsed", async () => {
     const connectSlot = <div data-testid="people-connect-form">connect</div>;
     const commonProps = {
