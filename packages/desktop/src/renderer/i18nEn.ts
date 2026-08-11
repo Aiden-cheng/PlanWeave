@@ -513,7 +513,7 @@ export const enCatalog = {
   settingsServerHint: "Configure how this computer and remote devices reach PlanWeave Server.",
   settingsServerContentNeedsSession:
     "Syncing Workspace content requires a connected collaboration session. Reconnect with this device's credential, or finish connecting the Workspace first.",
-  settingsServerOpenPeople: "Open People to connect",
+  settingsServerOpenPeople: "Open Members to connect",
   settingsServerReconnectSession: "Reconnect session",
   settingsServerReconnectSessionBusy: "Reconnecting…",
   hostAdminLocale: "en-US",
@@ -673,7 +673,7 @@ export const enCatalog = {
   hostAdminClearCredential: "Clear credential",
   hostAdminCredentialAvailable: "Credential available",
   hostAdminCredentialMissing:
-    "The current Server cannot create device enrollment details. Connect it from People first.",
+    "The current Server cannot create device enrollment details. Connect it from Members first.",
   hostAdminCredentialPersistence_persisted: "OS vault",
   "hostAdminCredentialPersistence_session-only": "session only",
   hostAdminCredentialPersistence_missing: "not configured",
@@ -784,7 +784,7 @@ export const enCatalog = {
   hostAdminBootstrapCodexPreset:
     "Enrollment exposes no agents by default. On the Host, use agents list and agents expose for a supported installed agent.",
   hostAdminBootstrapSecureCoordinator:
-    "Start or connect a PlanWeave Server you manage from People first.",
+    "Start or connect a PlanWeave Server you manage from Members first.",
   hostAdminBootstrapUnavailableTitle: "A managed Server is required",
   hostAdminBootstrapAbsolutePaths:
     "Config, data, and workspace paths must be absolute Host-local paths.",
@@ -807,9 +807,9 @@ export const enCatalog = {
   hostAdminBootstrapHeartbeatNote:
     "After registration, the device and its shared agents appear automatically below.",
   hostAdminOffline: "PlanWeave Server cannot be reached. Check your network and try again.",
-  hostAdminUnauthorized: "Server management access expired. Reconnect from People.",
+  hostAdminUnauthorized: "Server management access expired. Reconnect from Members.",
   hostAdminForbidden: "Your account cannot manage remote devices.",
-  hostAdminProfileMissing: "The current Server connection is unavailable. Reconnect from People.",
+  hostAdminProfileMissing: "The current Server connection is unavailable. Reconnect from Members.",
   hostAdminErrorGeneric: "The Agent Host action failed. Try again shortly.",
   hostAdminDiagnosticCode: "Diagnostic code",
   agentInstallStatus: "Local agent installation status",
@@ -1178,9 +1178,9 @@ export const enCatalog = {
   taskWorkspaceWorkingDirectory: "Working directory",
 
   // Collaboration people / invitation / Host surfaces (DX-002#B-001)
-  people: "People",
-  peopleTitle: "Project people",
-  peopleSections: "People page sections",
+  people: "Members",
+  peopleTitle: "Project members",
+  peopleSections: "Member page sections",
   peopleSectionWorkspace: "Members",
   peopleSectionHosting: "Workspace",
   collaborationOnboardingTitle: "Work together in PlanWeave",
@@ -1209,8 +1209,8 @@ export const enCatalog = {
   peopleLocalHostingTitle: "Local network sharing",
   peopleLocalHostingWarning:
     "The internal service runs automatically. Enable local network sharing only when another device on this trusted network needs to connect.",
-  peoplePresence: "People",
-  peoplePresenceWithCount: "People ({count})",
+  peoplePresence: "Members",
+  peoplePresenceWithCount: "Members ({count})",
   peopleMemberCount: "{count} members",
   peopleMembers: "Members",
   peopleOwnerActions: "Invitations & devices",
@@ -1293,7 +1293,7 @@ export const enCatalog = {
     "This invitation points to a device-only address and cannot be used from another Windows computer. Connect to a network-reachable Server and create a new invitation there.",
   peopleWindowsJoinTitle: "Connect from Windows",
   peopleWindowsJoinPath:
-    "On Windows, open People → Collaboration workspace → Join with invitation, then fill in:",
+    "On Windows, open Members → Collaboration workspace → Join with invitation, then fill in:",
   peopleWindowsDisplayNameHint: "A recognizable name for the Windows member",
   peopleWindowsTokenHint: "Paste the invitation secret shown below",
   peopleWindowsLanHttpRequired: "Turn this on for the local-network HTTP address above",
@@ -1439,7 +1439,7 @@ export const enCatalog = {
   assigneeRetry: "Retry",
   assigneeRevision: "Assignment revision {revision}",
   assigneeSectionUnassigned: "Unassigned",
-  assigneeSectionPeople: "People",
+  assigneeSectionPeople: "Members",
   assigneeSectionHosts: "Agent Hosts",
   assigneeSectionAutomatic: "Automatic",
   // Primary option / current / compact-chip labels (not only section headings)
@@ -1650,7 +1650,7 @@ export const enCatalog = {
   canvasCommandRejected: "Canvas command rejected: {code}",
   canvasCommandReconnectFailed: "Canvas reconnect failed: {code}",
   canvasCommandNotConnected:
-    "This shared canvas is offline and cannot be edited. Start or check the Server, then go to People and select Refresh to reconnect.",
+    "This shared canvas is offline and cannot be edited. Start or check the Server, then go to Members and select Refresh to reconnect.",
   sharedCanvasOfflineReplica: "Offline · read-only local replica",
   sharedCanvasOfflineRevision: "Offline · read-only · last confirmed revision {revision}",
   canvasCommandUnsupportedLocalOnly:

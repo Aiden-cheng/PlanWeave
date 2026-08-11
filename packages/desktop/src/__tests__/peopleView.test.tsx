@@ -618,7 +618,7 @@ describe("PeopleView", () => {
       />
     );
 
-    expect(screen.getByTestId("people-view")).toHaveAccessibleName("Project people");
+    expect(screen.getByTestId("people-view")).toHaveAccessibleName("Project members");
     expect(screen.getByTestId("people-view")).not.toHaveClass("border");
     expect(screen.getByTestId("people-view")).toHaveClass("[scrollbar-gutter:stable]");
     expect(screen.queryByRole("heading", { name: "Project people" })).not.toBeInTheDocument();

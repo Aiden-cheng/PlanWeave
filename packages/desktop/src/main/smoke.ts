@@ -1096,7 +1096,7 @@ async function runCollaborationAccessibilitySmoke(
     window.planweaveDesktopSettings.saveDesktopSettings({ language: "en" })
   `);
   await reloadSmokeRenderer(mainWindow, { requireCollaborationShell: true });
-  const enAccessibleName = await waitForLocalizedPeopleLabel("People");
+  const enAccessibleName = await waitForLocalizedPeopleLabel("Members");
   await mainWindow.webContents.executeJavaScript(`
     window.planweaveDesktopSettings.saveDesktopSettings({ language: "zh-CN" })
   `);
@@ -1274,7 +1274,7 @@ async function runCollaborationAccessibilitySmoke(
   `);
   const peopleAx = summarizeChromiumAccessibilityTree(
     await readChromiumAccessibilityTree(mainWindow),
-    ["成员", "People"],
+    ["成员", "Members"],
     { allowedRoles: ["dialog", "group", "region"] }
   );
   for (const [label, summary] of Object.entries({

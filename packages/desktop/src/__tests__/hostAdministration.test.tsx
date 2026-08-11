@@ -501,7 +501,7 @@ describe("Agent Host settings", () => {
 
     expect(await screen.findByText("A managed Server is required")).toBeVisible();
     expect(
-      screen.getByText("Start or connect a PlanWeave Server you manage from People first.")
+      screen.getByText("Start or connect a PlanWeave Server you manage from Members first.")
     ).toBeVisible();
     expect(screen.queryByTestId("host-admin-create-grant")).not.toBeInTheDocument();
     expect(screen.queryByText(/^1\./)).not.toBeInTheDocument();
