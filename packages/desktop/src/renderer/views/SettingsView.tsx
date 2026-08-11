@@ -94,6 +94,12 @@ export function SettingsView({
     setGlobalPromptDraft(globalPromptMarkdown ?? "");
   }, [globalPromptMarkdown]);
 
+  useEffect(() => {
+    if (!settings.developerMode && section === "project-doctor") {
+      setSection("general");
+    }
+  }, [section, settings.developerMode]);
+
   const resetSettingsViewport = useCallback(() => {
     const viewport = settingsViewportRef.current;
     if (!viewport) return;
@@ -124,6 +130,7 @@ export function SettingsView({
   return (
     <main className="flex h-full min-h-0 text-text">
       <SettingsNav
+        developerMode={settings.developerMode}
         section={section}
         setSection={setSection}
         onBackToApp={() => setActiveView("graph")}
@@ -179,7 +186,7 @@ export function SettingsView({
                 updateSettings={updateSettings}
               />
             ) : null}
-            {section === "project-doctor" ? (
+            {settings.developerMode && section === "project-doctor" ? (
               <SettingsProjectDoctorSection
                 selectedProject={selectedProject ?? null}
                 setError={setError}

@@ -22,18 +22,27 @@ export type SettingsSection =
   | "connections";
 
 type SettingsNavProps = {
+  developerMode: boolean;
   section: SettingsSection;
   setSection: (section: SettingsSection) => void;
   onBackToApp: () => void;
   t: ReturnType<typeof createTranslator>;
 };
 
-export function SettingsNav({ section, setSection, onBackToApp, t }: SettingsNavProps) {
+export function SettingsNav({
+  developerMode,
+  section,
+  setSection,
+  onBackToApp,
+  t
+}: SettingsNavProps) {
   const navItems = [
     { key: "general", label: t("settingsGeneral"), icon: SettingsIcon },
     { key: "components", label: t("settingsComponents"), icon: BlocksIcon },
     { key: "review", label: t("settingsReview"), icon: GitPullRequestIcon },
-    { key: "project-doctor", label: t("settingsProjectDoctor"), icon: WrenchIcon },
+    ...(developerMode
+      ? [{ key: "project-doctor" as const, label: t("settingsProjectDoctor"), icon: WrenchIcon }]
+      : []),
     { key: "agents", label: t("settingsAgents"), icon: BotIcon },
     { key: "mcp", label: t("settingsMcpTunnel"), icon: CableIcon },
     { key: "connections", label: t("settingsConnections"), icon: NetworkIcon }
