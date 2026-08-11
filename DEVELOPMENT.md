@@ -101,7 +101,7 @@ planweave mcp tunnel print-systemd --planweave-home /srv/planweave --env-file /e
 
 `planweave mcp tunnel run --serve` is the foreground command intended for the printed systemd unit. Runtime API keys should come from `OPENAI_RUNTIME_API_KEY` or `CONTROL_PLANE_API_KEY`, typically through an `EnvironmentFile`; they are not written to the MCP tunnel JSON config.
 
-The desktop app's **Settings -> MCP Tunnel** page remains available for local ChatGPT tunnel traffic. Headless or VPS deployments should use the CLI systemd path instead of the desktop app.
+The desktop app's **Settings → MCP Tunnel** page remains available for local ChatGPT tunnel traffic. Headless or VPS deployments should use the CLI systemd path instead of the desktop app.
 
 MCP planning clients should start with `list_tool_groups`. The recommended default path uses bounded tools:
 
@@ -183,7 +183,7 @@ node packages/agent-host/dist/bin.js run --config /absolute/path/agent-host.json
 node packages/agent-host/dist/bin.js revoke --config /absolute/path/agent-host.json
 ```
 
-After a published install the same entry points are `planweave-server` and `planweave-agent-host` on `PATH`.
+Package installations expose `planweave-server` and `planweave-agent-host` on `PATH`. The PlanWeave CLI also exposes Host commands through `planweave agent-host`.
 
 Config shape (details and schema live in each package; use `--help` and package tests as contract sources):
 
@@ -195,7 +195,7 @@ Config shape (details and schema live in each package; use `--help` and package 
 Operational defaults:
 
 - Production transport is **HTTPS** and **WSS**. Plain HTTP/WS is loopback development only (`allowInsecureDevelopment`).
-- Create a one-time Host enrollment grant as server admin, enroll the Host, then `run`. Revoke on the server and/or `planweave-agent-host revoke` when a Host should no longer be trusted.
+- Create one-time Host enrollment details as a Server administrator, choose the credential lifetime, enroll the Host, then `run`. Lifecycle-aware credentials renew automatically; administrators can also request renewal from Desktop. Revoke on the Server and/or run `planweave agent-host revoke` when a Host should no longer be trusted.
 - Unauthenticated health endpoints: `/healthz`, `/readyz`, `/version`.
 - **Assignment** is coordination metadata only; **dispatch** / remote run is an explicit action.
 - Interrupted remote work needs an explicit lifecycle action (`cancel`, `resume_same_session`, `retry_new_attempt`, `fail`, `block`) — never silent re-run.

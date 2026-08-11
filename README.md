@@ -250,53 +250,27 @@ ACP runs expose structured progress, artifacts, usage, and interaction requests 
 
 ## Collaboration and Remote Agents (Experimental)
 
-A connected project lets people share one task board and run agents across machines.
+A connected project lets members share one task board and run agents on connected devices.
 
-**People and shared canvas**
+**Shared projects**
 
 - Invite members; owners manage membership and invitations
-- Assign Tasks and Blocks to people
+- Assign Tasks and Blocks to members
 - Comment and follow activity on the selected Task or Block
 - Keep the live project canvas in sync across Desktop clients
 
-**Remote agents and multi-machine runs**
+**Remote agents**
 
-- **Agent Hosts** on other machines execute Blocks with the same ACP agents used locally (Codex, Claude Code, OpenCode, Pi, Grok, …)
-- Use the Block **Agent run** panel to choose either a local Agent or a remote Agent Endpoint, then watch progress, respond to interactions, and cancel / resume / retry
-- Local **Auto Run** runs the selected Agent on this device; a remote Agent Endpoint runs it on an exposed device without a separate Host choice
-- Hosts appear in device management, where administrators register devices and expose Agents; they are not selected for each run
-- Legacy Host run settings remain readable but are read-only. Choose this device or a remote Agent for new runs
-- Assignment records human ownership; Agent run dispatch starts execution
+- Agent Hosts make installed ACP agents available as remote Agent Endpoints
+- Choose a local or remote Agent in the Block **Agent run** panel, then follow progress and respond to interactions
 
-**Install a remote Agent Host**
+**Connect a remote device**
 
-1. In Desktop, open **Settings -> Agent Hosts**, select a server-admin profile, then use **Connect an Agent Host** to create and copy the one-time enrollment command.
-2. On the Windows machine or Linux VPS that will run the Host, install and sign in to the selected ACP agent (for example, Codex), then install the Agent Host from the same PlanWeave build. This repository does not assume that `@planweave-ai/agent-host` has been published to npm; for the current source-checkout workflow and future registry installation, see the [Agent Host package guide](packages/agent-host/README.md).
+1. Open **Settings → Connections & Devices → My devices** and select **Add a remote device**.
+2. Choose a credential lifetime and copy the enrollment command.
+3. Run the command on the target device, expose an installed Agent, and run preflight. The remote Agent then appears in Desktop's Agent selector.
 
-3. Run the complete `planweave-agent-host enroll <handoff>` command copied by Desktop. Its JSON output includes `configPath`; use that absolute path in the following commands.
-4. Inspect the supported Host-local agents, expose the one you want, verify the configuration, and inspect the background process:
-
-```bash
-planweave-agent-host agents list --config <absolute-config-path>
-planweave-agent-host agents expose codex-acp --config <absolute-config-path>
-planweave-agent-host preflight --config <absolute-config-path>
-planweave-agent-host service status --config <absolute-config-path>
-planweave-agent-host service logs --config <absolute-config-path>
-```
-
-5. Once the Host reports readiness, each exposed remote Agent Endpoint appears automatically in Desktop's unified Agent selector. There is no second Host selector.
-
-On Linux, background mode uses user-systemd for the current user; enable linger for unattended VPS use so the Host survives logout and starts at boot. On Windows, it uses a current-user `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` startup entry, not a Windows SCM service, so it runs only after that user signs in. Windows `service logs` reports the startup entry identity and does not capture Host stdout; use foreground `run` mode for interactive diagnostics. The npm/source Agent Host supports Windows and Linux, while the `pack:agent-host:vps` archive is Linux-only. See the [Agent Host package guide](packages/agent-host/README.md) for installation and lifecycle details.
-
-The enrollment handoff is single-use and expires. ACP credentials, ACP command paths, and environment-variable values stay on the Host and are not uploaded to PlanWeave Server. The Host credential token is persisted in plaintext only in Host-private storage, but it is sent to the configured Server during enrollment and as Bearer authentication; the Server persists its one-way hash. Never put a handoff or token in project files, chat, or logs. Tailscale HTTPS and direct HTTPS each use one PlanWeave Server Origin shared by Desktop and the Host; LAN HTTP is available only as an explicit insecure development mode.
-
-**In Desktop**
-
-1. Open the collaboration connection for a project.
-2. Join with an invitation, or become the first owner when the project is set up.
-3. Use **People**, assignee chips, **Comments / Activity**, Host presence, and the **Remote run** panel.
-
-Device credentials appear once when you join. Desktop stores them securely — do not paste them into package files or chat logs.
+See the [Agent Host guide](packages/agent-host/README.md) for installation and commands.
 
 ## Future Direction
 

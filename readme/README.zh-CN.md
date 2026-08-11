@@ -250,53 +250,27 @@ ACP run 通过 CLI 和 Desktop 提供结构化进度、产物、usage 和交互�
 
 ## 协作与远程 Agent（实验）
 
-连接项目后，多人共享同一任务板，并在多台机器上运行 agent。
+连接项目后，成员可以共享同一任务板，并在已连接设备上运行 Agent。
 
-**人员与共享画布**
+**共享项目**
 
-- 邀请成员；owner 管理成员与邀请
-- 把 Task / Block 指派给人员
+- 邀请成员；所有者管理成员与邀请
+- 把 Task / Block 指派给成员
 - 在当前 Task / Block 上评论并查看活动
 - 多台 Desktop 客户端共享实时项目画布
 
-**远程 Agent 与多机执行**
+**远程 Agent**
 
-- 其他机器上的 **Agent Host** 执行 Block，使用与本机相同的 ACP agent（Codex、Claude Code、OpenCode、Pi、Grok 等）
-- 在 Block 的 **Agent 运行** 面板中选择本机 Agent 或远程 Agent Endpoint，然后查看进度、处理交互，以及取消 / 恢复 / 重试
-- 本机 **Auto Run** 在当前设备运行所选 Agent；远程 Agent Endpoint 在已暴露设备上运行，无需再选择 Host
-- Host 只出现在设备管理中，用于注册设备和暴露 Agent，不参与每次运行选择
-- 旧 Host 运行设置仍可读取，但已只读；新运行请选择本机或远程 Agent
-- 指派记录人员归属；Agent 运行派发启动执行
+- Agent Host 将已安装的 ACP Agent 开放为远程 Agent Endpoint
+- 在 Block 的 **Agent 运行** 面板中选择本机或远程 Agent，然后查看进度并处理交互
 
-**安装远程 Agent Host**
+**连接远程设备**
 
-1. 在 Desktop 打开 **设置 -> Agent Host**，选择一个 server-admin 配置，然后在 **连接 Agent Host** 中创建并复制一次性入驻命令。
-2. 在运行 Host 的 Windows 机器或 Linux VPS 上，先安装并登录所选 ACP Agent（例如 Codex），再安装与当前 PlanWeave 构建配套的 Agent Host。本仓库不假定 `@planweave-ai/agent-host` 已发布到 npm；当前源码检出方式和未来 registry 安装方式见 [Agent Host 包指南](../packages/agent-host/README.md)。
+1. 打开 **设置 → 连接与设备 → 我的设备**，选择 **添加远程设备**。
+2. 选择凭据生命周期并复制入驻命令。
+3. 在目标设备上运行命令，开放已安装的 Agent 并执行预检。远程 Agent 随后会出现在 Desktop 的 Agent selector 中。
 
-3. 运行 Desktop 复制的完整 `planweave-agent-host enroll <handoff>` 命令。其 JSON 输出包含 `configPath`；后续命令使用这个绝对路径。
-4. 查看 Host 本机支持的 Agent、暴露需要使用的 Agent、检查配置，并查看后台进程：
-
-```bash
-planweave-agent-host agents list --config <absolute-config-path>
-planweave-agent-host agents expose codex-acp --config <absolute-config-path>
-planweave-agent-host preflight --config <absolute-config-path>
-planweave-agent-host service status --config <absolute-config-path>
-planweave-agent-host service logs --config <absolute-config-path>
-```
-
-5. Host 报告就绪后，暴露的远程 Agent Endpoint 会自动进入 Desktop 的统一 Agent selector，不需要再选择第二个 Host。
-
-Linux 后台模式使用当前用户的 user-systemd；无人值守的 VPS 必须为该用户启用 linger，才能让 Host 在退出登录后继续运行并随系统启动。Windows 使用当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 启动项，而不是 Windows SCM service，因此需要该用户登录后才会运行。Windows 的 `service logs` 返回启动项标识，不捕获 Host stdout；交互式诊断应使用前台 `run` 模式。npm/source Agent Host 支持 Windows 与 Linux，但 `pack:agent-host:vps` 生成的归档仅适用于 Linux。安装方式与完整生命周期见 [Agent Host 包指南](../packages/agent-host/README.md)。
-
-入驻 handoff 只能使用一次且会过期。ACP 凭证、ACP 命令路径和环境变量值留在 Host 上，不会上传 PlanWeave Server。Host credential token 的明文只持久化在 Host 私有存储中，但 enrollment 和后续 Bearer 认证会把它发送给所配置的 Server；Server 持久化的是其单向哈希。不要把 handoff 或 token 写进项目文件、聊天或日志。Tailscale HTTPS 与 direct HTTPS 都只使用一个由 Desktop 和 Host 共用的 PlanWeave Server Origin；LAN HTTP 仅用于显式启用的不安全开发模式。
-
-**在 Desktop 中**
-
-1. 打开项目的协作连接。
-2. 通过邀请加入，或在建立项目时成为首位 owner。
-3. 使用 **人员**、指派人芯片、**评论 / 活动**、Host 在线状态，以及 **远程运行** 面板。
-
-加入时设备凭据只会展示一次。Desktop 会安全保存 —— 不要把它们写入 package 文件或聊天记录。
+安装和命令说明见 [Agent Host 指南](../packages/agent-host/README.md)。
 
 ## 未来方向
 
