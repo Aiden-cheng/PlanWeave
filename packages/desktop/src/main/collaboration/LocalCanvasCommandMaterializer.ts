@@ -43,7 +43,7 @@ export class LocalCanvasCommandMaterializer {
     canvasId: string;
     authorityProjectId: string;
   }): Promise<LocalCanvasCommandBinding> {
-    let registeredProjects;
+    let registeredProjects: Awaited<ReturnType<typeof listProjects>>;
     try {
       registeredProjects = (await listProjects()).filter(
         (candidate) => candidate.projectId === input.projectId
@@ -60,7 +60,7 @@ export class LocalCanvasCommandMaterializer {
       );
     }
     const registeredProject = registeredProjects[0]!;
-    let project;
+    let project: Awaited<ReturnType<typeof getProjectOverview>>;
     try {
       project = await getProjectOverview(registeredProject.rootPath);
     } catch {
@@ -70,7 +70,7 @@ export class LocalCanvasCommandMaterializer {
       throw materializationError("collaboration_canvas_project_binding_mismatch", false);
     }
 
-    let workspace;
+    let workspace: Awaited<ReturnType<typeof resolveTaskCanvasWorkspace>>;
     try {
       workspace = await resolveTaskCanvasWorkspace(project.rootPath, input.canvasId);
     } catch {

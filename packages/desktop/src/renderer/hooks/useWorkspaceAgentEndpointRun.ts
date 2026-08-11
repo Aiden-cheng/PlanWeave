@@ -11,7 +11,12 @@ import type { RemoteOperationObservation } from "@planweave-ai/collaboration-pro
 import { useCallback, useEffect, useRef } from "react";
 import type { PlanWeaveCollaborationApi } from "../../shared/collaboration";
 import type { DesktopUiSettings } from "../../shared/desktopSettings";
-import { bridge, collaborationBridge, desktopCanvasReference, operatorControlBridge } from "../bridge";
+import {
+  bridge,
+  collaborationBridge,
+  desktopCanvasReference,
+  operatorControlBridge
+} from "../bridge";
 import {
   createAgentEndpointBlockExecutor,
   type ResolveLiveRemoteBinding
@@ -415,7 +420,6 @@ export function useWorkspaceAgentEndpointRun(
       input.ownerFleetDispatchEnabled,
       input.setError,
       input.stopLocal,
-      input.waitForLocalTerminal,
       input.waitForLocalUnit,
       input.waitForTerminal
     ]

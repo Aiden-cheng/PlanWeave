@@ -21,10 +21,17 @@ import {
 
 export const canvasPresenceProtocolVersionSchema = z.literal(CANVAS_PRESENCE_PROTOCOL_VERSION);
 
-export const canvasPresenceSessionIdSchema = opaqueIdentifierSchema.brand(
-  "CanvasPresenceSessionId"
-);
+export const canvasPresenceSessionIdSchema =
+  opaqueIdentifierSchema.brand("CanvasPresenceSessionId");
 export type CanvasPresenceSessionId = z.infer<typeof canvasPresenceSessionIdSchema>;
+
+function hasAsciiControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
 
 export const canvasPresenceSelectionIdSchema = z
   .string()
@@ -32,7 +39,7 @@ export const canvasPresenceSelectionIdSchema = z
   .max(CANVAS_PRESENCE_SELECTION_ID_MAX_LENGTH)
   .refine((value) => value.trim().length > 0, "selection id must not be blank")
   .refine(
-    (value) => !/[\u0000-\u001f\u007f]/u.test(value),
+    (value) => !hasAsciiControlCharacter(value),
     "selection id must not contain control characters"
   );
 export type CanvasPresenceSelectionId = z.infer<typeof canvasPresenceSelectionIdSchema>;
@@ -61,7 +68,7 @@ export const canvasPresencePointerSchema = z
 export type CanvasPresencePointer = z.infer<typeof canvasPresencePointerSchema>;
 
 export const canvasPresenceDisplayNameSchema = humanDisplayNameSchema.refine(
-  (value) => !/[\u0000-\u001f\u007f]/u.test(value),
+  (value) => !hasAsciiControlCharacter(value),
   "presence display name must not contain control characters"
 );
 
@@ -73,9 +80,7 @@ export const canvasPresenceSessionIdentitySchema = z
     displayName: canvasPresenceDisplayNameSchema
   })
   .strict();
-export type CanvasPresenceSessionIdentity = z.infer<
-  typeof canvasPresenceSessionIdentitySchema
->;
+export type CanvasPresenceSessionIdentity = z.infer<typeof canvasPresenceSessionIdentitySchema>;
 
 export const canvasPresenceSessionSchema = z
   .object({

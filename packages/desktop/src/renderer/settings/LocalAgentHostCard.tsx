@@ -59,7 +59,6 @@ function serverConnectionLabel(
       return t("hostAdminLocalHostServerAuthFailed");
     case "stopped":
       return t("hostAdminLocalHostServerStopped");
-    case "unknown":
     default:
       return t("hostAdminLocalHostServerUnknown");
   }

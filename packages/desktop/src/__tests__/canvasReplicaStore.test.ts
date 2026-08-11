@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
-  CanvasCommandAccepted,
   CanvasCommandIntent,
   CanvasJournalEntry,
   CanvasReconnectResponse
@@ -73,31 +72,6 @@ function layoutIntent(x: number, y: number, updatedAt: string): CanvasCommandInt
       { nodeId: "T-002", x: 30, y: 40 }
     ],
     updatedAt
-  };
-}
-
-function accepted(
-  operationId: string,
-  previousRevision: number,
-  digest: string
-): CanvasCommandAccepted {
-  return {
-    type: "canvas.command.accepted",
-    protocolVersion: 1,
-    schemaVersion: "canvas-command/v1",
-    scope: {
-      workspaceId: "workspace-authority",
-      projectId: "project-authority",
-      canvasId: "default"
-    },
-    operationId,
-    revision: previousRevision + 1,
-    previousRevision,
-    contentDigest: digest,
-    journalEntryId: `journal-${previousRevision + 1}`,
-    actor: { kind: "human", id: "human-1", displayName: "Editor" },
-    acceptedAt: "2026-08-02T00:00:00.000Z",
-    idempotentReplay: false
   };
 }
 

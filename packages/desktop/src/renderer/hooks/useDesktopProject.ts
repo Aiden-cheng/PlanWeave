@@ -162,9 +162,11 @@ export function useDesktopProject({
     setError
   });
 
+  const selectedProjectId = selectedProject?.projectId ?? null;
+
   useEffect(() => {
     if (!collaborationBridge) return;
-    if (!selectedProject || !selectedCanvasId) {
+    if (!selectedProjectId || !selectedCanvasId) {
       if (projectLoading || projectRefreshing) return;
       void collaborationBridge.clearCollaborationCurrentSelection().catch((error: unknown) => {
         setError(error instanceof Error ? error.message : String(error));
@@ -172,11 +174,14 @@ export function useDesktopProject({
       return;
     }
     void collaborationBridge
-      .setCollaborationCurrentSelection({ projectId: selectedProject.projectId, canvasId: selectedCanvasId })
+      .setCollaborationCurrentSelection({
+        projectId: selectedProjectId,
+        canvasId: selectedCanvasId
+      })
       .catch((error: unknown) => {
         setError(error instanceof Error ? error.message : String(error));
       });
-  }, [projectLoading, projectRefreshing, selectedCanvasId, selectedProject?.projectId, setError]);
+  }, [projectLoading, projectRefreshing, selectedCanvasId, selectedProjectId, setError]);
 
   return {
     expandedProjectId,

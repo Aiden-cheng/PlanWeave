@@ -155,9 +155,11 @@ export function useCollaborationCanvasPresence(input: {
     };
   }, [api, labels]);
 
+  const remoteCanvasId = currentScope?.remoteCanvasId ?? null;
+
   useEffect(() => {
     const controller = controllerRef.current;
-    const shouldRun = Boolean(controller && scopeEnabled && currentScope && input.profileId);
+    const shouldRun = Boolean(controller && scopeEnabled && remoteCanvasId && input.profileId);
     if (!controller || !shouldRun) {
       desiredPointerRef.current = null;
       desiredSelectionRef.current = [];
@@ -166,11 +168,10 @@ export function useCollaborationCanvasPresence(input: {
       return undefined;
     }
     setError(null);
-    const canvasId = currentScope?.remoteCanvasId ?? null;
     const profileId = input.profileId;
-    if (!canvasId || !profileId) return undefined;
+    if (!remoteCanvasId || !profileId) return undefined;
     const scope = {
-      canvasId,
+      canvasId: remoteCanvasId,
       profileId
     };
     let active = true;
@@ -185,7 +186,7 @@ export function useCollaborationCanvasPresence(input: {
       lastPublishedRef.current = null;
       setRemoteSessions([]);
     };
-  }, [currentScope?.remoteCanvasId, input.profileId, scopeEnabled]);
+  }, [input.profileId, remoteCanvasId, scopeEnabled]);
 
   const publish = useCallback(
     (pointer: XYPosition | null, selectionIds: string[]) => {

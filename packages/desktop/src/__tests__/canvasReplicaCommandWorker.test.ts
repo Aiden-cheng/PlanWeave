@@ -249,7 +249,6 @@ describe("CanvasReplicaCommandWorker", () => {
     expect(laterContent.canonicalDigest).not.toBe(snapshotContent.canonicalDigest);
 
     const store = new CanvasReplicaStore(() => undefined);
-    let discoverUsed = false;
     const transport: CanvasReplicaCommandTransport = {
       async fetchReconnectBaseline() {
         // Only reconnect snapshot content is used.
@@ -268,8 +267,6 @@ describe("CanvasReplicaCommandWorker", () => {
         throw new Error("unexpected submit");
       }
     };
-    // Guard: transport must not call discover-style APIs.
-    void discoverUsed;
     const worker = new CanvasReplicaCommandWorker(store, transport);
     await worker.bind(baseScope);
     expect(store.revision(baseScope)).toBe(4);
@@ -564,5 +561,4 @@ describe("CanvasReplicaCommandWorker", () => {
     await worker2.bind(baseScope);
     expect(store.revision(baseScope)).toBe(4);
   });
-
 });

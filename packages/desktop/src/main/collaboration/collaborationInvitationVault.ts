@@ -13,10 +13,7 @@ const recordSchema = z.object({ encryptedInvitation: z.string().trim().min(1) })
 const documentSchema = z
   .object({
     version: z.literal(1),
-    invitations: z.record(
-      opaqueIdentifierSchema,
-      z.record(opaqueIdentifierSchema, recordSchema)
-    )
+    invitations: z.record(opaqueIdentifierSchema, z.record(opaqueIdentifierSchema, recordSchema))
   })
   .strict();
 type InvitationDocument = z.infer<typeof documentSchema>;
@@ -83,7 +80,8 @@ export class CollaborationInvitationVault {
     this.session.set(this.key(profileId, invitationId), invitation);
     if (!this.options.safeStorage.isEncryptionAvailable()) return "session-only";
     const document = await this.load();
-    const profileInvitations = (document.invitations[profileId] ??= {});
+    document.invitations[profileId] ??= {};
+    const profileInvitations = document.invitations[profileId];
     profileInvitations[invitationId] = {
       encryptedInvitation: this.options.safeStorage
         .encryptString(JSON.stringify(invitation))
@@ -93,7 +91,10 @@ export class CollaborationInvitationVault {
     return "persisted";
   }
 
-  async get(profileId: string, invitationId: string): Promise<HumanCreateInvitationResponse | null> {
+  async get(
+    profileId: string,
+    invitationId: string
+  ): Promise<HumanCreateInvitationResponse | null> {
     const cached = this.session.get(this.key(profileId, invitationId));
     if (cached) {
       if (!this.isExpired(cached)) return cached;

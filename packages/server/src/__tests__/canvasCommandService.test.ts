@@ -233,7 +233,7 @@ function submitBody(
 describe("canvas command service (OSS-004 B-002)", () => {
   it("publishes one complete journal entry only after a durable non-idempotent accept", async () => {
     const published: CanvasJournalEntry[] = [];
-    const { service, repository } = await fixture({
+    const { service } = await fixture({
       onAcceptedEntry: (entry) => published.push(entry),
       onAcceptedEntryUnavailable: () => {}
     });
@@ -259,7 +259,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
 
   it("publishes strictly increasing revisions for consecutive accepted commits", async () => {
     const published: CanvasJournalEntry[] = [];
-    const { service, repository } = await fixture({
+    const { service } = await fixture({
       onAcceptedEntry: (entry) => published.push(entry),
       onAcceptedEntryUnavailable: () => {}
     });
@@ -827,7 +827,7 @@ describe("canvas command service (OSS-004 B-002)", () => {
   it("commits immutable content and both authority heads in one accepted transaction", async () => {
     const runtime = createDefaultCanvasRuntimePort();
     const acceptedCommits: CanvasCommandAccepted[] = [];
-    const { workspace, database, access, repository, service, contentVersions } = await fixture({
+    const { database, access, repository, service, contentVersions } = await fixture({
       runtime,
       onAcceptedInCallerTransaction: (accepted) => acceptedCommits.push(accepted)
     });

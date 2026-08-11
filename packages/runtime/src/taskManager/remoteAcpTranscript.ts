@@ -17,9 +17,7 @@ import { optionalReaddir } from "../fs/optionalFile.js";
 import { parseBlockRef } from "../graph/compileTaskGraph.js";
 import { writeJsonFile } from "../json.js";
 import type { ProjectWorkspace } from "../types.js";
-import {
-  readImplementationRunMetadataFile
-} from "./implementationRunMetadata.js";
+import { readImplementationRunMetadataFile } from "./implementationRunMetadata.js";
 import { incrementTaskIndexCount, updateTaskIndex } from "./resultIndex.js";
 import type { ActiveRemoteOperationIdentity } from "./remoteOwnershipTransitions.js";
 import type { RemoteBlockCompletionInput } from "./remoteBlockRuntimeContracts.js";
@@ -49,7 +47,6 @@ async function findRunIdByExecutionAttempt(
       if (error instanceof Error && /is (invalid|malformed JSON):/.test(error.message)) {
         throw error;
       }
-      continue;
     }
   }
   return null;
@@ -69,10 +66,7 @@ export async function ensureRemoteReviewAcpConversationRun(options: {
 }): Promise<string> {
   const { taskId, blockId } = parseBlockRef(options.ref);
   const runRoot = join(options.workspace.resultsDir, taskId, "blocks", blockId, "runs");
-  const existing = await findRunIdByExecutionAttempt(
-    runRoot,
-    options.identity.executionAttemptId
-  );
+  const existing = await findRunIdByExecutionAttempt(runRoot, options.identity.executionAttemptId);
   if (existing) {
     return existing;
   }

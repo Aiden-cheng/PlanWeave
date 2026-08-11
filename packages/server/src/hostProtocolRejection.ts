@@ -16,7 +16,7 @@ const GENERIC_MESSAGE = "The server rejected the host event.";
 
 function truncateMessage(value: string): string {
   if (value.length <= PROTOCOL_ERROR_MESSAGE_MAX_LENGTH) return value;
-  return value.slice(0, PROTOCOL_ERROR_MESSAGE_MAX_LENGTH - 1) + "…";
+  return `${value.slice(0, PROTOCOL_ERROR_MESSAGE_MAX_LENGTH - 1)}…`;
 }
 
 function clampCode(value: string): string {
@@ -68,7 +68,9 @@ export function publicHostProtocolRejection(error: unknown): PublicHostProtocolR
       const code = clampCode(`host_event_unsupported:${eventType || "unknown"}`);
       return {
         code,
-        message: truncateMessage(`Host event type is not supported by this Server: ${eventType || "unknown"}`)
+        message: truncateMessage(
+          `Host event type is not supported by this Server: ${eventType || "unknown"}`
+        )
       };
     }
     // Stable machine codes (snake_case / dotted) may be returned as-is.

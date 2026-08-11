@@ -1,5 +1,3 @@
-import type { Migration } from "./types.js";
-
 export const migration1 = `
 CREATE TABLE server_metadata (
   key TEXT PRIMARY KEY,

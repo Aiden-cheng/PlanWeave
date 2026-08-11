@@ -12,8 +12,7 @@ import {
   type CanvasCommandOutcome,
   type CanvasCommandRejected,
   type CanvasJournalEntry,
-  type CanvasSnapshotContent,
-  type CanvasSnapshotMetadata
+  type CanvasSnapshotContent
 } from "@planweave-ai/collaboration-protocol/canvas/commands";
 import { type ActorRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { type PackageSnapshotDigestManifest } from "@planweave-ai/collaboration-protocol/content/snapshot";
@@ -378,10 +377,10 @@ export class CanvasCommandRepository {
         keyColumn: string
       ) => {
         const rows = this.database
-          .prepare(
-            `SELECT * FROM ${table} WHERE workspace_id=? AND project_id=? AND canvas_id=?`
-          )
-          .all(scope.workspaceId, scope.projectId, scope.canvasId) as Array<Record<string, unknown>>;
+          .prepare(`SELECT * FROM ${table} WHERE workspace_id=? AND project_id=? AND canvas_id=?`)
+          .all(scope.workspaceId, scope.projectId, scope.canvasId) as Array<
+          Record<string, unknown>
+        >;
         for (const row of rows) {
           archive.run(
             scope.workspaceId,
@@ -536,30 +535,30 @@ export class CanvasCommandRepository {
     });
 
     this.database
-        .prepare(
-          `INSERT INTO canvas_command_journal(
+      .prepare(
+        `INSERT INTO canvas_command_journal(
             workspace_id,project_id,canvas_id,entry_id,revision,previous_revision,operation_id,
             intent_json,intent_digest,content_digest,actor_kind,actor_id,actor_display_name,
             accepted_at,entry_json
           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-        )
-        .run(
-          input.scope.workspaceId,
-          input.scope.projectId,
-          input.scope.canvasId,
-          entryId,
-          input.revision,
-          input.previousRevision,
-          input.operationId,
-          JSON.stringify(input.intent),
-          input.intentDigest,
-          input.contentDigest,
-          input.actor.kind,
-          input.actor.id,
-          input.actor.displayName ?? null,
-          acceptedAt,
-          JSON.stringify(journalEntry)
-        );
+      )
+      .run(
+        input.scope.workspaceId,
+        input.scope.projectId,
+        input.scope.canvasId,
+        entryId,
+        input.revision,
+        input.previousRevision,
+        input.operationId,
+        JSON.stringify(input.intent),
+        input.intentDigest,
+        input.contentDigest,
+        input.actor.kind,
+        input.actor.id,
+        input.actor.displayName ?? null,
+        acceptedAt,
+        JSON.stringify(journalEntry)
+      );
 
     const headWrite = this.database
       .prepare(
@@ -584,32 +583,32 @@ export class CanvasCommandRepository {
     if (headWrite.changes !== 1) throw new Error("canvas_command_head_cas_conflict");
 
     this.database
-        .prepare(
-          `INSERT INTO canvas_command_operations(
+      .prepare(
+        `INSERT INTO canvas_command_operations(
             workspace_id,project_id,canvas_id,operation_id,intent_digest,intent_json,outcome_json,
             accepted,revision,journal_entry_id,created_at
           ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
-        )
-        .run(
-          input.scope.workspaceId,
-          input.scope.projectId,
-          input.scope.canvasId,
-          input.operationId,
-          input.intentDigest,
-          JSON.stringify(input.intent),
-          JSON.stringify(accepted),
-          1,
-          input.revision,
-          entryId,
-          acceptedAt
-        );
+      )
+      .run(
+        input.scope.workspaceId,
+        input.scope.projectId,
+        input.scope.canvasId,
+        input.operationId,
+        input.intentDigest,
+        JSON.stringify(input.intent),
+        JSON.stringify(accepted),
+        1,
+        input.revision,
+        entryId,
+        acceptedAt
+      );
 
     // Snapshots retain only metadata. The canonical baseline is always addressed by
     // the immutable content-version id derived from content_digest.
     const encoding = "content_version_ref";
     this.database
-        .prepare(
-          `INSERT INTO canvas_command_snapshots(
+      .prepare(
+        `INSERT INTO canvas_command_snapshots(
             workspace_id,project_id,canvas_id,revision,content_digest,created_at,
             package_snapshot_id,digest_manifest_json,size_bytes,encoding,integrity
           ) VALUES(?,?,?,?,?,?,?,?,?,?, 'verified')
@@ -621,19 +620,19 @@ export class CanvasCommandRepository {
             size_bytes=excluded.size_bytes,
             encoding=excluded.encoding,
             integrity='verified'`
-        )
-        .run(
-          input.scope.workspaceId,
-          input.scope.projectId,
-          input.scope.canvasId,
-          input.revision,
-          input.contentDigest,
-          acceptedAt,
-          input.packageSnapshotId ?? null,
-          input.digestManifest ? JSON.stringify(input.digestManifest) : null,
-          input.sizeBytes ?? null,
-          encoding
-        );
+      )
+      .run(
+        input.scope.workspaceId,
+        input.scope.projectId,
+        input.scope.canvasId,
+        input.revision,
+        input.contentDigest,
+        acceptedAt,
+        input.packageSnapshotId ?? null,
+        input.digestManifest ? JSON.stringify(input.digestManifest) : null,
+        input.sizeBytes ?? null,
+        encoding
+      );
 
     this.trimJournal(input.scope);
     this.trimSnapshots(input.scope);

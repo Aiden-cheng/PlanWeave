@@ -4,7 +4,6 @@
  * never task titles, prompts, Block lifecycle, Host presence, or capability copies.
  * Unassign keeps a durable row with target_kind='unassigned' (revision advances; no silent delete).
  */
-import type { Migration } from "./types.js";
 import type { SqliteDatabase } from "../sqlite.js";
 import { tableExists } from "./legacyTail.js";
 

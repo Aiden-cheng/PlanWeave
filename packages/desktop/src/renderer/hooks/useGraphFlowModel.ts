@@ -121,8 +121,7 @@ export function useGraphFlowModel({
     handleTitleSave,
     startAutoRunWithScope
   } = taskActions;
-  const { saveSelectedBlockPrompt, saveSelectedBlockTitle } =
-    blockActions;
+  const { saveSelectedBlockPrompt, saveSelectedBlockTitle } = blockActions;
   const { setEdges, setNodes, setSelectedBlock } = flowState;
   const agentEndpointFleetCatalogError = formatAgentEndpointFleetCatalogError(
     agentEndpointCatalogErrorCode,
@@ -189,7 +188,6 @@ export function useGraphFlowModel({
     onResourceHover,
     onResourcePin,
     onResourceOverflow,
-    agentEndpointCatalogErrorCode,
     agentEndpointFleetCatalogError,
     agentEndpoints,
     selectedAgentEndpointIdForTask,
