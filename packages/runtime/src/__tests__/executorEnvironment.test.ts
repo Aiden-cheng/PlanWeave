@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -155,11 +156,15 @@ async function forceStopWslProcessGroup(distribution: string, parentPid: number)
 }
 
 const WSL_LIFECYCLE_PROCESS_SCRIPT = [
-  'child_program=\'trap "" TERM; printf "%s\\n" "$$" > child.pid; : > child.ready; while :; do sleep 1; done\'',
-  'sh -c "$child_program" &',
-  'printf "%s\\n" "$$" > parent.pid',
-  "while [ ! -f child.ready ]; do :; done",
-  ": > parent.ready",
+  'pw_parent_pid_path="$1"',
+  'pw_child_pid_path="$2"',
+  'pw_child_ready_path="$3"',
+  'pw_parent_ready_path="$4"',
+  'child_program=\'trap "" TERM; printf "%s\\n" "$$" > "$1"; : > "$2"; while :; do sleep 1; done\'',
+  'sh -c "$child_program" planweave-wsl-child "$pw_child_pid_path" "$pw_child_ready_path" &',
+  'printf "%s\\n" "$$" > "$pw_parent_pid_path"',
+  'while [ ! -f "$pw_child_ready_path" ]; do :; done',
+  ': > "$pw_parent_ready_path"',
   "trap 'exit 0' TERM",
   "wait"
 ].join("; ");
@@ -237,9 +242,10 @@ describe("executor environment", () => {
         skip(reason);
       }
 
-      const runDir = await mkdtemp(join(process.cwd(), ".planweave-wsl-lifecycle-"));
+      const runDir = await mkdtemp(join(homedir(), ".planweave-wsl-lifecycle-"));
       const parentPidPath = join(runDir, "parent.pid");
       const childPidPath = join(runDir, "child.pid");
+      const childReadyPath = join(runDir, "child.ready");
       const parentReadyPath = join(runDir, "parent.ready");
       const stdoutPath = join(runDir, "stdout.log");
       const abort = new AbortController();
@@ -251,7 +257,16 @@ describe("executor environment", () => {
       try {
         running = execWithStreaming({
           command: "sh",
-          args: ["-c", WSL_LIFECYCLE_PROCESS_SCRIPT],
+          args: [
+            "-c",
+            WSL_LIFECYCLE_PROCESS_SCRIPT,
+            "planweave-wsl-lifecycle",
+            parentPidPath,
+            childPidPath,
+            childReadyPath,
+            parentReadyPath
+          ],
+          pathArgIndexes: [3, 4, 5, 6],
           cwd: runDir,
           stdin: "",
           host: { kind: "wsl", distribution: WSL_DISTRIBUTION },
