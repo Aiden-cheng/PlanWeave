@@ -66,8 +66,7 @@ export function useAgentEndpointCatalog(input: {
     const generation = ++generationRef.current;
     const requestProfileId = operatorProfileId;
     const canWrite = () =>
-      generation === generationRef.current &&
-      requestProfileId === operatorProfileIdRef.current;
+      generation === generationRef.current && requestProfileId === operatorProfileIdRef.current;
     if (!input.enabled || !requestProfileId || !listFleetEndpoints) {
       clearRetryTimer();
       setRemoteEndpoints([]);

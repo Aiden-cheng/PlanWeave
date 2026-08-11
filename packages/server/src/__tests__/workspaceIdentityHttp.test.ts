@@ -130,15 +130,21 @@ describe("workspace identity HTTP", () => {
     expect(body.hosts.some((host) => host.credentialExpiresAt !== null)).toBe(true);
     expect(body.hosts.some((host) => host.revokedAt !== null)).toBe(true);
     expect(body.migration.status).toBe("completed");
-    expect(JSON.stringify(body)).not.toMatch(/credential(?:Sha256|Hash|Token)|token|projectRoot|digest/i);
+    expect(JSON.stringify(body)).not.toMatch(
+      /credential(?:Sha256|Hash|Token)|token|projectRoot|digest/i
+    );
 
     const scoped = await fetch(url, {
       headers: { Authorization: `Bearer ${scopedToken}` }
     });
     expect(scoped.status).toBe(200);
-    expect((await fetch(`${url}?limit=1&cursor=0`, {
-      headers: { Authorization: `Bearer ${adminToken}` }
-    })).status).toBe(400);
+    expect(
+      (
+        await fetch(`${url}?limit=1&cursor=0`, {
+          headers: { Authorization: `Bearer ${adminToken}` }
+        })
+      ).status
+    ).toBe(400);
     expect((await fetch(url)).status).toBe(401);
   });
 

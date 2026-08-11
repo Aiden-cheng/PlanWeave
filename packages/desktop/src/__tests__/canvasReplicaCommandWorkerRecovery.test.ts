@@ -115,11 +115,7 @@ function createGate(): Gate {
 }
 
 /** Race a promise against a timeout; always clear the losing timer. */
-async function settleOrTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  message: string
-): Promise<T> {
+async function settleOrTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -304,20 +300,11 @@ describe("CanvasReplicaCommandWorker recovery", () => {
 
     const pending = worker.submit(baseScope, intent);
     // Nested enqueueSerial self-lock would hang forever; bound wait proves settle.
-    const outcome = await settleOrTimeout(
-      pending,
-      2000,
-      "same-lane recovery deadlock/timeout"
-    );
+    const outcome = await settleOrTimeout(pending, 2000, "same-lane recovery deadlock/timeout");
 
     expect(outcome.type).toBe("canvas.command.accepted");
     expect(events).toEqual(
-      expect.arrayContaining([
-        "uncertain",
-        "rebase-drop",
-        "confirm-stale",
-        "accept-after-recovery"
-      ])
+      expect.arrayContaining(["uncertain", "rebase-drop", "confirm-stale", "accept-after-recovery"])
     );
     // uncertain reconnect + same-lane recoverStaleRevisionInLane reconnect (+ optional retries)
     expect(reconnectCount).toBeGreaterThanOrEqual(2);
@@ -941,5 +928,4 @@ describe("CanvasReplicaCommandWorker recovery", () => {
     expect(store.revision(baseScope)).toBe(2);
     expect(store.pendingOperationIds(baseScope)).toEqual([]);
   });
-
 });

@@ -34,7 +34,10 @@ export type AgentEndpointRunPlan =
       selectionByBlockRef: ReadonlyMap<string, AgentEndpointBlockSelection>;
     };
 
-function rejectedForMismatch(blockRef: string, selection: Extract<EndpointSelection, { kind: "mismatch" }>): AgentEndpointRunPlan {
+function rejectedForMismatch(
+  blockRef: string,
+  selection: Extract<EndpointSelection, { kind: "mismatch" }>
+): AgentEndpointRunPlan {
   if (selection.detail.startsWith("agent_endpoint_unknown:")) {
     const remoteEndpointId = selection.detail.slice("agent_endpoint_unknown:".length);
     return {
@@ -53,10 +56,7 @@ function rejectedForUnavailable(input: {
   endpoint: AvailableAgentEndpoint | undefined;
   endpointId: string;
 }): AgentEndpointRunPlan {
-  const sourceLabel =
-    input.endpoint?.displayName ??
-    input.endpoint?.id ??
-    input.endpointId;
+  const sourceLabel = input.endpoint?.displayName ?? input.endpoint?.id ?? input.endpointId;
   const reasonCode =
     input.endpoint?.unavailableReason ??
     (input.endpoint ? "agent_endpoint_selection_unavailable" : "agent_endpoint_unknown");

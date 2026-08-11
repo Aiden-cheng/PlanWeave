@@ -38,10 +38,7 @@ export async function captureAuthorizedCanvasContent(input: {
     input.canvasId && typeof input.projectRoot === "string"
       ? await resolveTaskCanvasWorkspace(input.projectRoot, input.canvasId)
       : await resolvePackageWorkspace(input.projectRoot);
-  if (
-    input.expectedPackageDir !== undefined &&
-    workspace.packageDir !== input.expectedPackageDir
-  ) {
+  if (input.expectedPackageDir !== undefined && workspace.packageDir !== input.expectedPackageDir) {
     throw new Error("runtime_package_location_mismatch");
   }
   const captured = await capturePackageSnapshot({ projectRoot: workspace });

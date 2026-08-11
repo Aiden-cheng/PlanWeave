@@ -41,12 +41,24 @@ describe("OperatorTokenRegistry", () => {
       );
       const store = new OperatorSessionStore(database, () => new Date("2030-01-01T12:00:00.000Z"));
       session(store, workspaceId);
-      const registry = new OperatorTokenRegistry(database, [
-        { operatorId: "operator-a", tokenSha256: hashOperatorToken(tokenA), projectIds: ["project-a"] }
-      ], () => new Date("2030-01-01T12:00:00.000Z"));
+      const registry = new OperatorTokenRegistry(
+        database,
+        [
+          {
+            operatorId: "operator-a",
+            tokenSha256: hashOperatorToken(tokenA),
+            projectIds: ["project-a"]
+          }
+        ],
+        () => new Date("2030-01-01T12:00:00.000Z")
+      );
 
       const principal = registry.authenticate(`Bearer ${tokenA}`);
-      expect(principal).toMatchObject({ operatorId: "operator-a", workspaceId, projectIds: ["project-a"] });
+      expect(principal).toMatchObject({
+        operatorId: "operator-a",
+        workspaceId,
+        projectIds: ["project-a"]
+      });
       expect(registry.authenticate(`Bearer ${hostToken}`)).toBeUndefined();
       expect(registry.authenticate(`Bearer ${humanToken}`)).toBeUndefined();
       expect(registry.authenticate(`Bearer ${tokenB}`)).toBeUndefined();
@@ -65,15 +77,25 @@ describe("OperatorTokenRegistry", () => {
       const workspaceId = identity.ensureWorkspaceForLegacyProject("project-a");
       const store = new OperatorSessionStore(database, () => new Date("2030-01-03T00:00:00.000Z"));
       expect(() => session(store, workspaceId)).not.toThrow();
-      const registry = new OperatorTokenRegistry(database, [
-        { operatorId: "operator-a", tokenSha256: hashOperatorToken(tokenA), projectIds: ["project-a"] }
-      ], () => new Date("2030-01-03T00:00:00.000Z"));
+      const registry = new OperatorTokenRegistry(
+        database,
+        [
+          {
+            operatorId: "operator-a",
+            tokenSha256: hashOperatorToken(tokenA),
+            projectIds: ["project-a"]
+          }
+        ],
+        () => new Date("2030-01-03T00:00:00.000Z")
+      );
       expect(registry.authenticate(`Bearer ${tokenA}`)).toBeUndefined();
 
       const pending = identity.ensureWorkspaceForLegacyProject("project-pending");
-      database.prepare(
-        "UPDATE workspace_identity_migrations SET status='in_progress', interruption_marker='workspace_created' WHERE workspace_id=?"
-      ).run(pending);
+      database
+        .prepare(
+          "UPDATE workspace_identity_migrations SET status='in_progress', interruption_marker='workspace_created' WHERE workspace_id=?"
+        )
+        .run(pending);
       const pendingStore = new OperatorSessionStore(database);
       expect(() => session(pendingStore, pending, tokenB)).toThrow(
         "workspace_identity_read_cutover_incomplete"
@@ -92,24 +114,43 @@ describe("OperatorTokenRegistry", () => {
       const store = new OperatorSessionStore(database);
       session(store, firstWorkspace);
       const registry = new OperatorTokenRegistry(database, [
-        { operatorId: "operator-a", tokenSha256: hashOperatorToken(tokenA), projectIds: ["project-a"] }
+        {
+          operatorId: "operator-a",
+          tokenSha256: hashOperatorToken(tokenA),
+          projectIds: ["project-a"]
+        }
       ]);
       const scoped = registry.authenticate(`Bearer ${tokenA}`)!;
-      expect(() => registry.authorizeWorkspace(scoped, firstWorkspace, (projectId) =>
-        identity.workspaceForLegacyProject(projectId)
-      )).not.toThrow();
-      expect(() => registry.authorizeWorkspace(scoped, secondWorkspace, (projectId) =>
-        identity.workspaceForLegacyProject(projectId)
-      )).toThrow("operator_workspace_forbidden");
+      expect(() =>
+        registry.authorizeWorkspace(scoped, firstWorkspace, (projectId) =>
+          identity.workspaceForLegacyProject(projectId)
+        )
+      ).not.toThrow();
+      expect(() =>
+        registry.authorizeWorkspace(scoped, secondWorkspace, (projectId) =>
+          identity.workspaceForLegacyProject(projectId)
+        )
+      ).toThrow("operator_workspace_forbidden");
 
       const adminToken = `pw_operator_${"E".repeat(43)}`;
       session(store, firstWorkspace, adminToken, "2030-01-02T00:00:00.000Z", "operator-admin");
       const adminRegistry = new OperatorTokenRegistry(database, [
-        { operatorId: "operator-a", tokenSha256: hashOperatorToken(tokenA), projectIds: ["project-a"] },
-        { operatorId: "operator-admin", tokenSha256: hashOperatorToken(adminToken), projectIds: [], serverAdmin: true }
+        {
+          operatorId: "operator-a",
+          tokenSha256: hashOperatorToken(tokenA),
+          projectIds: ["project-a"]
+        },
+        {
+          operatorId: "operator-admin",
+          tokenSha256: hashOperatorToken(adminToken),
+          projectIds: [],
+          serverAdmin: true
+        }
       ]);
       const admin = adminRegistry.authenticate(`Bearer ${adminToken}`)!;
-      expect(() => adminRegistry.authorizeWorkspace(admin, secondWorkspace, () => undefined)).not.toThrow();
+      expect(() =>
+        adminRegistry.authorizeWorkspace(admin, secondWorkspace, () => undefined)
+      ).not.toThrow();
       expect(identity.workspaceExists("workspace-does-not-exist")).toBe(false);
     } finally {
       database.close();

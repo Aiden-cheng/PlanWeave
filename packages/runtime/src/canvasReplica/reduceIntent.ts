@@ -4,10 +4,7 @@ import {
 } from "@planweave-ai/collaboration-protocol/canvas/commands";
 import { buildCanvasCommandApplication } from "../graph/canvasCommandMutation.js";
 import type { PlanPackageGraphMutationSideEffect } from "../graph/mutation.js";
-import {
-  parseCanvasReplicaDocument,
-  type CanvasReplicaDocument
-} from "./document.js";
+import { parseCanvasReplicaDocument, type CanvasReplicaDocument } from "./document.js";
 
 function applySideEffect(
   prompts: Map<string, string>,
@@ -34,11 +31,7 @@ export function applyCanvasReplicaIntent(
 ): CanvasReplicaDocument {
   const document = parseCanvasReplicaDocument(input);
   const intent = canvasCommandIntentSchema.parse(rawIntent);
-  const application = buildCanvasCommandApplication(
-    document.manifest,
-    document.layout,
-    intent
-  );
+  const application = buildCanvasCommandApplication(document.manifest, document.layout, intent);
   const prompts = new Map(Object.entries(document.promptMarkdownByPath));
   for (const sideEffect of application.graphMutation.sideEffects) {
     applySideEffect(prompts, sideEffect);

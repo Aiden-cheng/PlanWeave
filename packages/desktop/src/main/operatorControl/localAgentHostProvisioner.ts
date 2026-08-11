@@ -336,10 +336,7 @@ export class DesktopLocalAgentHostProvisioner implements LocalAgentHostProvision
       "local_agent_host_background_install_failed",
       () => this.operator.installBackground(enrollment.configPath, this.launcher)
     );
-    const serverConnection = await resolveServerConnection(
-      enrollment.configPath,
-      background.state
-    );
+    const serverConnection = await resolveServerConnection(enrollment.configPath, background.state);
     return operatorLocalAgentHostStatusSchema.parse({
       supported: true,
       state: background.state === "running" ? "ready" : "background_setup_required",
@@ -414,4 +411,3 @@ export function unavailableLocalAgentHostProvisioner(): LocalAgentHostProvisione
     }
   };
 }
-

@@ -404,9 +404,10 @@ export class RemoteInteractionService {
       .map(toRecord);
   }
 
-  private findActiveAttempt(input: { hostId: string; request: InteractionRequest }):
-    | { operationId: string }
-    | undefined {
+  private findActiveAttempt(input: {
+    hostId: string;
+    request: InteractionRequest;
+  }): { operationId: string } | undefined {
     const row = this.database
       .prepare(
         `SELECT a.operation_id,a.dispatch_id,a.host_id,a.lease_id,a.status AS attempt_status,

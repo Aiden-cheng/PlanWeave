@@ -116,9 +116,9 @@ describe("remote Endpoint dispatch capacity gate", () => {
       endpointId: "endpoint-a",
       execute: () => firstTerminal.promise
     });
-    await expect(
-      gate.run({ endpointId: "endpoint-b", execute: async () => "done" })
-    ).resolves.toBe("done");
+    await expect(gate.run({ endpointId: "endpoint-b", execute: async () => "done" })).resolves.toBe(
+      "done"
+    );
     firstTerminal.resolve();
     await first;
   });

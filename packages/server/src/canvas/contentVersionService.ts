@@ -103,7 +103,10 @@ export class ContentVersionService {
   authorizeFetch(
     context: CollaborationAuthContext,
     rawRequest: unknown
-  ): { scope: CanvasScopeKey; content: ReturnType<typeof contentVersionFetchRequestSchema.parse>["content"] } {
+  ): {
+    scope: CanvasScopeKey;
+    content: ReturnType<typeof contentVersionFetchRequestSchema.parse>["content"];
+  } {
     const parsed = contentVersionFetchRequestSchema.safeParse(rawRequest);
     if (!parsed.success) throw new Error("content_fetch_invalid");
     const request = parsed.data;

@@ -70,9 +70,7 @@ export type ExecutionHost = z.infer<typeof executionHostSchema>;
 
 export const nativeExecutionHost: ExecutionHost = { kind: "native" };
 
-export function executorProfileExecutionHost(
-  profile: { host?: ExecutionHost }
-): ExecutionHost {
+export function executorProfileExecutionHost(profile: { host?: ExecutionHost }): ExecutionHost {
   return profile.host ?? nativeExecutionHost;
 }
 

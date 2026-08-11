@@ -7,10 +7,7 @@ import { AgentEndpointCatalogError } from "./agentEndpointCatalog.js";
  */
 export type ReenterFailureDecision = "defer_host" | "seal_failed" | "fatal";
 
-const OP_LOCAL_ERROR_NAMES = new Set([
-  "RemoteBlockRuntimeError",
-  "RemoteOwnershipConflictError"
-]);
+const OP_LOCAL_ERROR_NAMES = new Set(["RemoteBlockRuntimeError", "RemoteOwnershipConflictError"]);
 
 const OP_LOCAL_MESSAGE_CODES = new Set([
   "remote_source_changed",

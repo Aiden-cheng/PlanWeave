@@ -251,7 +251,9 @@ describe("OSS-004 canvas command contracts", () => {
       );
     }
 
-    expect(() => canvasSnapshotContentSchema.parse(exampleCanvasMalformedSnapshotInput.snapshot)).toThrow();
+    expect(() =>
+      canvasSnapshotContentSchema.parse(exampleCanvasMalformedSnapshotInput.snapshot)
+    ).toThrow();
     expect(() =>
       canvasReconnectResponseSchema.parse(exampleCanvasMalformedSnapshotInput)
     ).toThrow();

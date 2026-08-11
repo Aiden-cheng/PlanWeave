@@ -34,7 +34,8 @@ function findRemoteEndpoint(
   return endpoints.find(
     (endpoint) =>
       endpoint.source === "remote" &&
-      (endpoint.remoteEndpointId === remoteEndpointId || endpoint.id === `remote:${remoteEndpointId}`)
+      (endpoint.remoteEndpointId === remoteEndpointId ||
+        endpoint.id === `remote:${remoteEndpointId}`)
   );
 }
 

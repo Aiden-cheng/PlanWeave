@@ -19,9 +19,9 @@ export const planweaveToolDefinitionRegistries = [
   debugToolDefinitions
 ] as const;
 
-type UnionToIntersection<Value> = (
-  Value extends unknown ? (value: Value) => void : never
-) extends (value: infer Intersection) => void
+type UnionToIntersection<Value> = (Value extends unknown ? (value: Value) => void : never) extends (
+  value: infer Intersection
+) => void
   ? Intersection
   : never;
 

@@ -4,10 +4,7 @@ import type {
   NormalizedFailure,
   ServerToHostCommand
 } from "../protocol.js";
-import {
-  normalizedFailureSchema,
-  type ArtifactMediaType
-} from "@planweave-ai/agent-host-protocol";
+import { normalizedFailureSchema, type ArtifactMediaType } from "@planweave-ai/agent-host-protocol";
 
 export type AgentHostExecuteCommand = Extract<ServerToHostCommand, { type: "execute_block" }>;
 

@@ -122,7 +122,8 @@ function packageDigestManifestFromContent(
   return {
     manifest: { digestSha256: manifest.digestSha256, sizeBytes: manifest.sizeBytes },
     prompts,
-    totalBytes: manifest.sizeBytes + prompts.reduce((total, member) => total + member.digest.sizeBytes, 0)
+    totalBytes:
+      manifest.sizeBytes + prompts.reduce((total, member) => total + member.digest.sizeBytes, 0)
   };
 }
 
@@ -137,7 +138,8 @@ export class CanvasCommandService {
 
   constructor(private readonly options: CanvasCommandServiceOptions) {
     if (
-      (options.onAcceptedEntry === undefined) !== (options.onAcceptedEntryUnavailable === undefined)
+      (options.onAcceptedEntry === undefined) !==
+      (options.onAcceptedEntryUnavailable === undefined)
     ) {
       throw new Error("canvas_live_sync_publication_callbacks_must_be_paired");
     }
@@ -220,7 +222,10 @@ export class CanvasCommandService {
   ): CanvasSnapshotContent | null {
     try {
       const authority = this.readAuthoritativeContent(scope);
-      if (authority.content.content.canonicalDigest !== this.options.repository.head(scope).contentDigest) {
+      if (
+        authority.content.content.canonicalDigest !==
+        this.options.repository.head(scope).contentDigest
+      ) {
         return null;
       }
       return {
@@ -261,25 +266,22 @@ export class CanvasCommandService {
         version: input.content.completed
       },
       accepted: {
-          scope: input.scope,
-          operationId: input.operationId,
-          intent: input.intent,
-          intentDigest: input.intentDigest,
-          actor: input.actor,
-          previousRevision: input.previousRevision,
-          expectedContentDigest: input.expectedContentDigest,
-          revision: input.previousRevision + 1,
-          contentDigest: input.content.completed.canonicalDigest,
-          digestManifest: input.digestManifest,
-          sizeBytes: input.content.content.totalBytes
+        scope: input.scope,
+        operationId: input.operationId,
+        intent: input.intent,
+        intentDigest: input.intentDigest,
+        actor: input.actor,
+        previousRevision: input.previousRevision,
+        expectedContentDigest: input.expectedContentDigest,
+        revision: input.previousRevision + 1,
+        contentDigest: input.content.completed.canonicalDigest,
+        digestManifest: input.digestManifest,
+        sizeBytes: input.content.content.totalBytes
       }
     });
   }
 
-  async submit(
-    actor: CollaborationAuthContext,
-    rawSubmit: unknown
-  ): Promise<CanvasCommandOutcome> {
+  async submit(actor: CollaborationAuthContext, rawSubmit: unknown): Promise<CanvasCommandOutcome> {
     const parsed = canvasCommandSubmitSchema.safeParse(rawSubmit);
     if (!parsed.success) {
       const projectId =
@@ -417,12 +419,16 @@ export class CanvasCommandService {
         canvasId: submit.canvasId,
         operationId: submit.operationId,
         code: "journal_unavailable",
-        detail: error instanceof Error ? error.message.slice(0, 200) : "content_authority_unavailable"
+        detail:
+          error instanceof Error ? error.message.slice(0, 200) : "content_authority_unavailable"
       });
     }
     let head = this.options.repository.head(scope);
     if (head.revision === 0 && head.contentDigest === "0".repeat(64)) {
-      head = this.options.repository.ensureInitialHead(scope, authority.content.content.canonicalDigest);
+      head = this.options.repository.ensureInitialHead(
+        scope,
+        authority.content.content.canonicalDigest
+      );
     }
     if (head.contentDigest !== authority.content.content.canonicalDigest) {
       return rejectedOutcome({
@@ -707,12 +713,16 @@ export class CanvasCommandService {
         projectId: request.projectId,
         canvasId: request.canvasId,
         code: "snapshot_malformed",
-        detail: error instanceof Error ? error.message.slice(0, 200) : "content_authority_unavailable"
+        detail:
+          error instanceof Error ? error.message.slice(0, 200) : "content_authority_unavailable"
       });
     }
     let head = this.options.repository.head(scope);
     if (head.revision === 0 && head.contentDigest === "0".repeat(64)) {
-      head = this.options.repository.ensureInitialHead(scope, authority.content.content.canonicalDigest);
+      head = this.options.repository.ensureInitialHead(
+        scope,
+        authority.content.content.canonicalDigest
+      );
     }
     if (head.contentDigest !== authority.content.content.canonicalDigest) {
       return canvasReconnectErrorSchema.parse({
@@ -839,10 +849,7 @@ export class CanvasCommandService {
     });
   }
 
-  private verifySnapshot(
-    expectedDigest: string,
-    snapshot: CanvasSnapshotContent
-  ): boolean {
+  private verifySnapshot(expectedDigest: string, snapshot: CanvasSnapshotContent): boolean {
     if (snapshot.metadata.contentDigest !== expectedDigest) return false;
     return snapshot.content.canonicalDigest === expectedDigest;
   }

@@ -254,9 +254,9 @@ describe("CanvasPresenceController", () => {
     const gen0ListenerCount = vi.mocked(transport.bridge.onCollaborationPresenceSignal).mock.calls
       .length;
     await controller.start({ profileId: "profile-1", canvasId: "canvas-b" });
-    expect(vi.mocked(transport.bridge.onCollaborationPresenceSignal).mock.calls.length).toBeGreaterThan(
-      gen0ListenerCount
-    );
+    expect(
+      vi.mocked(transport.bridge.onCollaborationPresenceSignal).mock.calls.length
+    ).toBeGreaterThan(gen0ListenerCount);
 
     // Late signal for the previous canvas must not pollute the new scope.
     transport.emit(

@@ -122,9 +122,7 @@ export const collaborationCanvasReplicaProjectionSchema = z
             .strict()
         ),
         diagnostics: z.array(
-          z
-            .object({ code: z.string(), message: z.string(), path: z.string().optional() })
-            .strict()
+          z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()
         ),
         layout: layoutSchema,
         blockDependenciesByRef: z.record(z.string(), z.array(z.string())),

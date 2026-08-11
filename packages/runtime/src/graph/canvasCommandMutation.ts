@@ -8,11 +8,7 @@ import {
   buildPlanPackageManifestChangeMutation,
   type PlanPackageGraphMutation
 } from "./mutation.js";
-import type {
-  ManifestBlock,
-  ManifestTaskNode,
-  PlanPackageManifest
-} from "../types.js";
+import type { ManifestBlock, ManifestTaskNode, PlanPackageManifest } from "../types.js";
 import type { DesktopLayout } from "../desktop/types.js";
 
 export class CanvasCommandMutationError extends Error {
@@ -142,8 +138,7 @@ function applyCanvasLayoutMutation(
   };
   return {
     nextLayout,
-    layoutChanged:
-      update !== undefined || retainedNodes.length !== layout.nodes.length
+    layoutChanged: update !== undefined || retainedNodes.length !== layout.nodes.length
   };
 }
 
@@ -211,9 +206,7 @@ export function buildCanvasCommandMutation(
     case "add_block": {
       const task = requireTask(manifest, intent.taskId);
       if (task.blocks.some((block) => block.id === intent.blockId)) {
-        throw new CanvasCommandMutationError(
-          `block_exists:${intent.taskId}#${intent.blockId}`
-        );
+        throw new CanvasCommandMutationError(`block_exists:${intent.taskId}#${intent.blockId}`);
       }
       const common = {
         id: intent.blockId,

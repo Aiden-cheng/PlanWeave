@@ -275,7 +275,9 @@ describe("no parallel UI executor write paths", () => {
           relative.includes("hooks/") ||
           relative.includes("task-workspace/")
         ) {
-          violations.push(`${relative}: direct update*Executor outside changeEndpoint half-writers`);
+          violations.push(
+            `${relative}: direct update*Executor outside changeEndpoint half-writers`
+          );
         }
       }
     }

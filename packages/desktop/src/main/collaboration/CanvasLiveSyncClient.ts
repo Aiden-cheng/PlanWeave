@@ -146,7 +146,11 @@ export class CanvasLiveSyncClient {
    * Open or re-open the live socket for one canvas. Does not replace subscribers.
    * Optional handlers are added as subscribers for backward compatibility.
    */
-  start(canvasId: string, lastRevision: CanvasRevision, handlers: CanvasLiveSyncHandlers = {}): void {
+  start(
+    canvasId: string,
+    lastRevision: CanvasRevision,
+    handlers: CanvasLiveSyncHandlers = {}
+  ): void {
     if (this.disposed) {
       throw new CollaborationClientError({
         kind: "aborted",
@@ -386,7 +390,10 @@ export class CanvasLiveSyncClient {
             this.setStatus({ state: "catchup_required", canvasId });
             return;
           }
-          if (this.status.state === "catchup_required" || this.status.state === "catchup_recovering") {
+          if (
+            this.status.state === "catchup_required" ||
+            this.status.state === "catchup_recovering"
+          ) {
             return;
           }
           if (code === 4001) {
@@ -414,7 +421,9 @@ export class CanvasLiveSyncClient {
       } catch (error) {
         if (!this.isScopeCurrent(generation, canvasId)) return;
         this.logger?.error?.(
-          redactCollaborationText(error instanceof Error ? error.message : "live sync connect failed")
+          redactCollaborationText(
+            error instanceof Error ? error.message : "live sync connect failed"
+          )
         );
         this.scheduleReconnect(canvasId, generation);
       }

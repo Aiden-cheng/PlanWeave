@@ -87,7 +87,10 @@ export async function writeHostConnectionStatus(
       await unlink(temporary);
     } catch (cleanupError) {
       if (!missing(cleanupError)) {
-        throw new AggregateError([error, cleanupError], "agent_host_connection_status_write_failed");
+        throw new AggregateError(
+          [error, cleanupError],
+          "agent_host_connection_status_write_failed"
+        );
       }
     }
     throw error;

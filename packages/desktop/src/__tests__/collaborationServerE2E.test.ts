@@ -523,11 +523,7 @@ describe("Desktop CollaborationClient against the Server composition", () => {
   it("maps remote action, event, interaction, and error routes through the client", async () => {
     const { fixture, ownerBootstrap } = await createIdentityFixture();
     const { workspaceOwner } = await configureWorkspaceWorkAccess({ fixture, ownerBootstrap });
-    const host = await connectEnrolledHost(
-      fixture.origin,
-      fixture.adminToken,
-      fixture.workspaceId
-    );
+    const host = await connectEnrolledHost(fixture.origin, fixture.adminToken, fixture.workspaceId);
     const endpointPage = await workspaceOwner.listAgentEndpoints();
     const agentEndpointId = endpointPage.items.find(
       (endpoint) => endpoint.status === "available"

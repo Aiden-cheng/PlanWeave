@@ -12,9 +12,7 @@ const HARD_TERMINAL_OPERATION_STATES = new Set<RemoteOperationObservation["state
  * still holding durable writeback evidence. Interrupted + awaiting_writeback means
  * the Host already finished; keep polling until Server seals the package.
  */
-export function isRemoteOperationWaitTerminal(
-  observation: RemoteOperationObservation
-): boolean {
+export function isRemoteOperationWaitTerminal(observation: RemoteOperationObservation): boolean {
   if (HARD_TERMINAL_OPERATION_STATES.has(observation.state)) return true;
   if (observation.state !== "interrupted") return false;
   return observation.dispatchStatus !== "awaiting_writeback";

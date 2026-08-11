@@ -231,7 +231,9 @@ describe("ensureStateForManifest manifest-drift repair", () => {
         }
       }
     });
-    expect(ensureStateForManifest(basicManifest(), reviewOwned).blocks["T-001#R-001"]).toMatchObject({
+    expect(
+      ensureStateForManifest(basicManifest(), reviewOwned).blocks["T-001#R-001"]
+    ).toMatchObject({
       status: "in_progress",
       remoteOwnership: {
         phase: "preparing",

@@ -158,7 +158,11 @@ export class SetupCodeStore {
     };
   }
 
-  findByToken(setupCode: string): (SetupCodeGrant & { issuer?: SetupCodeIssuer; credentialExpiresAt: string | null }) | undefined {
+  findByToken(
+    setupCode: string
+  ):
+    | (SetupCodeGrant & { issuer?: SetupCodeIssuer; credentialExpiresAt: string | null })
+    | undefined {
     let digest: string;
     try {
       digest = hashSetupCode(setupCode);
@@ -172,7 +176,11 @@ export class SetupCodeStore {
     return this.enrich(row);
   }
 
-  getById(setupCodeId: string): (SetupCodeGrant & { issuer?: SetupCodeIssuer; credentialExpiresAt: string | null }) | undefined {
+  getById(
+    setupCodeId: string
+  ):
+    | (SetupCodeGrant & { issuer?: SetupCodeIssuer; credentialExpiresAt: string | null })
+    | undefined {
     const id = setupCodeIdSchema.parse(setupCodeId);
     const row = this.database
       .prepare("SELECT * FROM setup_code_grants WHERE setup_code_id=?")
@@ -185,25 +193,28 @@ export class SetupCodeStore {
     workspaceId: string,
     options: { cursor: number; limit: number; openOnly?: boolean }
   ): SetupCodeGrant[] {
-    const rows = (
-      options.openOnly
-        ? (this.database
-            .prepare(
-              `SELECT * FROM setup_code_grants
+    const rows = options.openOnly
+      ? (this.database
+          .prepare(
+            `SELECT * FROM setup_code_grants
                WHERE workspace_id=? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at>?
                ORDER BY issued_at ASC, setup_code_id ASC
                LIMIT ? OFFSET ?`
-            )
-            .all(workspaceId, this.clock().toISOString(), options.limit, options.cursor) as SetupCodeGrantRow[])
-        : (this.database
-            .prepare(
-              `SELECT * FROM setup_code_grants
+          )
+          .all(
+            workspaceId,
+            this.clock().toISOString(),
+            options.limit,
+            options.cursor
+          ) as SetupCodeGrantRow[])
+      : (this.database
+          .prepare(
+            `SELECT * FROM setup_code_grants
                WHERE workspace_id=?
                ORDER BY issued_at ASC, setup_code_id ASC
                LIMIT ? OFFSET ?`
-            )
-            .all(workspaceId, options.limit, options.cursor) as SetupCodeGrantRow[])
-    );
+          )
+          .all(workspaceId, options.limit, options.cursor) as SetupCodeGrantRow[]);
     return rows.map(toGrant);
   }
 

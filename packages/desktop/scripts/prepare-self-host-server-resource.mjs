@@ -15,7 +15,9 @@ function run(command, args) {
     const child = spawn(command, args, { cwd: repositoryRoot, stdio: "inherit" });
     child.once("error", reject);
     child.once("close", (code) =>
-      code === 0 ? resolveRun() : reject(new Error(`self-host resource build failed with exit ${code}`))
+      code === 0
+        ? resolveRun()
+        : reject(new Error(`self-host resource build failed with exit ${code}`))
     );
   });
 }
@@ -47,6 +49,9 @@ await rm(stagingAppRoot, { recursive: true, force: true });
 await assertPortableDirectory(resolve(imageRoot, "app"));
 await Promise.all([
   cp(resolve(desktopRoot, "build/self-host-server.Dockerfile"), resolve(imageRoot, "Dockerfile")),
-  cp(resolve(repositoryRoot, "packages/server/docker-entrypoint.sh"), resolve(imageRoot, "docker-entrypoint.sh")),
+  cp(
+    resolve(repositoryRoot, "packages/server/docker-entrypoint.sh"),
+    resolve(imageRoot, "docker-entrypoint.sh")
+  ),
   cp(resolve(desktopRoot, "build/self-host-compose.yaml"), resolve(outputRoot, "compose.yaml"))
 ]);

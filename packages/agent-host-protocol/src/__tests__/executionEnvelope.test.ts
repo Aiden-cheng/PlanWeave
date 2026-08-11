@@ -181,7 +181,9 @@ describe("ExecutionEnvelope schema", () => {
   });
 
   it("accepts implementation and review block types whose task segment matches taskId", () => {
-    expect(() => parseExecutionEnvelope(validEnvelope({ blockType: "implementation" }))).not.toThrow();
+    expect(() =>
+      parseExecutionEnvelope(validEnvelope({ blockType: "implementation" }))
+    ).not.toThrow();
     expect(() => parseExecutionEnvelope(validEnvelope({ blockType: "review" }))).not.toThrow();
     expectRejects(() => parseExecutionEnvelope(validEnvelope({ blockRef: "OTHER#B-002" })));
   });

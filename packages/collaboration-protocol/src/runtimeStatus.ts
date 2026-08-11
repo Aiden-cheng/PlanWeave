@@ -59,6 +59,4 @@ export const canvasRuntimeStatusProjectionSchema = z
     }
   });
 
-export type CanvasRuntimeStatusProjection = z.infer<
-  typeof canvasRuntimeStatusProjectionSchema
->;
+export type CanvasRuntimeStatusProjection = z.infer<typeof canvasRuntimeStatusProjectionSchema>;

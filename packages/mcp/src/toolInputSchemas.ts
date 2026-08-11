@@ -132,9 +132,11 @@ export const updateReviewPipelineInputShape = {
 } satisfies z.core.$ZodLooseShape;
 
 export const createTaskToolInputSchema = z.strictObject(createTaskInputShape);
-export const updateTaskToolInputSchema = z.strictObject(updateTaskInputShape).refine(hasUpdateField, {
-  message: "At least one of title, promptMarkdown, or executor must be provided."
-});
+export const updateTaskToolInputSchema = z
+  .strictObject(updateTaskInputShape)
+  .refine(hasUpdateField, {
+    message: "At least one of title, promptMarkdown, or executor must be provided."
+  });
 export const updateBlockToolInputSchema = z
   .strictObject(updateBlockInputShape)
   .refine(hasBlockTarget, {

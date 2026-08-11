@@ -176,7 +176,7 @@ describe("peopleViewModels", () => {
             lastErrorCode: null,
             lastErrorMessage: null
           },
-          updatedAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
         },
         syncPhase: "ready",
         memberCount: 2

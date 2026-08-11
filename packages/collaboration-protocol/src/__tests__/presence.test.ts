@@ -41,7 +41,9 @@ describe("canvas presence contracts", () => {
 
   it("rejects unsupported versions, unknown fields, and forged client identity", () => {
     const hello = { type: "canvas.presence.hello", ...scope } as const;
-    expect(() => canvasPresenceClientMessageSchema.parse({ ...hello, protocolVersion: 2 })).toThrow();
+    expect(() =>
+      canvasPresenceClientMessageSchema.parse({ ...hello, protocolVersion: 2 })
+    ).toThrow();
     expect(() => canvasPresenceClientMessageSchema.parse({ ...hello, extra: true })).toThrow();
     expect(() =>
       canvasPresenceClientMessageSchema.parse({

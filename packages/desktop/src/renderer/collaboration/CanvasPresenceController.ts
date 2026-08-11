@@ -74,9 +74,7 @@ function cleanSelectionIds(value: unknown): string[] {
   return ids;
 }
 
-function sanitizeSession(
-  session: CanvasPresenceSession
-): CanvasPresenceRemoteSession | null {
+function sanitizeSession(session: CanvasPresenceSession): CanvasPresenceRemoteSession | null {
   const parsed = canvasPresenceSessionSchema.safeParse(session);
   if (!parsed.success) return null;
   return {

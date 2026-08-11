@@ -957,23 +957,20 @@ describe("distributed server composition", () => {
     const address = httpServer.address();
     if (!address || typeof address === "string") throw new Error("Expected HTTP address");
 
-    const dispatch = await fetch(
-      `http://127.0.0.1:${address.port}/api/v1/remote-operations`,
-      {
-        method: "POST",
-        headers: jsonHeaders(adminToken),
-        body: JSON.stringify({
-          schemaVersion: "remote-run/v3",
-          projectId,
-          canvasId: "default",
-          blockRef: "T-001#B-001",
-          agentEndpointId: "endpoint-not-enrolled",
-          idempotencyKey: "owner-only-dispatch",
-          expectedResponsibilityRevision: 0,
-          expectedReviewerRevision: 0
-        })
-      }
-    );
+    const dispatch = await fetch(`http://127.0.0.1:${address.port}/api/v1/remote-operations`, {
+      method: "POST",
+      headers: jsonHeaders(adminToken),
+      body: JSON.stringify({
+        schemaVersion: "remote-run/v3",
+        projectId,
+        canvasId: "default",
+        blockRef: "T-001#B-001",
+        agentEndpointId: "endpoint-not-enrolled",
+        idempotencyKey: "owner-only-dispatch",
+        expectedResponsibilityRevision: 0,
+        expectedReviewerRevision: 0
+      })
+    });
 
     expect(dispatch.status).toBe(409);
     await expect(dispatch.json()).resolves.toEqual({ error: "agent_endpoint_unknown" });

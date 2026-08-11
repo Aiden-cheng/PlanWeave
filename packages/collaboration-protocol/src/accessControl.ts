@@ -39,9 +39,13 @@ export const accessCapabilityMatrix: Readonly<
   Record<ProjectAccessRole, readonly AccessCapability[]>
 > = Object.freeze({
   viewer: Object.freeze(["list", "read"] as const),
-  editor: Object.freeze(
-    ["list", "read", "persistent_canvas_command", "assignment", "comment"] as const
-  ),
+  editor: Object.freeze([
+    "list",
+    "read",
+    "persistent_canvas_command",
+    "assignment",
+    "comment"
+  ] as const),
   owner: Object.freeze([...accessCapabilities])
 });
 
@@ -55,7 +59,12 @@ export function roleHasAccessCapability(
 const accessScopeBaseSchema = z
   .object({
     workspaceId: workspaceIdSchema,
-    projectId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
+    projectId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
   })
   .strict();
 
@@ -66,7 +75,12 @@ export const projectAccessScopeSchema = accessScopeBaseSchema
 export const canvasAccessScopeSchema = accessScopeBaseSchema
   .extend({
     scopeKind: z.literal("canvas"),
-    canvasId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
+    canvasId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
   })
   .strict();
 export const accessScopeSchema = z.discriminatedUnion("scopeKind", [
@@ -141,7 +155,8 @@ function capabilityFlagsMatchRole(
   role: ProjectAccessRole | null
 ): boolean {
   return accessCapabilities.every(
-    (capability) => capabilities[capability] === (role !== null && roleHasAccessCapability(role, capability))
+    (capability) =>
+      capabilities[capability] === (role !== null && roleHasAccessCapability(role, capability))
   );
 }
 
@@ -332,21 +347,38 @@ export const serverAccessMutationContextSchema = z
   .strict()
   .superRefine((value, ctx) => {
     if (value.request.scope.workspaceId !== value.authenticatedWorkspaceId) {
-      ctx.addIssue({ code: "custom", message: "cross_workspace", path: ["request", "scope", "workspaceId"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "cross_workspace",
+        path: ["request", "scope", "workspaceId"]
+      });
     }
   });
 export type ServerAccessMutationContext = z.infer<typeof serverAccessMutationContextSchema>;
 
-export const accessMutationResultSchema = z
-  .discriminatedUnion("status", [
-    z.object({ status: z.literal("applied"), aclRevision: aclRevisionSchema, updatedAt: timestampSchema }).strict(),
-    z
-      .object({ status: z.literal("conflict"), reason: z.literal("acl_revision_conflict"), aclRevision: aclRevisionSchema })
-      .strict(),
-    z
-      .object({ status: z.literal("denied"), reason: accessDisabledReasonSchema, aclRevision: aclRevisionSchema })
-      .strict()
-  ]);
+export const accessMutationResultSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      status: z.literal("applied"),
+      aclRevision: aclRevisionSchema,
+      updatedAt: timestampSchema
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal("conflict"),
+      reason: z.literal("acl_revision_conflict"),
+      aclRevision: aclRevisionSchema
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal("denied"),
+      reason: accessDisabledReasonSchema,
+      aclRevision: aclRevisionSchema
+    })
+    .strict()
+]);
 export type AccessMutationResult = z.infer<typeof accessMutationResultSchema>;
 
 /** Active grant metadata needed to issue one exact-scope revoke; authority details stay server-side. */

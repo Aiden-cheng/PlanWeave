@@ -17,10 +17,7 @@ import {
 } from "./protocol.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
 import type { TransportAdmissionPolicy } from "./insecureTransport.js";
-import {
-  logHostProtocolRejection,
-  publicHostProtocolRejection
-} from "./hostProtocolRejection.js";
+import { logHostProtocolRejection, publicHostProtocolRejection } from "./hostProtocolRejection.js";
 
 export type AgentHostWebSocketOptions = {
   server: HttpServer;

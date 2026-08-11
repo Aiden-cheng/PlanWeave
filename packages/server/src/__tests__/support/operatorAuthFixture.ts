@@ -18,7 +18,8 @@ export async function seedOperatorSessions(
     const fallbackWorkspace = database
       .prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id LIMIT 1")
       .get()?.workspace_id;
-    if (typeof fallbackWorkspace !== "string") throw new Error("operator_fixture_workspace_missing");
+    if (typeof fallbackWorkspace !== "string")
+      throw new Error("operator_fixture_workspace_missing");
 
     for (const credential of credentials) {
       const workspaceId =

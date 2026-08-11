@@ -9,7 +9,10 @@ import {
 } from "@planweave-ai/runtime";
 import { expect, afterEach } from "vitest";
 import { WebSocket } from "ws";
-import { basicManifest, createTestWorkspace } from "../../../../runtime/src/__tests__/promptTestHelpers.js";
+import {
+  basicManifest,
+  createTestWorkspace
+} from "../../../../runtime/src/__tests__/promptTestHelpers.js";
 import { parseServerConfig } from "../../../../server/src/config.js";
 import { AgentHostRepository } from "../../../../server/src/hosts.js";
 import { hashOperatorToken } from "../../../../server/src/operatorAuth.js";
@@ -32,8 +35,12 @@ export const adminToken = `pw_operator_${"F".repeat(43)}`;
 
 afterEach(async () => {
   for (const composition of compositions.splice(0)) await composition.close();
-  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(resolve))));
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(resolve)))
+  );
+  await Promise.all(
+    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  );
 });
 
 export async function setupSelfHostedTwoClientFixture() {
@@ -78,12 +85,14 @@ export async function setupSelfHostedTwoClientFixture() {
     trustedProjects: [
       { workspaceId, projectId, projectRoot: workspace.root, trustAllDeclaredCanvases: true }
     ],
-    operatorCredentials: [{
-      operatorId: "two-client-e2e-admin",
-      tokenSha256: hashOperatorToken(adminToken),
-      projectIds: [],
-      serverAdmin: true
-    }]
+    operatorCredentials: [
+      {
+        operatorId: "two-client-e2e-admin",
+        tokenSha256: hashOperatorToken(adminToken),
+        projectIds: [],
+        serverAdmin: true
+      }
+    ]
   });
   compositions.push(await createDistributedServerComposition({ httpServer, config }));
   await seedOperatorSessions(config.databasePath, config.operatorCredentials);
@@ -98,17 +107,25 @@ export async function setupSelfHostedTwoClientFixture() {
 }
 
 export async function issueDeviceSetupCode(origin: string, workspaceId: string) {
-  const response = await fetch(`${origin}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/setup-codes`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ schemaVersion: "workspace-setup/v1", purpose: "device_session" })
-  });
+  const response = await fetch(
+    `${origin}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/setup-codes`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: "workspace-setup/v1", purpose: "device_session" })
+    }
+  );
   const body = await response.json();
   expect(response.status).toBe(201);
   return body as { setupCode: string; grant: { setupCodeId: string } };
 }
 
-export async function redeemDesktop(input: { home: string; name: string; origin: string; setupCode: string }) {
+export async function redeemDesktop(input: {
+  home: string;
+  name: string;
+  origin: string;
+  setupCode: string;
+}) {
   const vault = new CollaborationCredentialVault({
     paths: { credentialsPath: join(input.home, input.name, "credentials.json") }
   });
@@ -155,7 +172,10 @@ export async function discoverContentHead(
   );
   const body = (await response.json()) as {
     canPublishInitial?: boolean;
-    authoritativeHead?: { revision: number; content: { versionId: string; canonicalDigest: string } } | null;
+    authoritativeHead?: {
+      revision: number;
+      content: { versionId: string; canonicalDigest: string };
+    } | null;
     replicaStatus?: string;
   };
   return { status: response.status, body };
@@ -266,7 +286,12 @@ export async function configureWorkspaceAccess(input: {
   return { database, hostId: host.id };
 }
 
-export async function openPresence(origin: string, projectId: string, canvasId: string, token: string) {
+export async function openPresence(
+  origin: string,
+  projectId: string,
+  canvasId: string,
+  token: string
+) {
   const url = new URL(origin);
   url.protocol = "ws:";
   url.pathname = `/api/v1/projects/${encodeURIComponent(projectId)}/canvases/${encodeURIComponent(canvasId)}/human/presence`;
@@ -279,10 +304,15 @@ export async function openPresence(origin: string, projectId: string, canvasId: 
 }
 
 export function sendPresenceHello(socket: WebSocket, projectId: string, canvasId: string): void {
-  socket.send(JSON.stringify({ type: "canvas.presence.hello", protocolVersion: 1, projectId, canvasId }));
+  socket.send(
+    JSON.stringify({ type: "canvas.presence.hello", protocolVersion: 1, projectId, canvasId })
+  );
 }
 
-export function nextPresenceMessage(socket: WebSocket, type: string): Promise<Record<string, unknown>> {
+export function nextPresenceMessage(
+  socket: WebSocket,
+  type: string
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();

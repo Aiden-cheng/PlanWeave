@@ -35,7 +35,10 @@ export function createTrustedProjectControlPort(input: {
     const scope = canvasScopeRefSchema.parse(rawScope);
     const configured = configuredScopes.get(scopeKey(scope));
     if (!configured) return undefined;
-    const project = input.projectAccess.registry.projectInternal(scope.workspaceId, scope.projectId);
+    const project = input.projectAccess.registry.projectInternal(
+      scope.workspaceId,
+      scope.projectId
+    );
     const canvas = input.projectAccess.registry.canvasInternal(
       scope.workspaceId,
       scope.projectId,

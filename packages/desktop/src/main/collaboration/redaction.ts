@@ -25,10 +25,7 @@ export function redactCollaborationText(value: string): string {
       return "[REDACTED]";
     })
     .replace(WINDOWS_ABSOLUTE_PATH_LIKE, "<redacted-path>")
-    .replace(
-      UNIX_ABSOLUTE_PATH_LIKE,
-      (_match, boundary: string) => `${boundary}<redacted-path>`
-    )
+    .replace(UNIX_ABSOLUTE_PATH_LIKE, (_match, boundary: string) => `${boundary}<redacted-path>`)
     .replace(/"deviceToken"\s*:\s*"[^"]*"/g, '"deviceToken":"[REDACTED]"')
     .replace(/"invitationToken"\s*:\s*"[^"]*"/g, '"invitationToken":"[REDACTED]"')
     .replace(/"existingDeviceToken"\s*:\s*"[^"]*"/g, '"existingDeviceToken":"[REDACTED]"');

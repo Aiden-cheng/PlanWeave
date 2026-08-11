@@ -158,9 +158,7 @@ export function ensureStateForManifest(
       const receiptType = blockState.remoteOperationReceipt.blockType;
       // New receipts stamp blockType. Legacy receipts without it only fit implementation.
       const receiptMatchesType =
-        receiptType === undefined
-          ? block.type === "implementation"
-          : receiptType === block.type;
+        receiptType === undefined ? block.type === "implementation" : receiptType === block.type;
       if (!receiptMatchesType) {
         terminalReceiptTypeDriftRefs.add(ref);
       }

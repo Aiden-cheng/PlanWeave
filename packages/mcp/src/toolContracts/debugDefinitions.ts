@@ -1,9 +1,5 @@
 import { blockRefInput, projectCanvasInput, projectInput } from "./inputShapes.js";
-import {
-  defineToolDefinitions,
-  readOnlyAnnotations,
-  writeAnnotations
-} from "./types.js";
+import { defineToolDefinitions, readOnlyAnnotations, writeAnnotations } from "./types.js";
 
 export const debugToolDefinitions = defineToolDefinitions({
   get_project_graph_full_debug: {

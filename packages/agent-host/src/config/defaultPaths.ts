@@ -1,10 +1,7 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-  canonicalizeJson,
-  type AgentHostSetupHandoff
-} from "@planweave-ai/agent-host-protocol";
+import { canonicalizeJson, type AgentHostSetupHandoff } from "@planweave-ai/agent-host-protocol";
 import { parseAgentHostConfig, type AgentHostConfig } from "./schema.js";
 
 export type AgentHostDefaultPaths = {

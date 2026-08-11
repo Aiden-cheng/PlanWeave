@@ -103,8 +103,7 @@ export function TaskInspector({
   }, [graph, selectedTask]);
   const concreteExecutor = taskPreflightExecutorValue(selectedTask, taskBlocks);
   const endpointSelectValue =
-    selectedAgentEndpointId ??
-    `local:${concreteExecutor ?? selectedTask?.executor ?? "manual"}`;
+    selectedAgentEndpointId ?? `local:${concreteExecutor ?? selectedTask?.executor ?? "manual"}`;
   const preflight = useExecutorPreflight({
     bridgeUnavailableMessage: t("bridgeUnavailable"),
     cacheKey: graph ? `${graph.graphVersion}:${graph.packageFingerprint}` : null,

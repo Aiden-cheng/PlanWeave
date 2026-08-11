@@ -27,7 +27,10 @@ import {
   timestampSchema
 } from "./primitives.js";
 import { completedContentVersionRefSchema } from "./contentVersion.js";
-import { packageSnapshotDigestSchema, packageSnapshotDigestManifestSchema } from "./packageSnapshot.js";
+import {
+  packageSnapshotDigestSchema,
+  packageSnapshotDigestManifestSchema
+} from "./packageSnapshot.js";
 
 /**
  * Server-authoritative shared Canvas command, journal, snapshot, and reconnect contracts.
@@ -67,11 +70,7 @@ export const canvasJournalEntryIdSchema = opaqueIdentifierSchema.brand("CanvasJo
 export type CanvasJournalEntryId = z.infer<typeof canvasJournalEntryIdSchema>;
 
 /** Monotonic CAS counter for one project/canvas durable graph state. 0 means empty/initial. */
-export const canvasRevisionSchema = z
-  .number()
-  .int()
-  .nonnegative()
-  .max(COLLABORATION_REVISION_MAX);
+export const canvasRevisionSchema = z.number().int().nonnegative().max(COLLABORATION_REVISION_MAX);
 export type CanvasRevision = z.infer<typeof canvasRevisionSchema>;
 
 /** Stored revisions after the first accepted mutation are always >= 1. */
@@ -85,10 +84,7 @@ const canvasIdSchema = opaqueIdentifierSchema;
 const taskIdSchema = opaqueIdentifierSchema;
 const blockIdSchema = opaqueIdentifierSchema;
 
-const canvasPromptMarkdownSchema = z
-  .string()
-  .min(1)
-  .max(CANVAS_COMMAND_MAX_PROMPT_MARKDOWN_CHARS);
+const canvasPromptMarkdownSchema = z.string().min(1).max(CANVAS_COMMAND_MAX_PROMPT_MARKDOWN_CHARS);
 
 const canvasTitleSchema = z.string().trim().min(1).max(CANVAS_COMMAND_MAX_TITLE_LENGTH);
 
@@ -220,7 +216,10 @@ const canvasCommandIntentUnionSchema = z.discriminatedUnion("kind", [
       promptMarkdown: canvasPromptMarkdownSchema,
       acceptance: canvasAcceptanceItemsSchema.optional(),
       executor: opaqueIdentifierSchema.optional(),
-      blockPrompts: z.array(blockPromptEntrySchema).max(CANVAS_COMMAND_MAX_BLOCK_PROMPT_ENTRIES).optional(),
+      blockPrompts: z
+        .array(blockPromptEntrySchema)
+        .max(CANVAS_COMMAND_MAX_BLOCK_PROMPT_ENTRIES)
+        .optional(),
       layout: canvasLayoutNodeSchema.optional(),
       layoutUpdatedAt: timestampSchema.optional()
     })
@@ -552,7 +551,12 @@ export const canvasSnapshotMetadataSchema = z
     packageSnapshotId: packageSnapshotIdSchema.optional(),
     /** Bounded digest manifest; never embeds raw prompt bodies on the wire. */
     digestManifest: packageSnapshotDigestManifestSchema.optional(),
-    sizeBytes: z.number().int().nonnegative().max(256 * 1_024 * 1_024).optional()
+    sizeBytes: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(256 * 1_024 * 1_024)
+      .optional()
   })
   .strict();
 export type CanvasSnapshotMetadata = z.infer<typeof canvasSnapshotMetadataSchema>;

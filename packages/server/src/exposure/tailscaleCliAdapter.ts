@@ -90,11 +90,7 @@ function parseVersion(output: string): string {
   if (!match) throw tailscaleExposureFailure("TAILSCALE_VERSION_UNSUPPORTED");
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  if (
-    major !== 1 ||
-    minor < TAILSCALE_MINIMUM_STABLE_MINOR ||
-    minor % 2 !== 0
-  ) {
+  if (major !== 1 || minor < TAILSCALE_MINIMUM_STABLE_MINOR || minor % 2 !== 0) {
     throw tailscaleExposureFailure("TAILSCALE_VERSION_UNSUPPORTED");
   }
   return parsed.data.majorMinorPatch;

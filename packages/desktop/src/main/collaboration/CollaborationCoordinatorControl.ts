@@ -226,7 +226,8 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
           onLifecycleError,
           serve: (config) =>
             serveDistributedServer(config, {
-              createExposureLifecycle: (leases) => this.privateHttpsExposure.createLifecycle(leases),
+              createExposureLifecycle: (leases) =>
+                this.privateHttpsExposure.createLifecycle(leases),
               ownerTrustedProjects
             })
         }));
@@ -946,7 +947,11 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
           canvas.canvasId
         );
         const workspaceId = localWorkspaceIdForProject(projectId);
-        const key = this.ownerRuntimeScopeKey({ workspaceId, projectId, canvasId: canvas.canvasId });
+        const key = this.ownerRuntimeScopeKey({
+          workspaceId,
+          projectId,
+          canvasId: canvas.canvasId
+        });
         const existing = projects.get(key);
         if (existing && existing.projectRoot !== project.rootPath) {
           throw new Error("local_owner_runtime_project_catalog_ambiguous");

@@ -147,7 +147,9 @@ export class DeploymentActions {
   private readonly writeClipboard?: (value: string) => void;
   private readonly now: () => Date;
   private readonly resourceDirectory?: string;
-  private readonly resolveBundleSource?: (target: DeploymentTargetDraft) => Promise<DeploymentBundleSource>;
+  private readonly resolveBundleSource?: (
+    target: DeploymentTargetDraft
+  ) => Promise<DeploymentBundleSource>;
   private readonly showSaveDialog?: DeploymentActionsOptions["showSaveDialog"];
 
   constructor(options: DeploymentActionsOptions = {}) {
@@ -211,7 +213,8 @@ export class DeploymentActions {
     try {
       source = await this.resolveBundleSource(target);
     } catch (error) {
-      if (error instanceof DeploymentBundleUnavailableError) return unavailableBundleView(error.state);
+      if (error instanceof DeploymentBundleUnavailableError)
+        return unavailableBundleView(error.state);
       throw error;
     }
     try {
@@ -222,7 +225,8 @@ export class DeploymentActions {
       });
       await writeFile(save.filePath, archive, { mode: 0o600 });
     } catch (error) {
-      if (error instanceof DeploymentBundleUnavailableError) return unavailableBundleView(error.state);
+      if (error instanceof DeploymentBundleUnavailableError)
+        return unavailableBundleView(error.state);
       throw error;
     }
     return deploymentBundleExportViewSchema.parse({
@@ -308,11 +312,17 @@ async function archiveDirectory(
   for (const entry of entries) {
     const path = resolve(resolvedRoot, entry.name);
     if (relative(resolvedRoot, path).startsWith("..")) {
-      throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_path_escape");
+      throw new DeploymentBundleUnavailableError(
+        "invalid_project",
+        "deployment_bundle_path_escape"
+      );
     }
     const metadata = await lstat(path);
     if (metadata.isSymbolicLink()) {
-      throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_symlink_rejected");
+      throw new DeploymentBundleUnavailableError(
+        "invalid_project",
+        "deployment_bundle_symlink_rejected"
+      );
     }
     const name = `${prefix}/${entry.name}`;
     if (metadata.isDirectory()) {
@@ -320,7 +330,10 @@ async function archiveDirectory(
       continue;
     }
     if (!metadata.isFile()) {
-      throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_entry_invalid");
+      throw new DeploymentBundleUnavailableError(
+        "invalid_project",
+        "deployment_bundle_entry_invalid"
+      );
     }
     total.bytes += metadata.size;
     if (total.bytes > maxBundleInputBytes) {
@@ -337,7 +350,10 @@ async function createBundleArchive(input: {
 }): Promise<Uint8Array> {
   const config = serverConfigSchema.parse(input.source.config);
   if (!isAbsolute(input.source.workspaceRoot) || config.trustedProjects.length !== 1) {
-    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_source_invalid");
+    throw new DeploymentBundleUnavailableError(
+      "invalid_project",
+      "deployment_bundle_source_invalid"
+    );
   }
   const trusted = config.trustedProjects[0];
   if (
@@ -346,7 +362,10 @@ async function createBundleArchive(input: {
     trusted.projectRoot !== `/var/lib/planweave/projects/${input.source.projectId}` ||
     config.deployment?.serverOrigin !== input.target.endpoint.serverOrigin
   ) {
-    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_scope_invalid");
+    throw new DeploymentBundleUnavailableError(
+      "invalid_project",
+      "deployment_bundle_scope_invalid"
+    );
   }
   const configInput = serverConfigFileInput(config);
   const files: Record<string, Uint8Array> = {
@@ -357,7 +376,10 @@ async function createBundleArchive(input: {
   const composePath = resolve(input.resourceDirectory, "compose.yaml");
   const composeMetadata = await lstat(composePath);
   if (composeMetadata.isSymbolicLink() || !composeMetadata.isFile()) {
-    throw new DeploymentBundleUnavailableError("invalid_project", "deployment_bundle_compose_invalid");
+    throw new DeploymentBundleUnavailableError(
+      "invalid_project",
+      "deployment_bundle_compose_invalid"
+    );
   }
   total.bytes += composeMetadata.size;
   if (total.bytes > maxBundleInputBytes) {
@@ -365,7 +387,12 @@ async function createBundleArchive(input: {
   }
   files["compose.yaml"] = new Uint8Array(await readFile(composePath));
   await archiveDirectory(resolve(input.resourceDirectory, "image"), "image", files, total);
-  await archiveDirectory(input.source.workspaceRoot, `projects/${input.source.projectId}`, files, total);
+  await archiveDirectory(
+    input.source.workspaceRoot,
+    `projects/${input.source.projectId}`,
+    files,
+    total
+  );
   files[`projects/${input.source.projectId}/project.json`] = strToU8(
     `${JSON.stringify({
       id: input.source.projectId,

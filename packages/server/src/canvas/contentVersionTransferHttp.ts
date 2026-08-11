@@ -34,7 +34,11 @@ function encodedFrame(frame: unknown): Buffer {
 }
 
 function isResponseClosed(response: ContentVersionTransferResponse): boolean {
-  return response.destroyed === true || response.writableEnded === true || response.writableFinished === true;
+  return (
+    response.destroyed === true ||
+    response.writableEnded === true ||
+    response.writableFinished === true
+  );
 }
 
 async function writeFrame(
@@ -100,7 +104,9 @@ async function writeFrame(
   });
 }
 
-function validateTransfer(input: ReturnType<ContentVersionTransferRepository["openTransfer"]>): void {
+function validateTransfer(
+  input: ReturnType<ContentVersionTransferRepository["openTransfer"]>
+): void {
   const header = contentVersionTransferHeaderFrameSchema.parse(input.header);
   let index = 0;
   let totalBytes = 0;

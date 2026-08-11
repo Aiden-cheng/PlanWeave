@@ -10,9 +10,9 @@ import {
 
 describe("remoteReenterRecovery", () => {
   it("defers host catalog failures", () => {
-    expect(classifyReenterFailure(new AgentEndpointCatalogError("agent_endpoint_unavailable"))).toBe(
-      "defer_host"
-    );
+    expect(
+      classifyReenterFailure(new AgentEndpointCatalogError("agent_endpoint_unavailable"))
+    ).toBe("defer_host");
   });
 
   it("seals any writeback domain failure, not only one code", () => {
@@ -48,9 +48,11 @@ describe("remoteReenterRecovery", () => {
         )
       )
     ).toBe("seal_failed");
-    expect(isMissingActiveOwnership(
-      new RemoteOwnershipConflictError("remote_ownership_not_active", "gone")
-    )).toBe(true);
+    expect(
+      isMissingActiveOwnership(
+        new RemoteOwnershipConflictError("remote_ownership_not_active", "gone")
+      )
+    ).toBe(true);
     expect(classifyReenterFailure(new Error("remote_source_changed"))).toBe("seal_failed");
     expect(diagnosticFromReenterFailure(new Error("remote_source_changed"))).toEqual({
       code: "remote_source_changed",
@@ -62,9 +64,9 @@ describe("remoteReenterRecovery", () => {
     expect(classifyReenterFailure(new Error("injected_crash:after_runtime_writeback"))).toBe(
       "fatal"
     );
-    expect(classifyReenterFailure(new AggregateError([new Error("left"), new Error("right")]))).toBe(
-      "fatal"
-    );
+    expect(
+      classifyReenterFailure(new AggregateError([new Error("left"), new Error("right")]))
+    ).toBe("fatal");
     expect(classifyReenterFailure(new Error("reservation_version_conflict"))).toBe("fatal");
   });
 });

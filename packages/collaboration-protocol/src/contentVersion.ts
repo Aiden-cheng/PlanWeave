@@ -121,7 +121,11 @@ export const completeContentVersionSchema = z
   .superRefine((value, context) => {
     const paths = value.members.map((member) => member.path);
     if (new Set(paths).size !== paths.length) {
-      context.addIssue({ code: "custom", message: "duplicate_content_version_member_path", path: ["members"] });
+      context.addIssue({
+        code: "custom",
+        message: "duplicate_content_version_member_path",
+        path: ["members"]
+      });
     }
     for (let index = 0; index < value.members.length; index += 1) {
       const member = value.members[index]!;
@@ -141,14 +145,26 @@ export const completeContentVersionSchema = z
       }
     }
     if (value.members.filter((member) => member.kind === "manifest").length !== 1) {
-      context.addIssue({ code: "custom", message: "content_version_requires_one_manifest", path: ["members"] });
+      context.addIssue({
+        code: "custom",
+        message: "content_version_requires_one_manifest",
+        path: ["members"]
+      });
     }
     if (value.members.filter((member) => member.kind === "desktop_layout").length !== 1) {
-      context.addIssue({ code: "custom", message: "content_version_requires_one_desktop_layout", path: ["members"] });
+      context.addIssue({
+        code: "custom",
+        message: "content_version_requires_one_desktop_layout",
+        path: ["members"]
+      });
     }
     const totalBytes = value.members.reduce((sum, member) => sum + member.sizeBytes, 0);
     if (totalBytes !== value.totalBytes) {
-      context.addIssue({ code: "custom", message: "content_version_total_bytes_mismatch", path: ["totalBytes"] });
+      context.addIssue({
+        code: "custom",
+        message: "content_version_total_bytes_mismatch",
+        path: ["totalBytes"]
+      });
     }
   });
 export type CompleteContentVersion = z.infer<typeof completeContentVersionSchema>;
@@ -206,7 +222,11 @@ export const authoritativeContentVersionSchema = z
   });
 export type AuthoritativeContentVersion = z.infer<typeof authoritativeContentVersionSchema>;
 
-export const contentVersionRevisionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+export const contentVersionRevisionSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(Number.MAX_SAFE_INTEGER);
 export type ContentVersionRevision = z.infer<typeof contentVersionRevisionSchema>;
 
 export const authoritativeContentHeadSchema = z
@@ -233,21 +253,37 @@ export const contentVersionJournalEntrySchema = z
   .strict()
   .superRefine((value, context) => {
     if (value.revision !== value.previousRevision + 1) {
-      context.addIssue({ code: "custom", message: "content_version_journal_must_be_contiguous", path: ["revision"] });
+      context.addIssue({
+        code: "custom",
+        message: "content_version_journal_must_be_contiguous",
+        path: ["revision"]
+      });
     }
   });
 export type ContentVersionJournalEntry = z.infer<typeof contentVersionJournalEntrySchema>;
 
 export const firstContentVersionPublishRequestSchema = z
   .object({
-    projectId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    canvasId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    projectId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    canvasId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
     expectedHeadRevision: z.literal(0),
     expectedHeadVersionId: z.null(),
     content: completeContentVersionSchema
   })
   .strict();
-export type FirstContentVersionPublishRequest = z.infer<typeof firstContentVersionPublishRequestSchema>;
+export type FirstContentVersionPublishRequest = z.infer<
+  typeof firstContentVersionPublishRequestSchema
+>;
 
 /** Server-only authorization envelope. The request itself cannot assert an actor or owner role. */
 export const ownerAuthorizedFirstContentVersionPublishSchema = z
@@ -267,7 +303,10 @@ export const ownerAuthorizedFirstContentVersionPublishSchema = z
       value.actor.kind !== "human" ||
       value.actor.id !== value.owner
     ) {
-      context.addIssue({ code: "custom", message: "owner_authorized_initial_publish_scope_mismatch" });
+      context.addIssue({
+        code: "custom",
+        message: "owner_authorized_initial_publish_scope_mismatch"
+      });
     }
   });
 export type OwnerAuthorizedFirstContentVersionPublish = z.infer<
@@ -315,12 +354,24 @@ export const firstContentVersionPublishResultSchema = z.discriminatedUnion("outc
     })
     .strict()
 ]);
-export type FirstContentVersionPublishResult = z.infer<typeof firstContentVersionPublishResultSchema>;
+export type FirstContentVersionPublishResult = z.infer<
+  typeof firstContentVersionPublishResultSchema
+>;
 
 export const contentVersionFetchRequestSchema = z
   .object({
-    projectId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    canvasId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    projectId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    canvasId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
     content: completedContentVersionRefSchema
   })
   .strict();
@@ -339,7 +390,10 @@ export const authorizedContentVersionFetchSchema = z
       value.request.projectId !== value.scope.projectId ||
       value.request.canvasId !== value.scope.canvasId
     ) {
-      context.addIssue({ code: "custom", message: "authorized_content_version_fetch_scope_mismatch" });
+      context.addIssue({
+        code: "custom",
+        message: "authorized_content_version_fetch_scope_mismatch"
+      });
     }
   });
 export type AuthorizedContentVersionFetch = z.infer<typeof authorizedContentVersionFetchSchema>;
@@ -350,7 +404,9 @@ export const contentVersionMaterializeRequestSchema = z
     expectedCurrentVersionId: contentVersionIdSchema.nullable()
   })
   .strict();
-export type ContentVersionMaterializeRequest = z.infer<typeof contentVersionMaterializeRequestSchema>;
+export type ContentVersionMaterializeRequest = z.infer<
+  typeof contentVersionMaterializeRequestSchema
+>;
 
 export const contentVersionMaterializeOutcomeSchema = z.enum([
   "materialized",
@@ -358,7 +414,9 @@ export const contentVersionMaterializeOutcomeSchema = z.enum([
   "retry_required",
   "rejected"
 ]);
-export type ContentVersionMaterializeOutcome = z.infer<typeof contentVersionMaterializeOutcomeSchema>;
+export type ContentVersionMaterializeOutcome = z.infer<
+  typeof contentVersionMaterializeOutcomeSchema
+>;
 
 export const contentVersionMaterializeResultSchema = z
   .object({
@@ -371,10 +429,17 @@ export const contentVersionMaterializeResultSchema = z
   .superRefine((value, context) => {
     const successful = value.outcome === "materialized" || value.outcome === "already_materialized";
     if (successful && (value.retryable || value.reason !== null)) {
-      context.addIssue({ code: "custom", message: "successful_materialization_cannot_have_retry_reason" });
+      context.addIssue({
+        code: "custom",
+        message: "successful_materialization_cannot_have_retry_reason"
+      });
     }
     if (!successful && value.reason === null) {
-      context.addIssue({ code: "custom", message: "failed_materialization_requires_reason", path: ["reason"] });
+      context.addIssue({
+        code: "custom",
+        message: "failed_materialization_requires_reason",
+        path: ["reason"]
+      });
     }
   });
 export type ContentVersionMaterializeResult = z.infer<typeof contentVersionMaterializeResultSchema>;

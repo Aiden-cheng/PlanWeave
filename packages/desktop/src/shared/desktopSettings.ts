@@ -47,9 +47,9 @@ export const desktopAgentEndpointPreferenceSchema = z.union([
   desktopAgentEndpointPreferenceLegacySchema
 ]);
 
-export type DesktopAgentEndpointPreference = z.infer<
-  typeof desktopAgentEndpointPreferenceRemoteSchema
-> | z.infer<typeof desktopAgentEndpointPreferenceLocalSchema>;
+export type DesktopAgentEndpointPreference =
+  | z.infer<typeof desktopAgentEndpointPreferenceRemoteSchema>
+  | z.infer<typeof desktopAgentEndpointPreferenceLocalSchema>;
 
 export type DesktopUiSettings = {
   runtimePath: string;

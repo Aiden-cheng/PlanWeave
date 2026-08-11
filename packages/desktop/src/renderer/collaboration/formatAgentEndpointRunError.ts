@@ -2,20 +2,14 @@ import type { createTranslator } from "../i18n";
 
 type Translator = ReturnType<typeof createTranslator>;
 
-function withPlaceholders(
-  template: string,
-  values: Record<string, string>
-): string {
+function withPlaceholders(template: string, values: Record<string, string>): string {
   return Object.entries(values).reduce(
     (text, [key, value]) => text.replaceAll(`{${key}}`, value),
     template
   );
 }
 
-function matchPrefix(
-  message: string,
-  prefix: string
-): { rest: string } | null {
+function matchPrefix(message: string, prefix: string): { rest: string } | null {
   if (!message.startsWith(prefix)) return null;
   return { rest: message.slice(prefix.length) };
 }
@@ -25,10 +19,7 @@ function matchPrefix(
  * Keeps the original code in the message for diagnostics.
  * Unknown messages pass through unchanged.
  */
-export function formatAgentEndpointRunError(
-  message: string,
-  t: Translator
-): string {
+export function formatAgentEndpointRunError(message: string, t: Translator): string {
   if (message === "claim_bus_cancelled") {
     return withPlaceholders(t("claimBusCancelledError"), { code: message });
   }
@@ -122,8 +113,7 @@ export function formatAgentEndpointRunError(
   {
     const matched = matchPrefix(message, "agent_endpoint_unavailable:");
     if (matched) {
-      const [block = "unknown", endpoint = "unknown", ...reasonParts] =
-        matched.rest.split(":");
+      const [block = "unknown", endpoint = "unknown", ...reasonParts] = matched.rest.split(":");
       return withPlaceholders(t("agentEndpointUnavailableError"), {
         block,
         endpoint,

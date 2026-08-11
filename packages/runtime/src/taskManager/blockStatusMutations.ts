@@ -2,7 +2,12 @@ import { dirname } from "node:path";
 import { withCanvasLock } from "../fs/withCanvasLock.js";
 import { loadPackage } from "../package/loadPackage.js";
 import { writeState } from "../state.js";
-import type { BlockStatus, ExecutionGraphSession, PackageWorkspaceRef, RuntimeState } from "../types.js";
+import type {
+  BlockStatus,
+  ExecutionGraphSession,
+  PackageWorkspaceRef,
+  RuntimeState
+} from "../types.js";
 import { loadRuntime, refreshDerivedState } from "./runtimeContext.js";
 import {
   clearRemoteBlockOperationState,

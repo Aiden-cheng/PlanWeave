@@ -467,7 +467,9 @@ export class ProjectAccessRepository {
         const table = canvasId === null ? "project_registry" : "canvas_registry";
         const idColumn = canvasId === null ? "project_registry_id" : "canvas_registry_id";
         const projectScope =
-          canvasId === null ? this.registry.projectInternal(scope.workspaceId, scope.projectId) : undefined;
+          canvasId === null
+            ? this.registry.projectInternal(scope.workspaceId, scope.projectId)
+            : undefined;
         const canvasScope =
           canvasId === null
             ? undefined
@@ -499,8 +501,14 @@ export class ProjectAccessRepository {
         }
         const project = this.registry.projectInternal(scope.workspaceId, scope.projectId);
         const canvas =
-          canvasId === null ? undefined : this.registry.canvasInternal(scope.workspaceId, scope.projectId, canvasId);
-        if (!project || project.revokedAt !== null || (canvasId !== null && (!canvas || canvas.revokedAt !== null))) {
+          canvasId === null
+            ? undefined
+            : this.registry.canvasInternal(scope.workspaceId, scope.projectId, canvasId);
+        if (
+          !project ||
+          project.revokedAt !== null ||
+          (canvasId !== null && (!canvas || canvas.revokedAt !== null))
+        ) {
           return { status: "denied", reason: "scope_private", aclRevision: current };
         }
         const table = canvas ? "canvas_registry" : "project_registry";
@@ -519,7 +527,15 @@ export class ProjectAccessRepository {
             aclRevision: this.currentAclRevision(scope.workspaceId, scope.projectId, canvasId)
           };
         const grantId = `grant-${createHash("sha256")
-          .update([scope.workspaceId, scope.projectId, canvasId ?? "", request.humanPrincipalId, String(nextRevision)].join("\0"))
+          .update(
+            [
+              scope.workspaceId,
+              scope.projectId,
+              canvasId ?? "",
+              request.humanPrincipalId,
+              String(nextRevision)
+            ].join("\0")
+          )
           .digest("hex")
           .slice(0, 32)}`;
         this.database
@@ -550,7 +566,12 @@ export class ProjectAccessRepository {
              AND ((scope_kind='project' AND ? IS NULL) OR (scope_kind='canvas' AND canvas_id=?))`
         )
         .get(request.grantId, scope.workspaceId, scope.projectId, canvasId, canvasId) as
-        | { grant_id: string; scope_kind: string; canvas_id: string | null; revoked_at: string | null }
+        | {
+            grant_id: string;
+            scope_kind: string;
+            canvas_id: string | null;
+            revoked_at: string | null;
+          }
         | undefined;
       if (!grant) return { status: "denied", reason: "scope_private", aclRevision: current };
       if (grant.revoked_at !== null) {
@@ -571,14 +592,20 @@ export class ProjectAccessRepository {
         );
       if (updatedScope.changes !== 1) throw new Error("access_scope_revision_race");
       const revoked = this.database
-        .prepare("UPDATE project_access_grants SET revoked_at=?,acl_revision=? WHERE grant_id=? AND revoked_at IS NULL")
+        .prepare(
+          "UPDATE project_access_grants SET revoked_at=?,acl_revision=? WHERE grant_id=? AND revoked_at IS NULL"
+        )
         .run(at, current + 1, request.grantId);
       if (revoked.changes !== 1) throw new Error("access_grant_revision_race");
       return { status: "applied", aclRevision: current + 1, updatedAt: at };
     });
   }
 
-  private currentAclRevision(workspaceId: string, projectId: string, canvasId: string | null): number {
+  private currentAclRevision(
+    workspaceId: string,
+    projectId: string,
+    canvasId: string | null
+  ): number {
     const row =
       canvasId === null
         ? this.registry.projectInternal(workspaceId, projectId)

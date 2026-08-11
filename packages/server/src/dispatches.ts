@@ -665,10 +665,7 @@ export class DispatchService {
     }
     // Terminal complete/fail may arrive after wall-clock expiry; still accept identity match.
     // Soft-dropping those caused false lease_lost materializations while work already finished.
-    if (
-      !options.allowExpired &&
-      new Date(dispatch.leaseExpiresAt).getTime() <= Date.now()
-    ) {
+    if (!options.allowExpired && new Date(dispatch.leaseExpiresAt).getTime() <= Date.now()) {
       return { ok: false, reason: "lease_expired" };
     }
     return { ok: true, dispatch };
@@ -678,9 +675,7 @@ export class DispatchService {
   private canAcceptTerminalHostResult(dispatch: DispatchRecord): boolean {
     if (dispatch.status === "running" || dispatch.status === "cancelling") return true;
     // Late terminal after Server-side lease recovery interrupted the dispatch.
-    return (
-      dispatch.status === "interrupted" && dispatch.interruption?.reason === "lease_lost"
-    );
+    return dispatch.status === "interrupted" && dispatch.interruption?.reason === "lease_lost";
   }
 
   private async writeBack(dispatchId: string): Promise<DispatchRecord> {

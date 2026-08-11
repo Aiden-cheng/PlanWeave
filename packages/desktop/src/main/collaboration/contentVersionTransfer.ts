@@ -104,78 +104,84 @@ export async function fetchContentVersionTransfer(input: {
   );
   const { response } = stream;
   try {
-  if (!response.ok) {
-    const text = await input.transport.readBoundedError(response);
-    throw collaborationErrorFromHttp(response.status, text, response.headers.get("retry-after"));
-  }
-  const declaredType = response.headers.get("content-type") ?? "";
-  const mediaType = declaredType.split(";", 1)[0]?.trim().toLowerCase();
-  if (mediaType !== contentVersionTransferMediaType) {
-    await response.body?.cancel();
-    throw protocolError("content_transfer_media_type_invalid");
-  }
-  let header: ReturnType<typeof contentVersionTransferHeaderFrameSchema.parse> | undefined;
-  const members: ContentVersionMember[] = [];
-  let previousPath: string | undefined;
-  let totalBytes = 0;
-  let completed = false;
-  for await (const frame of ndjsonFrames(response)) {
-    if (frame.type === "header") {
-      if (header || members.length > 0 || completed) throw protocolError("content_transfer_header_order_invalid");
-      header = contentVersionTransferHeaderFrameSchema.parse(frame);
-      if (
-        header.scope.workspaceId !== input.scope.workspaceId ||
-        header.scope.projectId !== input.scope.projectId ||
-        header.scope.canvasId !== input.scope.canvasId ||
-        header.completed.versionId !== input.content.versionId ||
-        header.canonicalDigest !== input.content.canonicalDigest
-      ) {
-        throw protocolError("content_transfer_authority_mismatch");
+    if (!response.ok) {
+      const text = await input.transport.readBoundedError(response);
+      throw collaborationErrorFromHttp(response.status, text, response.headers.get("retry-after"));
+    }
+    const declaredType = response.headers.get("content-type") ?? "";
+    const mediaType = declaredType.split(";", 1)[0]?.trim().toLowerCase();
+    if (mediaType !== contentVersionTransferMediaType) {
+      await response.body?.cancel();
+      throw protocolError("content_transfer_media_type_invalid");
+    }
+    let header: ReturnType<typeof contentVersionTransferHeaderFrameSchema.parse> | undefined;
+    const members: ContentVersionMember[] = [];
+    let previousPath: string | undefined;
+    let totalBytes = 0;
+    let completed = false;
+    for await (const frame of ndjsonFrames(response)) {
+      if (frame.type === "header") {
+        if (header || members.length > 0 || completed)
+          throw protocolError("content_transfer_header_order_invalid");
+        header = contentVersionTransferHeaderFrameSchema.parse(frame);
+        if (
+          header.scope.workspaceId !== input.scope.workspaceId ||
+          header.scope.projectId !== input.scope.projectId ||
+          header.scope.canvasId !== input.scope.canvasId ||
+          header.completed.versionId !== input.content.versionId ||
+          header.canonicalDigest !== input.content.canonicalDigest
+        ) {
+          throw protocolError("content_transfer_authority_mismatch");
+        }
+        continue;
       }
-      continue;
-    }
-    if (!header) throw protocolError("content_transfer_header_missing");
-    if (frame.type === "member") {
-      if (completed || frame.index !== members.length) throw protocolError("content_transfer_member_order_invalid");
-      validateMember(frame.member, previousPath);
-      totalBytes += frame.member.sizeBytes;
-      if (
-        totalBytes > CONTENT_VERSION_MAX_TOTAL_BYTES ||
-        totalBytes > header.totalBytes ||
-        members.length >= header.memberCount
-      ) {
-        throw protocolError("content_transfer_total_bytes_invalid");
+      if (!header) throw protocolError("content_transfer_header_missing");
+      if (frame.type === "member") {
+        if (completed || frame.index !== members.length)
+          throw protocolError("content_transfer_member_order_invalid");
+        validateMember(frame.member, previousPath);
+        totalBytes += frame.member.sizeBytes;
+        if (
+          totalBytes > CONTENT_VERSION_MAX_TOTAL_BYTES ||
+          totalBytes > header.totalBytes ||
+          members.length >= header.memberCount
+        ) {
+          throw protocolError("content_transfer_total_bytes_invalid");
+        }
+        members.push(frame.member);
+        previousPath = frame.member.path;
+        continue;
       }
-      members.push(frame.member);
-      previousPath = frame.member.path;
-      continue;
+      if (completed) throw protocolError("content_transfer_complete_duplicate");
+      const complete = contentVersionTransferCompleteFrameSchema.parse(frame);
+      if (
+        complete.canonicalDigest !== header.canonicalDigest ||
+        complete.totalBytes !== header.totalBytes ||
+        complete.memberCount !== header.memberCount ||
+        members.length !== header.memberCount ||
+        totalBytes !== header.totalBytes
+      ) {
+        throw protocolError("content_transfer_complete_invalid");
+      }
+      completed = true;
     }
-    if (completed) throw protocolError("content_transfer_complete_duplicate");
-    const complete = contentVersionTransferCompleteFrameSchema.parse(frame);
-    if (
-      complete.canonicalDigest !== header.canonicalDigest ||
-      complete.totalBytes !== header.totalBytes ||
-      complete.memberCount !== header.memberCount ||
-      members.length !== header.memberCount ||
-      totalBytes !== header.totalBytes
-    ) {
-      throw protocolError("content_transfer_complete_invalid");
+    if (!header || !completed) throw protocolError("content_transfer_incomplete");
+    try {
+      return authoritativeContentVersionSchema.parse({
+        schemaVersion: header.schemaVersion,
+        scope: header.scope,
+        content: {
+          members,
+          canonicalDigest: header.canonicalDigest,
+          totalBytes: header.totalBytes
+        },
+        completed: header.completed,
+        createdAt: header.createdAt,
+        createdBy: header.createdBy
+      });
+    } catch (error) {
+      throw protocolError("content_transfer_authoritative_envelope_invalid", error);
     }
-    completed = true;
-  }
-  if (!header || !completed) throw protocolError("content_transfer_incomplete");
-  try {
-    return authoritativeContentVersionSchema.parse({
-      schemaVersion: header.schemaVersion,
-      scope: header.scope,
-      content: { members, canonicalDigest: header.canonicalDigest, totalBytes: header.totalBytes },
-      completed: header.completed,
-      createdAt: header.createdAt,
-      createdBy: header.createdBy
-    });
-  } catch (error) {
-    throw protocolError("content_transfer_authoritative_envelope_invalid", error);
-  }
   } catch (error) {
     if (stream.timedOut()) {
       throw new CollaborationClientError({

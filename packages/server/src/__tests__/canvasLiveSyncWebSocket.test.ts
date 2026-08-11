@@ -30,23 +30,62 @@ function initialContent(): CompleteContentVersion {
     {
       kind: "desktop_layout" as const,
       path: "desktop/layout.json",
-      content: JSON.stringify({ version: "desktop-layout/v1", projectId: "project-live", nodes: [], updatedAt: "2026-08-02T00:00:00.000Z" })
+      content: JSON.stringify({
+        version: "desktop-layout/v1",
+        projectId: "project-live",
+        nodes: [],
+        updatedAt: "2026-08-02T00:00:00.000Z"
+      })
     },
     {
       kind: "manifest" as const,
       path: "manifest.json",
-      content: JSON.stringify({ version: "plan-package/v1", project: { title: "Plan", description: "" }, execution: { parallel: { enabled: false, maxConcurrent: 1 } }, review: { maxFeedbackCycles: 1, completionPolicy: "strict" }, executors: {}, nodes: [{ id: "T-001", type: "task", title: "Task", prompt: "nodes/T-001/prompt.md", acceptance: ["done"], blocks: [{ id: "B-001", type: "implementation", title: "Block", prompt: "nodes/T-001/blocks/B-001.prompt.md" }] }], edges: [] })
+      content: JSON.stringify({
+        version: "plan-package/v1",
+        project: { title: "Plan", description: "" },
+        execution: { parallel: { enabled: false, maxConcurrent: 1 } },
+        review: { maxFeedbackCycles: 1, completionPolicy: "strict" },
+        executors: {},
+        nodes: [
+          {
+            id: "T-001",
+            type: "task",
+            title: "Task",
+            prompt: "nodes/T-001/prompt.md",
+            acceptance: ["done"],
+            blocks: [
+              {
+                id: "B-001",
+                type: "implementation",
+                title: "Block",
+                prompt: "nodes/T-001/blocks/B-001.prompt.md"
+              }
+            ]
+          }
+        ],
+        edges: []
+      })
     },
     { kind: "task_prompt" as const, path: "nodes/T-001/prompt.md", content: "# Task\n" },
-    { kind: "block_prompt" as const, path: "nodes/T-001/blocks/B-001.prompt.md", content: "# Block\n" }
+    {
+      kind: "block_prompt" as const,
+      path: "nodes/T-001/blocks/B-001.prompt.md",
+      content: "# Block\n"
+    }
   ]
-    .map((member) => ({ ...member, digestSha256: digest(member.content), sizeBytes: Buffer.byteLength(member.content, "utf8") }))
+    .map((member) => ({
+      ...member,
+      digestSha256: digest(member.content),
+      sizeBytes: Buffer.byteLength(member.content, "utf8")
+    }))
     .sort((left, right) => left.path.localeCompare(right.path));
   const totalBytes = members.reduce((sum, member) => sum + member.sizeBytes, 0);
   return {
     members,
     totalBytes,
-    canonicalDigest: digest(canonicalContentVersionDigestPayload({ members, totalBytes, canonicalDigest: "0".repeat(64) }))
+    canonicalDigest: digest(
+      canonicalContentVersionDigestPayload({ members, totalBytes, canonicalDigest: "0".repeat(64) })
+    )
   };
 }
 
@@ -109,7 +148,10 @@ async function setup() {
   const repository = new CanvasCommandRepository(database, {
     clock: () => new Date("2026-08-02T00:00:00.000Z")
   });
-  const contentVersions = new ContentVersionRepository(database, () => new Date("2026-08-02T00:00:00.000Z"));
+  const contentVersions = new ContentVersionRepository(
+    database,
+    () => new Date("2026-08-02T00:00:00.000Z")
+  );
   contentVersions.publishInitial({
     scope: { workspaceId, projectId: "project-live", canvasId: "default" },
     content: initialContent(),
@@ -209,7 +251,11 @@ function hello(socket: WebSocket, lastRevision: number): void {
   );
 }
 
-function commit(repository: CanvasCommandRepository, scope: { workspaceId: string; projectId: string; canvasId: string }, revision: number) {
+function commit(
+  repository: CanvasCommandRepository,
+  scope: { workspaceId: string; projectId: string; canvasId: string },
+  revision: number
+) {
   const digest = String(revision).repeat(64);
   const accepted = repository.commitAccepted({
     scope,
@@ -238,10 +284,16 @@ describe("canvas live sync WebSocket", () => {
 
     const ownerWelcome = nextMessage(owner);
     hello(owner, 0);
-    await expect(ownerWelcome).resolves.toMatchObject({ type: "canvas.live.welcome", headRevision: 0 });
+    await expect(ownerWelcome).resolves.toMatchObject({
+      type: "canvas.live.welcome",
+      headRevision: 0
+    });
     const viewerWelcome = nextMessage(viewer);
     hello(viewer, 0);
-    await expect(viewerWelcome).resolves.toMatchObject({ type: "canvas.live.welcome", headRevision: 0 });
+    await expect(viewerWelcome).resolves.toMatchObject({
+      type: "canvas.live.welcome",
+      headRevision: 0
+    });
 
     const ownerFirst = nextMessage(owner);
     const viewerFirst = nextMessage(viewer);
@@ -258,12 +310,21 @@ describe("canvas live sync WebSocket", () => {
     const ownerSecond = nextMessage(owner);
     const viewerSecond = nextMessage(viewer);
     fixture.live.publishAcceptedEntry(commit(fixture.repository, fixture.scope, 2));
-    await expect(ownerSecond).resolves.toMatchObject({ type: "canvas.live.accepted_entry", entry: { revision: 2, previousRevision: 1 } });
-    await expect(viewerSecond).resolves.toMatchObject({ type: "canvas.live.accepted_entry", entry: { revision: 2, previousRevision: 1 } });
+    await expect(ownerSecond).resolves.toMatchObject({
+      type: "canvas.live.accepted_entry",
+      entry: { revision: 2, previousRevision: 1 }
+    });
+    await expect(viewerSecond).resolves.toMatchObject({
+      type: "canvas.live.accepted_entry",
+      entry: { revision: 2, previousRevision: 1 }
+    });
 
     const rejected = nextMessage(viewer);
     viewer.send(JSON.stringify({ type: "canvas.command.submit", protocolVersion: 1 }));
-    await expect(rejected).resolves.toMatchObject({ type: "canvas.live.error", code: "invalid_message" });
+    await expect(rejected).resolves.toMatchObject({
+      type: "canvas.live.error",
+      code: "invalid_message"
+    });
     expect(fixture.repository.head(fixture.scope).revision).toBe(2);
   });
 
@@ -274,7 +335,9 @@ describe("canvas live sync WebSocket", () => {
     });
     await expect(
       new Promise<number>((resolve) =>
-        unauthenticated.once("unexpected-response", (_request, response) => resolve(response.statusCode))
+        unauthenticated.once("unexpected-response", (_request, response) =>
+          resolve(response.statusCode)
+        )
       )
     ).resolves.toBe(401);
     const crossCanvas = new WebSocket(fixture.url.replace("/default/", "/other/"), {
@@ -282,7 +345,9 @@ describe("canvas live sync WebSocket", () => {
     });
     await expect(
       new Promise<number>((resolve) =>
-        crossCanvas.once("unexpected-response", (_request, response) => resolve(response.statusCode))
+        crossCanvas.once("unexpected-response", (_request, response) =>
+          resolve(response.statusCode)
+        )
       )
     ).resolves.toBe(403);
 
@@ -320,7 +385,10 @@ describe("canvas live sync WebSocket", () => {
     const expired = nextMessage(viewer);
     const closed = waitForClose(viewer);
     fixture.live.publishAcceptedEntry(commit(fixture.repository, fixture.scope, 1));
-    await expect(expired).resolves.toMatchObject({ type: "canvas.live.auth_expired", code: "forbidden" });
+    await expect(expired).resolves.toMatchObject({
+      type: "canvas.live.auth_expired",
+      code: "forbidden"
+    });
     await expect(closed).resolves.toBe(4003);
   });
 
@@ -439,7 +507,11 @@ describe("canvas live sync WebSocket", () => {
     const head = fixture.repository.head(fixture.scope);
     vi.spyOn(fixture.repository, "head")
       .mockReturnValueOnce(head)
-      .mockReturnValueOnce({ revision: 1, contentDigest: "b".repeat(64), updatedAt: head.updatedAt });
+      .mockReturnValueOnce({
+        revision: 1,
+        contentDigest: "b".repeat(64),
+        updatedAt: head.updatedAt
+      });
     const secondHeadSocket = await connect(fixture.url, fixture.ownerToken);
     const secondHeadMessages = nextMessages(secondHeadSocket, 2);
     const secondHeadClosed = waitForClose(secondHeadSocket);
@@ -453,7 +525,10 @@ describe("canvas live sync WebSocket", () => {
     const gapSocket = await connect(fixture.url, fixture.ownerToken);
     const gapWelcome = nextMessage(gapSocket);
     hello(gapSocket, 0);
-    await expect(gapWelcome).resolves.toMatchObject({ type: "canvas.live.welcome", headRevision: 0 });
+    await expect(gapWelcome).resolves.toMatchObject({
+      type: "canvas.live.welcome",
+      headRevision: 0
+    });
     commit(fixture.repository, fixture.scope, 1);
     const catchupMessage = nextMessage(gapSocket);
     const gapClosed = waitForClose(gapSocket);

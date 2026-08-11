@@ -34,7 +34,11 @@ function document() {
     layout: {
       version: "desktop-layout/v1",
       projectId: "project-authority",
-      nodes: manifest.nodes.map((task, index) => ({ nodeId: task.id, x: index * 100, y: index * 200 })),
+      nodes: manifest.nodes.map((task, index) => ({
+        nodeId: task.id,
+        x: index * 100,
+        y: index * 200
+      })),
       updatedAt: "2026-08-02T00:00:00.000Z"
     }
   });
@@ -202,7 +206,9 @@ describe("canvas replica graph projection", () => {
 
     expect(overlaid.tasks[0]?.status).toBe("planned");
     expect(overlaid.tasks[0]?.blocks.every((block) => !block.dispatchable)).toBe(true);
-    expect(overlaid.sharedResourceGroups.every((group) => group.activeBlockRefs.length === 0)).toBe(true);
+    expect(overlaid.sharedResourceGroups.every((group) => group.activeBlockRefs.length === 0)).toBe(
+      true
+    );
 
     const fingerprintMismatch = overlayCanvasReplicaRuntimeStatus({
       content: projected,

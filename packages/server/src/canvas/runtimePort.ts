@@ -54,7 +54,10 @@ export function createDefaultCanvasRuntimePort(): CanvasRuntimeMutationPort {
         });
         return { ok: true, content: captured.content };
       } catch (error) {
-        return { ok: false, detail: error instanceof Error ? error.message.slice(0, 200) : "content_capture_failed" };
+        return {
+          ok: false,
+          detail: error instanceof Error ? error.message.slice(0, 200) : "content_capture_failed"
+        };
       }
     },
     async readStatus(input) {

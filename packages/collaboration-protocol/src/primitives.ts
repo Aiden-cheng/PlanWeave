@@ -27,12 +27,9 @@ export const timestampSchema = z.iso.datetime();
  */
 export const workspaceIdentitySchemaVersion = "workspace-identity/v1" as const;
 export const workspaceIdentitySchemaVersionSchema = z.literal(workspaceIdentitySchemaVersion);
-export type WorkspaceIdentitySchemaVersion = z.infer<
-  typeof workspaceIdentitySchemaVersionSchema
->;
+export type WorkspaceIdentitySchemaVersion = z.infer<typeof workspaceIdentitySchemaVersionSchema>;
 
-export const workspaceIdentityMigrationSchemaVersion =
-  "workspace-identity-migration/v1" as const;
+export const workspaceIdentityMigrationSchemaVersion = "workspace-identity-migration/v1" as const;
 export const workspaceIdentityMigrationSchemaVersionSchema = z.literal(
   workspaceIdentityMigrationSchemaVersion
 );
@@ -102,7 +99,10 @@ export const workspaceNameSchema = z.string().trim().min(1).max(128);
 export const operatorDisplayNameSchema = z.string().trim().min(1).max(128);
 
 /** Stored credential digests are the only credential representation allowed in durable rows. */
-export const credentialSha256Schema = z.string().length(64).regex(/^[a-f0-9]+$/);
+export const credentialSha256Schema = z
+  .string()
+  .length(64)
+  .regex(/^[a-f0-9]+$/);
 export const tokenSha256HexSchema = credentialSha256Schema;
 
 /** Operator bearer credentials are a separate trust domain from human and Host credentials. */
@@ -115,9 +115,7 @@ export const identityCredentialStateSchema = z.enum(["active", "expired", "revok
 export type IdentityCredentialState = z.infer<typeof identityCredentialStateSchema>;
 
 /** Workspace-only scope reference.  No paths, commands, or credentials can be carried here. */
-export const workspaceScopeRefSchema = z
-  .object({ workspaceId: workspaceIdSchema })
-  .strict();
+export const workspaceScopeRefSchema = z.object({ workspaceId: workspaceIdSchema }).strict();
 export type WorkspaceScopeRef = z.infer<typeof workspaceScopeRefSchema>;
 
 export const projectScopeRefSchema = z

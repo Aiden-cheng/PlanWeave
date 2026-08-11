@@ -909,7 +909,9 @@ describe("Task Workspace shell", () => {
     expect(headerMain).toHaveClass("border-b", "border-border/80");
     expect(headerMain).not.toHaveClass("border-l");
     expect(screen.getByTestId("task-workspace-timeline-slot")).not.toHaveClass("border-r");
-    expect(screen.getByTestId("task-workspace-timeline-resize-rail")).toHaveStyle({ width: "280px" });
+    expect(screen.getByTestId("task-workspace-timeline-resize-rail")).toHaveStyle({
+      width: "280px"
+    });
     const timelineSeparator = screen.getByRole("separator", { name: "Resize timeline" });
     expect(timelineSeparator).toHaveClass("after:w-px", "after:bg-border/80", "right-0");
     const timelineToggle = within(header).getByRole("button", { name: "Timeline" });

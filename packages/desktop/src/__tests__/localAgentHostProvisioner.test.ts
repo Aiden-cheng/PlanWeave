@@ -2,10 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  resolveAgentHostDefaultPaths,
-  writeHostConnectionStatus
-} from "@planweave-ai/agent-host";
+import { resolveAgentHostDefaultPaths, writeHostConnectionStatus } from "@planweave-ai/agent-host";
 import { DesktopLocalAgentHostProvisioner } from "../main/operatorControl/localAgentHostProvisioner.js";
 import { LocalAgentHostRegistrationStore } from "../main/operatorControl/localAgentHostRegistrationStore.js";
 
@@ -387,9 +384,7 @@ describe("Desktop local Agent Host provisioner", () => {
       reconcileAgentExposure: vi
         .fn()
         .mockRejectedValue(new Error("agent_host_credential_unavailable")),
-      installBackground: vi
-        .fn()
-        .mockRejectedValue(new Error("agent_host_credential_unavailable"))
+      installBackground: vi.fn().mockRejectedValue(new Error("agent_host_credential_unavailable"))
     };
     const provisioner = new DesktopLocalAgentHostProvisioner({
       platform: "win32",
@@ -568,5 +563,3 @@ describe("Desktop local Agent Host provisioner", () => {
     });
   });
 });
-
-

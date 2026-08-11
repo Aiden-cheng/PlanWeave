@@ -236,10 +236,13 @@ export function SettingsAgentsSection({
               setHostSaving(true);
               const save = persistSettings
                 ? persistSettings({ execution: { agentHost: { kind: "native" } } })
-                : Promise.resolve(
-                    updateSettings({ execution: { agentHost: { kind: "native" } } })
-                  );
-              settleSettingsSave(save, () => setHostSaving(false), refreshAgentDetections, setError);
+                : Promise.resolve(updateSettings({ execution: { agentHost: { kind: "native" } } }));
+              settleSettingsSave(
+                save,
+                () => setHostSaving(false),
+                refreshAgentDetections,
+                setError
+              );
             }}
           >
             <SelectTrigger className="mt-3 w-56" id="agent-host-select" aria-label={t("agentHost")}>

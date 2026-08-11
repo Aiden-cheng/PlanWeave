@@ -173,9 +173,7 @@ describe("Agent Host configuration", () => {
     });
     const resolved = await resolver.resolve("acp.test", "test-agent");
     expect(resolved.env).not.toHaveProperty("UNTRUSTED_OVERRIDE");
-    expect(
-      Object.keys(resolved.env).some((key) => key.toLowerCase() === "path")
-    ).toBe(true);
+    expect(Object.keys(resolved.env).some((key) => key.toLowerCase() === "path")).toBe(true);
     await expect(resolver.resolve("acp.test", "wrong-agent")).rejects.toThrow("not_configured");
     expect(() =>
       parseAgentHostConfig({

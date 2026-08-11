@@ -555,7 +555,9 @@ process.exit(2);
     expect(workflow).toContain("pnpm test:unit --maxWorkers=2");
     expect(workflow).not.toContain("pnpm test:unit -- --maxWorkers=2");
     expect(workflow).toContain("name: Integration tests (${{ matrix.label }})");
-    expect(workflow).toContain("pnpm test:integration:${{ matrix.shard }} --maxWorkers=${{ matrix.max_workers }}");
+    expect(workflow).toContain(
+      "pnpm test:integration:${{ matrix.shard }} --maxWorkers=${{ matrix.max_workers }}"
+    );
     expect(workflow).not.toContain("pnpm test:integration --maxWorkers=2");
     // Distributed realProcess multi-process suites must stay on the required CI shard
     // and run serially (max_workers: 1) so loopback ports and process trees stay stable.

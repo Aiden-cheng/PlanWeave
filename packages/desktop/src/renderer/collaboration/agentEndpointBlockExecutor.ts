@@ -62,8 +62,7 @@ function collaborationRemoteDispatchSurface(api: RemoteOperationsApi): RemoteDis
 
 function ownerFleetRemoteDispatchSurface(api: OwnerFleetRemoteDispatchApi): RemoteDispatchSurface {
   return {
-    dispatch: (command) =>
-      api.dispatchOwnerFleetRemoteOperation({ command }),
+    dispatch: (command) => api.dispatchOwnerFleetRemoteOperation({ command }),
     observe: (input) => api.observeOwnerFleetRemoteOperation(input),
     executeAction: (input) => api.executeOwnerFleetRemoteOperationAction(input),
     fallbackRefreshMs: OWNER_FLEET_FALLBACK_REFRESH_MS
@@ -81,9 +80,7 @@ const TERMINAL_OPERATION_STATES = new Set<RemoteOperationObservation["state"]>([
   "cancelled"
 ]);
 
-function nonTerminalOperationId(
-  execution: RemoteBlockExecutionReadModel | null
-): string | null {
+function nonTerminalOperationId(execution: RemoteBlockExecutionReadModel | null): string | null {
   if (!execution || execution.phase === "terminal") return null;
   return execution.identity.operationId;
 }
@@ -174,8 +171,7 @@ async function waitForRemoteCompletion(input: {
   const terminal = await input.waitForRemoteTerminal({
     api: {
       observeCollaborationRemoteOperation: (observeInput) => input.api.observe(observeInput),
-      onCollaborationObserverSignal:
-        input.api.onObserverSignal ?? (() => () => undefined)
+      onCollaborationObserverSignal: input.api.onObserverSignal ?? (() => () => undefined)
     },
     initial: input.observation,
     signal: input.signal,

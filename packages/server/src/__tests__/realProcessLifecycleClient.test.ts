@@ -4,9 +4,7 @@ import {
   type OperatorOperationView
 } from "./support/realProcessLifecycleClient.js";
 
-function operationView(
-  overrides: Partial<OperatorOperationView> = {}
-): OperatorOperationView {
+function operationView(overrides: Partial<OperatorOperationView> = {}): OperatorOperationView {
   return {
     operationId: "operation-1",
     projectId: "project-1",

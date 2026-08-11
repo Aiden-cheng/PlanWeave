@@ -78,7 +78,9 @@ function grantFromRow(row: Record<string, unknown> | undefined): MembershipGrant
 }
 
 function legacyDeniedReason(reason: AccessDisabledReason): "missing" | "revoked" {
-  return reason === "membership_revoked" || reason === "session_revoked" || reason === "grant_revoked"
+  return reason === "membership_revoked" ||
+    reason === "session_revoked" ||
+    reason === "grant_revoked"
     ? "revoked"
     : "missing";
 }
@@ -103,7 +105,11 @@ export class ProjectAccessPolicy {
       input.canvasId === undefined
         ? undefined
         : this.registry.canvasInternal(input.workspaceId, input.projectId, input.canvasId);
-    if (!project || project.revokedAt !== null || (input.canvasId !== undefined && (!canvas || canvas.revokedAt !== null))) {
+    if (
+      !project ||
+      project.revokedAt !== null ||
+      (input.canvasId !== undefined && (!canvas || canvas.revokedAt !== null))
+    ) {
       throw new Error("access_scope_not_found");
     }
     if (!project.ownerHumanPrincipalId || (canvas && !canvas.ownerHumanPrincipalId)) {
@@ -113,14 +119,25 @@ export class ProjectAccessPolicy {
       input.actor.kind === "human" ? input.actor.id : "non-human"
     );
     const membership =
-      input.actor.kind === "human" && activeWorkspacePrincipal(this.database, input.workspaceId, humanPrincipalId)
+      input.actor.kind === "human" &&
+      activeWorkspacePrincipal(this.database, input.workspaceId, humanPrincipalId)
         ? "active"
         : "missing";
     return evaluateEffectiveAccess({
       scope: accessScopeSchema.parse(
         input.canvasId === undefined
-          ? { scopeKind: "project", workspaceId: input.workspaceId, projectId: input.projectId, canvasId: null }
-          : { scopeKind: "canvas", workspaceId: input.workspaceId, projectId: input.projectId, canvasId: input.canvasId }
+          ? {
+              scopeKind: "project",
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              canvasId: null
+            }
+          : {
+              scopeKind: "canvas",
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              canvasId: input.canvasId
+            }
       ),
       humanPrincipalId,
       membership,
@@ -128,7 +145,9 @@ export class ProjectAccessPolicy {
       project: projectAccessRecord(project),
       canvas: canvas ? canvasAccessRecord(canvas) : null,
       projectGrant: grantFromRow(latestProjectGrant(this.database, project, humanPrincipalId)),
-      canvasGrant: canvas ? grantFromRow(latestCanvasGrant(this.database, canvas, humanPrincipalId)) : null
+      canvasGrant: canvas
+        ? grantFromRow(latestCanvasGrant(this.database, canvas, humanPrincipalId))
+        : null
     });
   }
 
@@ -142,7 +161,8 @@ export class ProjectAccessPolicy {
     bootstrap?: boolean;
   }): EffectiveAccessView {
     if (input.actor.kind === "local_admin") {
-      if (input.bootstrap === true) return this.evaluate({ ...input, actor: { kind: "human", id: "bootstrap" } });
+      if (input.bootstrap === true)
+        return this.evaluate({ ...input, actor: { kind: "human", id: "bootstrap" } });
       throw new Error("local_admin_bootstrap_only");
     }
     const access = this.evaluate(input);
@@ -161,7 +181,11 @@ export class ProjectAccessPolicy {
       const access = this.evaluate(input);
       return access.capabilities.read
         ? decision({ decision: "allow", aclRevision: access.aclRevision })
-        : decision({ decision: "deny", reason: legacyDeniedReason(access.disabledReason ?? "capability_denied"), aclRevision: access.aclRevision });
+        : decision({
+            decision: "deny",
+            reason: legacyDeniedReason(access.disabledReason ?? "capability_denied"),
+            aclRevision: access.aclRevision
+          });
     } catch {
       return decision({ decision: "deny", reason: "missing", aclRevision: 0 });
     }
@@ -177,7 +201,11 @@ export class ProjectAccessPolicy {
       const access = this.evaluate(input);
       return access.capabilities.read
         ? decision({ decision: "allow", aclRevision: access.aclRevision })
-        : decision({ decision: "deny", reason: legacyDeniedReason(access.disabledReason ?? "capability_denied"), aclRevision: access.aclRevision });
+        : decision({
+            decision: "deny",
+            reason: legacyDeniedReason(access.disabledReason ?? "capability_denied"),
+            aclRevision: access.aclRevision
+          });
     } catch {
       return decision({ decision: "deny", reason: "missing", aclRevision: 0 });
     }

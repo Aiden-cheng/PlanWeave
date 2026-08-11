@@ -218,7 +218,9 @@ describe("CollaborationConnectForm invitation onboarding", () => {
     await user.click(screen.getByTestId("people-connect-submit"));
 
     const error = await screen.findByTestId("people-connect-error");
-    expect(error).toHaveTextContent("Could not reach the shared Server through the private network");
+    expect(error).toHaveTextContent(
+      "Could not reach the shared Server through the private network"
+    );
     expect(error).not.toHaveTextContent("permission for this Workspace");
     expect(error).not.toHaveTextContent("planweave.example.ts.net");
   });
@@ -685,9 +687,7 @@ describe("CollaborationConnectForm connection diagnostics", () => {
 
     await user.click(screen.getByTestId("people-connect-submit"));
 
-    await waitFor(() =>
-      expect(registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({})
-    );
+    await waitFor(() => expect(registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({}));
     expect(upsertCollaborationProfile).not.toHaveBeenCalled();
     expect(connectWorkspaceConnection).not.toHaveBeenCalled();
     expect(connectCollaborationSession).not.toHaveBeenCalled();

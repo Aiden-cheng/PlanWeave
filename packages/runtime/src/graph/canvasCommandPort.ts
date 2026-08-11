@@ -186,10 +186,7 @@ export async function applyAuthorizedCanvasCommand(
   try {
     loaded = await loadPackage(workspace);
   } catch (error) {
-    return fail(
-      "mutation_failed",
-      error instanceof Error ? error.message : "package_load_failed"
-    );
+    return fail("mutation_failed", error instanceof Error ? error.message : "package_load_failed");
   }
 
   try {
@@ -248,7 +245,10 @@ export async function readAuthorizedCanvasContentDigest(input: {
       typeof input.projectRoot === "string"
         ? await resolveTaskCanvasWorkspace(input.projectRoot, input.canvasId)
         : await resolvePackageWorkspace(input.projectRoot);
-    if (input.expectedPackageDir !== undefined && workspace.packageDir !== input.expectedPackageDir) {
+    if (
+      input.expectedPackageDir !== undefined &&
+      workspace.packageDir !== input.expectedPackageDir
+    ) {
       return fail("package_mismatch", "runtime_package_location_mismatch");
     }
     const captured = await captureAuthorizedCanvasContent({

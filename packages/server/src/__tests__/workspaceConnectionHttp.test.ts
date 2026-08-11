@@ -15,9 +15,13 @@ const directories: string[] = [];
 const servers: Server[] = [];
 
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  await Promise.all(
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
+  );
   for (const database of databases.splice(0)) database.close();
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  );
 });
 
 async function setup() {
@@ -43,7 +47,14 @@ async function setup() {
     .prepare(
       "INSERT INTO workspace_memberships(workspace_id,membership_id,human_principal_id,role,revision,created_at,updated_at,revoked_at) VALUES(?,?,?,?,1,?,?,NULL)"
     )
-    .run(workspaceId, "workspace-membership-connection", humanPrincipalId, "owner", issuedAt, issuedAt);
+    .run(
+      workspaceId,
+      "workspace-membership-connection",
+      humanPrincipalId,
+      "owner",
+      issuedAt,
+      issuedAt
+    );
   database
     .prepare(
       "INSERT INTO workspace_device_sessions(workspace_id,device_session_id,human_principal_id,credential_sha256,issued_at,expires_at,revoked_at,last_used_at) VALUES(?,?,?,?,?,?,NULL,NULL)"
@@ -66,7 +77,13 @@ async function setup() {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("expected_http_address");
-  return { database, workspaceId, otherWorkspaceId, token, origin: `http://127.0.0.1:${address.port}` };
+  return {
+    database,
+    workspaceId,
+    otherWorkspaceId,
+    token,
+    origin: `http://127.0.0.1:${address.port}`
+  };
 }
 
 describe("workspace connection HTTP", () => {
@@ -82,9 +99,7 @@ describe("workspace connection HTTP", () => {
     const page = (await response.json()) as {
       items: Array<{ workspaceId: string; membershipActive: boolean }>;
     };
-    expect(page.items).toEqual([
-      expect.objectContaining({ workspaceId, membershipActive: true })
-    ]);
+    expect(page.items).toEqual([expect.objectContaining({ workspaceId, membershipActive: true })]);
     expect(JSON.stringify(page)).not.toContain(otherWorkspaceId);
     expect(JSON.stringify(page)).not.toMatch(/projectRoot|credential|token|secret/i);
   });

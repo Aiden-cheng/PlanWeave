@@ -60,9 +60,7 @@ describe("desktop settings bridge", () => {
       migrateLegacyDesktopSettings: vi.fn().mockResolvedValue(defaultDesktopSettings)
     };
     const setError = vi.fn();
-    const { result } = renderHook(() =>
-      useDesktopSettingsBridge({ setError, settingsApi })
-    );
+    const { result } = renderHook(() => useDesktopSettingsBridge({ setError, settingsApi }));
 
     expect(result.current.settingsHydrated).toBe(false);
     act(() => resolveSettings({ ...defaultDesktopSettings, runtimePath: "/tmp/restored" }));
@@ -404,9 +402,7 @@ describe("desktop settings bridge", () => {
       migrateLegacyDesktopSettings: vi.fn().mockResolvedValue(defaultDesktopSettings)
     };
     const setError = vi.fn(() => events.push("failure handled"));
-    const { result } = renderHook(() =>
-      useDesktopSettingsBridge({ setError, settingsApi })
-    );
+    const { result } = renderHook(() => useDesktopSettingsBridge({ setError, settingsApi }));
 
     let firstSave!: Promise<void>;
     let secondSave!: Promise<void>;

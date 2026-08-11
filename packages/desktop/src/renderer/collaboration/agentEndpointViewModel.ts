@@ -14,10 +14,7 @@ export type AvailableAgentEndpoint = {
 };
 
 /** Hosts that can never accept work again — omit from the executor picker entirely. */
-const REMOTE_ENDPOINT_TERMINAL_HOST_REASONS = new Set([
-  "host_revoked",
-  "host_credential_expired"
-]);
+const REMOTE_ENDPOINT_TERMINAL_HOST_REASONS = new Set(["host_revoked", "host_credential_expired"]);
 
 export function isSelectableRemoteAgentEndpoint(endpoint: RemoteAgentEndpoint): boolean {
   if (endpoint.status === "available") return true;

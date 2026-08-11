@@ -44,9 +44,9 @@ describe("Agent exposure allowlist", () => {
   it("treats a missing allowlist as empty without creating a destructive empty file", async () => {
     const value = await config();
     await expect(readExposedAgentProfileIds(value)).resolves.toEqual([]);
-    await expect(readFile(join(value.dataDirectory, "agent-exposure.json"), "utf8")).rejects.toMatchObject(
-      { code: "ENOENT" }
-    );
+    await expect(
+      readFile(join(value.dataDirectory, "agent-exposure.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await writeExposedAgentProfileIds(value, ["codex-acp"]);
     await expect(readExposedAgentProfileIds(value)).resolves.toEqual(["codex-acp"]);
   });

@@ -67,13 +67,17 @@ describe("authoritative content-version contracts", () => {
       }
       return member;
     });
-    expect(compareContentVersionMemberPaths("nodes/a/prompt.md", "nodes/A/prompt.md")).toBeLessThan(0);
+    expect(compareContentVersionMemberPaths("nodes/a/prompt.md", "nodes/A/prompt.md")).toBeLessThan(
+      0
+    );
     expect(
-      completeContentVersionSchema.parse({
-        ...exampleCompleteContentVersion,
-        canonicalDigest: "a".repeat(64),
-        members
-      }).members.map((member) => member.path)
+      completeContentVersionSchema
+        .parse({
+          ...exampleCompleteContentVersion,
+          canonicalDigest: "a".repeat(64),
+          members
+        })
+        .members.map((member) => member.path)
     ).toEqual(members.map((member) => member.path));
     expect(() =>
       completeContentVersionSchema.parse({
@@ -87,7 +91,9 @@ describe("authoritative content-version contracts", () => {
   it("pins case-distinct ASCII path order independently of the runtime locale", () => {
     const upperCaseI = "nodes/I/prompt.md";
     const lowerCaseI = "nodes/i/prompt.md";
-    expect(new Intl.Collator("tr", { sensitivity: "variant" }).compare(upperCaseI, lowerCaseI)).toBeLessThan(0);
+    expect(
+      new Intl.Collator("tr", { sensitivity: "variant" }).compare(upperCaseI, lowerCaseI)
+    ).toBeLessThan(0);
     expect(compareContentVersionMemberPaths(upperCaseI, lowerCaseI)).toBeGreaterThan(0);
     expect(compareContentVersionMemberPaths(upperCaseI, lowerCaseI)).toBe(
       new Intl.Collator("en-US", {
@@ -124,10 +130,7 @@ describe("authoritative content-version contracts", () => {
     expect(() =>
       completeContentVersionSchema.parse({
         ...exampleCompleteContentVersion,
-        members: [
-          { ...layout!, sizeBytes: 1 },
-          ...exampleCompleteContentVersion.members.slice(1)
-        ],
+        members: [{ ...layout!, sizeBytes: 1 }, ...exampleCompleteContentVersion.members.slice(1)],
         totalBytes: 18
       })
     ).toThrow();
@@ -139,7 +142,9 @@ describe("authoritative content-version contracts", () => {
       completeContentVersionSchema.parse({
         ...exampleCompleteContentVersion,
         members: exampleCompleteContentVersion.members.map((member) =>
-          member.kind === "desktop_layout" ? { ...member, path: "canvases/default/desktop/layout.json" } : member
+          member.kind === "desktop_layout"
+            ? { ...member, path: "canvases/default/desktop/layout.json" }
+            : member
         )
       })
     ).toThrow();
@@ -222,7 +227,10 @@ describe("authoritative content-version contracts", () => {
       })
     ).toThrow();
     expect(() =>
-      authoritativeContentHeadSchema.parse({ ...head, content: { ...content, verification: "pending" } })
+      authoritativeContentHeadSchema.parse({
+        ...head,
+        content: { ...content, verification: "pending" }
+      })
     ).toThrow();
   });
 
@@ -264,16 +272,30 @@ describe("authoritative content-version contracts", () => {
         request: { content },
         acknowledgement: {
           ...acknowledgement,
-          content: { ...content, canonicalDigest: "f".repeat(64), versionId: `version-${"f".repeat(64)}` }
+          content: {
+            ...content,
+            canonicalDigest: "f".repeat(64),
+            versionId: `version-${"f".repeat(64)}`
+          }
         }
       })
     ).toThrow();
   });
 
   it("accepts authority discovery only after the server supplies scope and device identity", () => {
-    const request = { projectId: scope.projectId, canvasId: scope.canvasId, localReplica: null, knownRevision: null };
+    const request = {
+      projectId: scope.projectId,
+      canvasId: scope.canvasId,
+      localReplica: null,
+      knownRevision: null
+    };
     expect(contentVersionAuthorityDiscoveryRequestSchema.parse(request)).toEqual(request);
-    expect(() => contentVersionAuthorityDiscoveryRequestSchema.parse({ ...request, actor: { kind: "human", id: "owner" } })).toThrow();
+    expect(() =>
+      contentVersionAuthorityDiscoveryRequestSchema.parse({
+        ...request,
+        actor: { kind: "human", id: "owner" }
+      })
+    ).toThrow();
     expect(
       authorizedContentVersionAuthorityDiscoverySchema.parse({
         request,
@@ -392,9 +414,9 @@ describe("authoritative content-version contracts", () => {
       canMaterialize: false,
       canRecover: false
     });
-    expect(
-      contentVersionAuthorityDiscoveryToDesktopReadModel(headlessNonOwner).canRecover
-    ).toBe(false);
+    expect(contentVersionAuthorityDiscoveryToDesktopReadModel(headlessNonOwner).canRecover).toBe(
+      false
+    );
     expect(() =>
       contentVersionDesktopReadModelSchema.parse({
         authoritativeHead: head,

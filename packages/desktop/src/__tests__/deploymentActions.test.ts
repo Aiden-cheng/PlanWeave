@@ -126,7 +126,9 @@ describe("DeploymentActions", () => {
       resolveBundleSource,
       showSaveDialog: async () => ({ canceled: true })
     });
-    await expect(actions.exportComposeBundle(request("export_supported_compose_bundle"))).resolves.toMatchObject({
+    await expect(
+      actions.exportComposeBundle(request("export_supported_compose_bundle"))
+    ).resolves.toMatchObject({
       state: "cancelled"
     });
     expect(resolveBundleSource).not.toHaveBeenCalled();
@@ -140,7 +142,9 @@ describe("DeploymentActions", () => {
       },
       showSaveDialog: async () => ({ canceled: false, filePath: "/tmp/bundle.zip" })
     });
-    await expect(unavailable.exportComposeBundle(request("export_supported_compose_bundle"))).resolves.toMatchObject({
+    await expect(
+      unavailable.exportComposeBundle(request("export_supported_compose_bundle"))
+    ).resolves.toMatchObject({
       state: "needs_project"
     });
 
@@ -151,9 +155,9 @@ describe("DeploymentActions", () => {
       },
       showSaveDialog: async () => ({ canceled: false, filePath: "/tmp/bundle.zip" })
     });
-    await expect(failing.exportComposeBundle(request("export_supported_compose_bundle"))).rejects.toThrow(
-      "secure_storage_failed"
-    );
+    await expect(
+      failing.exportComposeBundle(request("export_supported_compose_bundle"))
+    ).rejects.toThrow("secure_storage_failed");
   });
 
   it("exports a portable non-symlink source bundle", async () => {
@@ -217,7 +221,9 @@ describe("DeploymentActions", () => {
       resolveBundleSource: async () => source,
       showSaveDialog: async () => ({ canceled: false, filePath: bundlePath })
     });
-    await expect(actions.exportComposeBundle(request("export_supported_compose_bundle"))).resolves.toEqual({
+    await expect(
+      actions.exportComposeBundle(request("export_supported_compose_bundle"))
+    ).resolves.toEqual({
       state: "exported",
       fileName: "bundle.zip",
       tls: "required_after_export"
@@ -231,7 +237,9 @@ describe("DeploymentActions", () => {
         "projects/project-test/project.txt"
       ])
     );
-    expect(JSON.parse(new TextDecoder().decode(archive["projects/project-test/project.json"]))).toMatchObject({
+    expect(
+      JSON.parse(new TextDecoder().decode(archive["projects/project-test/project.json"]))
+    ).toMatchObject({
       id: "project-test",
       kind: "managed",
       rootPath: "/var/lib/planweave/projects/project-test",

@@ -77,10 +77,7 @@ export type WorkspaceConnectionProfileStorePaths = {
 };
 
 export function workspaceConnectionProfileStorePaths(
-  profilesPath: string = join(
-    desktopHomePaths().collaborationDir,
-    "workspace-profiles.json"
-  )
+  profilesPath: string = join(desktopHomePaths().collaborationDir, "workspace-profiles.json")
 ): WorkspaceConnectionProfileStorePaths {
   return { profilesPath };
 }

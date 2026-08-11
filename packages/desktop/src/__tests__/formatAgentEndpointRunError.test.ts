@@ -59,10 +59,7 @@ describe("formatAgentEndpointRunError", () => {
     expect(mismatch).toContain("Re-select");
     expect(mismatch).toContain("[agent_endpoint_preference_mismatch:T-003#B-001:grok->codex]");
 
-    const missing = formatAgentEndpointRunError(
-      "agent_endpoint_selection_missing:T-001#R-001",
-      en
-    );
+    const missing = formatAgentEndpointRunError("agent_endpoint_selection_missing:T-001#R-001", en);
     expect(missing).toContain("T-001#R-001");
     expect(missing).toContain("[agent_endpoint_selection_missing:T-001#R-001]");
   });

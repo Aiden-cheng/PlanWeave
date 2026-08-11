@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { parseServerConfig } from "../../server/src/config.js";
 import { hashOperatorToken } from "../../server/src/operatorAuth.js";
 import { seedOperatorSessions } from "../../server/src/__tests__/support/operatorAuthFixture.js";
-import { createDistributedServerComposition, type DistributedServerComposition } from "../../server/src/serverComposition.js";
+import {
+  createDistributedServerComposition,
+  type DistributedServerComposition
+} from "../../server/src/serverComposition.js";
 
 const smokeAdminToken = `pw_operator_${"M".repeat(43)}`;
 

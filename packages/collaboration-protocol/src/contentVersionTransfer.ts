@@ -5,11 +5,7 @@ import {
   CONTENT_VERSION_TRANSFER_MAX_FRAME_BYTES,
   CONTENT_VERSION_TRANSFER_MAX_WIRE_BYTES
 } from "./limits.js";
-import {
-  actorRefSchema,
-  canvasScopeRefSchema,
-  timestampSchema
-} from "./primitives.js";
+import { actorRefSchema, canvasScopeRefSchema, timestampSchema } from "./primitives.js";
 import {
   completedContentVersionRefSchema,
   contentVersionMemberSchema,
@@ -18,7 +14,8 @@ import {
 import { packageSnapshotDigestSchema } from "./packageSnapshot.js";
 
 /** Immutable content uses a dedicated NDJSON stream; it is never a generic collaboration JSON DTO. */
-export const contentVersionTransferMediaType = "application/x-planweave-content-version-ndjson" as const;
+export const contentVersionTransferMediaType =
+  "application/x-planweave-content-version-ndjson" as const;
 export const contentVersionTransferTotalBytesSchema = z
   .number()
   .int()
@@ -48,12 +45,20 @@ export const contentVersionTransferHeaderFrameSchema = z
       context.addIssue({ code: "custom", message: "content_transfer_header_digest_mismatch" });
     }
   });
-export type ContentVersionTransferHeaderFrame = z.infer<typeof contentVersionTransferHeaderFrameSchema>;
+export type ContentVersionTransferHeaderFrame = z.infer<
+  typeof contentVersionTransferHeaderFrameSchema
+>;
 
 export const contentVersionTransferMemberFrameSchema = z
-  .object({ type: z.literal("member"), index: z.number().int().nonnegative(), member: contentVersionMemberSchema })
+  .object({
+    type: z.literal("member"),
+    index: z.number().int().nonnegative(),
+    member: contentVersionMemberSchema
+  })
   .strict();
-export type ContentVersionTransferMemberFrame = z.infer<typeof contentVersionTransferMemberFrameSchema>;
+export type ContentVersionTransferMemberFrame = z.infer<
+  typeof contentVersionTransferMemberFrameSchema
+>;
 
 export const contentVersionTransferCompleteFrameSchema = z
   .object({
@@ -63,7 +68,9 @@ export const contentVersionTransferCompleteFrameSchema = z
     memberCount: contentVersionTransferMemberCountSchema
   })
   .strict();
-export type ContentVersionTransferCompleteFrame = z.infer<typeof contentVersionTransferCompleteFrameSchema>;
+export type ContentVersionTransferCompleteFrame = z.infer<
+  typeof contentVersionTransferCompleteFrameSchema
+>;
 
 export const contentVersionTransferFrameSchema = z.discriminatedUnion("type", [
   contentVersionTransferHeaderFrameSchema,

@@ -186,7 +186,7 @@ describe("project access registry", () => {
         projectId: "p",
         canvasId: null,
         grantId: projectViewer.grantId,
-      actor: editor,
+        actor: editor,
         expectedAclRevision: 2
       })
     ).toThrow("access_capability_denied:capability_denied");
@@ -255,13 +255,15 @@ describe("project access registry", () => {
         [viewer, "viewer"]
       ] as const) {
         expect(
-          access.listAuthorizedCanvases({
-            workspaceId: "w",
-            projectId: "p",
-            actor,
-            limit: 1,
-            offset: 0
-          }).map((canvas) => canvas.registry.canvasId)
+          access
+            .listAuthorizedCanvases({
+              workspaceId: "w",
+              projectId: "p",
+              actor,
+              limit: 1,
+              offset: 0
+            })
+            .map((canvas) => canvas.registry.canvasId)
         ).toEqual(["c"]);
         expect(
           access.evaluateEffectiveAccess({
@@ -316,7 +318,11 @@ describe("project access registry", () => {
         visibility: "shared"
       })
     });
-    expect(visibility).toEqual({ status: "applied", aclRevision: 1, updatedAt: "2026-01-02T00:00:00.000Z" });
+    expect(visibility).toEqual({
+      status: "applied",
+      aclRevision: 1,
+      updatedAt: "2026-01-02T00:00:00.000Z"
+    });
     const sharedViewer = access.evaluateEffectiveAccess({
       workspaceId: "w",
       projectId: "p",

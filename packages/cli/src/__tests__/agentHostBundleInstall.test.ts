@@ -46,13 +46,7 @@ describe("Agent Host VPS bundle installer", () => {
       { env }
     );
 
-    expect(JSON.parse(stdout)).toEqual([
-      "agent-host",
-      "enroll",
-      "opaque",
-      "--expose",
-      "codex-acp"
-    ]);
+    expect(JSON.parse(stdout)).toEqual(["agent-host", "enroll", "opaque", "--expose", "codex-acp"]);
     expect(await readFile(join(installRoot, "current/dist/index.js"), "utf8")).toContain(
       "process.argv.slice(2)"
     );

@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import {
-  logHostProtocolRejection,
-  publicHostProtocolRejection
-} from "../hostProtocolRejection.js";
+import { logHostProtocolRejection, publicHostProtocolRejection } from "../hostProtocolRejection.js";
 
 describe("publicHostProtocolRejection", () => {
   it("returns stable machine codes for known host protocol failures", () => {
@@ -61,7 +58,9 @@ describe("publicHostProtocolRejection", () => {
   it("logs full internal error detail for operators while keeping wire payload separate", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      const publicRejection = publicHostProtocolRejection(new Error("mailbox_cursor_not_acknowledged"));
+      const publicRejection = publicHostProtocolRejection(
+        new Error("mailbox_cursor_not_acknowledged")
+      );
       logHostProtocolRejection({
         hostId: "host-1",
         phase: "hello",

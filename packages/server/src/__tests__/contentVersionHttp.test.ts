@@ -359,13 +359,8 @@ describe("content version HTTP boundary", () => {
   });
 
   it("authorizes head discovery, bounded fetch/ack, revocation, and redacted failures", async () => {
-    const {
-      origin,
-      membership,
-      ownerDeviceCredentialId,
-      ownerToken,
-      memberToken
-    } = await fixture();
+    const { origin, membership, ownerDeviceCredentialId, ownerToken, memberToken } =
+      await fixture();
     const initial = await fetch(
       `${origin}/api/v1/projects/p/canvases/default/content/initial-publish`,
       {

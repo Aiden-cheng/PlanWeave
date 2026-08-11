@@ -195,14 +195,11 @@ async function consumeInvitation(
   invitationToken: string,
   displayName: string
 ) {
-  const response = await fetch(
-    `${origin}/api/v1/projects/${projectId}/human/invitations/consume`,
-    {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: JSON.stringify({ invitationToken, displayName })
-    }
-  );
+  const response = await fetch(`${origin}/api/v1/projects/${projectId}/human/invitations/consume`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ invitationToken, displayName })
+  });
   const body = (await response.json()) as { deviceToken: string };
   expect(response.status).toBe(201);
   return body;
@@ -453,11 +450,7 @@ describe("human observer WSS", () => {
     );
     expect(visibility.status).toBe(200);
 
-    const invitation = await createInvitation(
-      fixture.origin,
-      fixture.projectId,
-      owner.deviceToken
-    );
+    const invitation = await createInvitation(fixture.origin, fixture.projectId, owner.deviceToken);
     const member = await consumeInvitation(
       fixture.origin,
       fixture.projectId,

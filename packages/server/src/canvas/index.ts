@@ -16,8 +16,14 @@ export type {
   AuthoritativeCanvasCommitPort
 } from "./authoritativeCanvasCommitPort.js";
 export { SqliteAuthoritativeCanvasCommitStore } from "./sqliteAuthoritativeCanvasCommitStore.js";
-export { ContentVersionService, type ContentVersionServiceOptions } from "./contentVersionService.js";
-export { handleContentVersionHttpRequest, type ContentVersionHttpOptions } from "./contentVersionHttp.js";
+export {
+  ContentVersionService,
+  type ContentVersionServiceOptions
+} from "./contentVersionService.js";
+export {
+  handleContentVersionHttpRequest,
+  type ContentVersionHttpOptions
+} from "./contentVersionHttp.js";
 export {
   CanvasCommandRepository,
   digestCanvasIntent,

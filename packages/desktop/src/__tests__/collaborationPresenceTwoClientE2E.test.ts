@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import {
-  applyDefaultCanvasWorkspaceMigration,
-  initWorkspace
-} from "@planweave-ai/runtime";
+import { applyDefaultCanvasWorkspaceMigration, initWorkspace } from "@planweave-ai/runtime";
 import { exampleHumanDeviceToken } from "@planweave-ai/collaboration-protocol/fixtures/collaboration";
 import {
   basicManifest,
@@ -43,9 +40,7 @@ afterEach(async () => {
   for (const client of clients.splice(0)) client.dispose();
   for (const composition of compositions.splice(0)) await composition.close();
   await Promise.all(
-    servers.splice(0).map(
-      (server) => new Promise<void>((resolve) => server.close(() => resolve()))
-    )
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -245,11 +240,7 @@ describe("real Desktop canvas presence clients", () => {
   it("exchanges cursor state and isolates canvas/project scopes with leave cleanup", async () => {
     const fixture = await setup();
     const owner = await bootstrap(fixture.origin, fixture.firstProjectId, "Desktop Owner");
-    const member = await inviteMember(
-      fixture.origin,
-      fixture.firstProjectId,
-      owner.deviceToken
-    );
+    const member = await inviteMember(fixture.origin, fixture.firstProjectId, owner.deviceToken);
     const otherOwner = await bootstrap(
       fixture.origin,
       fixture.secondProjectId,
@@ -328,21 +319,13 @@ describe("real Desktop canvas presence clients", () => {
     expect(ownerController.getSnapshot().sessions).toEqual([]);
     expect(otherController.getSnapshot().sessions).toEqual([]);
 
-    await Promise.all([
-      ownerController.stop(),
-      memberController.stop(),
-      otherController.stop()
-    ]);
+    await Promise.all([ownerController.stop(), memberController.stop(), otherController.stop()]);
   });
 
   it("re-publishes last pointer after presence disconnect and automatic reconnect", async () => {
     const fixture = await setup();
     const owner = await bootstrap(fixture.origin, fixture.firstProjectId, "Owner Reconnect");
-    const member = await inviteMember(
-      fixture.origin,
-      fixture.firstProjectId,
-      owner.deviceToken
-    );
+    const member = await inviteMember(fixture.origin, fixture.firstProjectId, owner.deviceToken);
     const ownerProfileId = "owner-reconnect";
     const memberProfileId = "member-reconnect";
     const ownerClient = createClient(

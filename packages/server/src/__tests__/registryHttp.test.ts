@@ -276,12 +276,7 @@ describe("registry HTTP boundary", () => {
       .prepare(
         "UPDATE workspace_memberships SET revoked_at=?,updated_at=? WHERE workspace_id=? AND human_principal_id=?"
       )
-      .run(
-        "2026-01-02T00:00:00.000Z",
-        "2026-01-02T00:00:00.000Z",
-        otherWorkspaceId,
-        "human-owner"
-      );
+      .run("2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z", otherWorkspaceId, "human-owner");
 
     const conflict = await fetch(
       `${fixture.origin}/api/v1/registry/projects/project-a/canvases/default/snapshots/snapshot-001/restore`,

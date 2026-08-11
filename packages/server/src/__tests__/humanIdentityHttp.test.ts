@@ -63,8 +63,7 @@ async function setup(
   const service = new HumanMembershipService({
     repository,
     projectAuthority,
-    workspaceForProject: (projectId) =>
-      workspaceIdentity.ensureWorkspaceForLegacyProject(projectId)
+    workspaceForProject: (projectId) => workspaceIdentity.ensureWorkspaceForLegacyProject(projectId)
   });
   const server = createServer((request, response) => {
     void handleHumanHttpRequest(request, response, {

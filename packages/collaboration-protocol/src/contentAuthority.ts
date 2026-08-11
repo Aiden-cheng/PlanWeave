@@ -14,8 +14,18 @@ import {
  */
 export const contentVersionAuthorityDiscoveryRequestSchema = z
   .object({
-    projectId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    canvasId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    projectId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    canvasId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
     localReplica: completedContentVersionRefSchema.nullable(),
     knownRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
   })
@@ -91,7 +101,11 @@ export const contentVersionAuthorityDiscoveryResultSchema = z
     if (value.authoritativeHead === null && value.recoveryAction !== "await_initial_publish") {
       context.addIssue({ code: "custom", message: "headless_authority_requires_initial_publish" });
     }
-    if (value.authoritativeHead !== null && value.replicaStatus !== "in_sync" && value.recoveryAction !== "fetch_head") {
+    if (
+      value.authoritativeHead !== null &&
+      value.replicaStatus !== "in_sync" &&
+      value.recoveryAction !== "fetch_head"
+    ) {
       context.addIssue({ code: "custom", message: "stale_replica_requires_head_fetch" });
     }
     if (value.canPublishInitial && value.authoritativeHead !== null) {
@@ -103,7 +117,10 @@ export const contentVersionAuthorityDiscoveryResultSchema = z
     if (value.recoveryAction === "fetch_head" && !value.canRecover) {
       context.addIssue({ code: "custom", message: "head_fetch_requires_recovery_capability" });
     }
-    if (value.recoveryAction === "await_initial_publish" && value.canRecover !== value.canPublishInitial) {
+    if (
+      value.recoveryAction === "await_initial_publish" &&
+      value.canRecover !== value.canPublishInitial
+    ) {
       context.addIssue({ code: "custom", message: "headless_recovery_requires_owner_capability" });
     }
   });
@@ -137,10 +154,17 @@ export const contentVersionDesktopReadModelSchema = z
       value.authoritativeHead !== null &&
       !value.canRecover
     ) {
-      context.addIssue({ code: "custom", message: "snapshot_required_must_allow_recovery", path: ["canRecover"] });
+      context.addIssue({
+        code: "custom",
+        message: "snapshot_required_must_allow_recovery",
+        path: ["canRecover"]
+      });
     }
     if (value.offlineWriteReason !== null && value.canPublishInitial) {
-      context.addIssue({ code: "custom", message: "offline_write_block_cannot_allow_initial_publish" });
+      context.addIssue({
+        code: "custom",
+        message: "offline_write_block_cannot_allow_initial_publish"
+      });
     }
   });
 export type ContentVersionDesktopReadModel = z.infer<typeof contentVersionDesktopReadModelSchema>;

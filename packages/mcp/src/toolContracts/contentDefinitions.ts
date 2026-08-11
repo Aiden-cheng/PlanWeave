@@ -10,11 +10,7 @@ import {
   promptSourceWriteInput,
   taskPromptInput
 } from "./inputShapes.js";
-import {
-  defineToolDefinitions,
-  readOnlyAnnotations,
-  writeAnnotations
-} from "./types.js";
+import { defineToolDefinitions, readOnlyAnnotations, writeAnnotations } from "./types.js";
 
 export const contentToolDefinitions = defineToolDefinitions({
   get_prompt: {

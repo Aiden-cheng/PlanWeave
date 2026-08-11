@@ -7,10 +7,7 @@ import type {
   CanvasReconnectResponse
 } from "@planweave-ai/collaboration-protocol/canvas/commands";
 import type { CompleteContentVersion } from "@planweave-ai/collaboration-protocol/content/version";
-import type {
-  CanvasReplicaPendingOperation,
-  CanvasReplicaScope
-} from "./CanvasReplicaStore.js";
+import type { CanvasReplicaPendingOperation, CanvasReplicaScope } from "./CanvasReplicaStore.js";
 import { CanvasReplicaStore } from "./CanvasReplicaStore.js";
 import { CollaborationClientError } from "./collaborationErrors.js";
 import { reconnectDelay, type ReconnectBackoffOptions } from "./reconnectBackoff.js";
@@ -533,10 +530,7 @@ export class CanvasReplicaCommandWorker {
       }
     } finally {
       this.running.delete(runningKey);
-      if (
-        this.isCurrent(scopeKey, generation) &&
-        (this.queues.get(scopeKey)?.length ?? 0) > 0
-      ) {
+      if (this.isCurrent(scopeKey, generation) && (this.queues.get(scopeKey)?.length ?? 0) > 0) {
         void this.run(scope);
       }
     }
@@ -970,11 +964,6 @@ export class CanvasReplicaCommandWorker {
   }
 
   private key(scope: CanvasReplicaScope): string {
-    return JSON.stringify([
-      scope.authorityId,
-      scope.workspaceId,
-      scope.projectId,
-      scope.canvasId
-    ]);
+    return JSON.stringify([scope.authorityId, scope.workspaceId, scope.projectId, scope.canvasId]);
   }
 }

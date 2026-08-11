@@ -33,7 +33,10 @@ class TestSocket {
   }
 
   removeEventListener(type: "open" | "message" | "error" | "close", listener: Listener): void {
-    this.listeners.set(type, (this.listeners.get(type) ?? []).filter((entry) => entry !== listener));
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter((entry) => entry !== listener)
+    );
   }
 
   emit(type: "open" | "message" | "error" | "close", event: unknown = {}): void {
@@ -309,7 +312,11 @@ describe("CanvasLiveSyncClient", () => {
         code: "forbidden"
       })
     });
-    expect(client.state()).toEqual({ state: "access_denied", canvasId: "canvas-1", code: "forbidden" });
+    expect(client.state()).toEqual({
+      state: "access_denied",
+      canvasId: "canvas-1",
+      code: "forbidden"
+    });
     expect(timers).toHaveLength(0);
   });
 

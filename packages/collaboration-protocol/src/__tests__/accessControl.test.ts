@@ -72,16 +72,18 @@ function grant(scopeKind: "project" | "canvas", role: "viewer" | "editor") {
   };
 }
 
-function evaluation(input: {
-  projectVisibility?: "private" | "shared";
-  canvasVisibility?: "private" | "shared";
-  projectOwner?: string;
-  canvasOwner?: string;
-  membership?: "active" | "missing" | "revoked";
-  session?: "active" | "missing" | "expired" | "revoked";
-  projectGrant?: ReturnType<typeof grant> | null;
-  canvasGrant?: ReturnType<typeof grant> | null;
-} = {}) {
+function evaluation(
+  input: {
+    projectVisibility?: "private" | "shared";
+    canvasVisibility?: "private" | "shared";
+    projectOwner?: string;
+    canvasOwner?: string;
+    membership?: "active" | "missing" | "revoked";
+    session?: "active" | "missing" | "expired" | "revoked";
+    projectGrant?: ReturnType<typeof grant> | null;
+    canvasGrant?: ReturnType<typeof grant> | null;
+  } = {}
+) {
   return {
     scope: { scopeKind: "canvas" as const, workspaceId, projectId, canvasId },
     humanPrincipalId: actorId,
@@ -174,30 +176,42 @@ describe("scoped access capability contracts", () => {
     });
     expect(evaluateEffectiveAccess(evaluation()).disabledReason).toBe("scope_private");
 
-    const inherited = evaluateEffectiveAccess(evaluation({ projectGrant: grant("project", "editor") }));
+    const inherited = evaluateEffectiveAccess(
+      evaluation({ projectGrant: grant("project", "editor") })
+    );
     expect(inherited).toMatchObject({ effectiveRole: "editor", roleSource: "project_grant" });
     const overridden = evaluateEffectiveAccess(
-      evaluation({ projectGrant: grant("project", "editor"), canvasGrant: grant("canvas", "viewer") })
+      evaluation({
+        projectGrant: grant("project", "editor"),
+        canvasGrant: grant("canvas", "viewer")
+      })
     );
     expect(overridden).toMatchObject({ effectiveRole: "viewer", roleSource: "canvas_grant" });
   });
 
   it("fails closed for membership, session, revoke, and cross-workspace scope transitions", () => {
-    expect(evaluateEffectiveAccess(evaluation({ membership: "missing", canvasVisibility: "shared" })).disabledReason).toBe(
-      "membership_missing"
-    );
-    expect(evaluateEffectiveAccess(evaluation({ membership: "revoked", canvasVisibility: "shared" })).disabledReason).toBe(
-      "membership_revoked"
-    );
-    expect(evaluateEffectiveAccess(evaluation({ session: "expired", canvasVisibility: "shared" })).disabledReason).toBe(
-      "session_expired"
-    );
+    expect(
+      evaluateEffectiveAccess(evaluation({ membership: "missing", canvasVisibility: "shared" }))
+        .disabledReason
+    ).toBe("membership_missing");
+    expect(
+      evaluateEffectiveAccess(evaluation({ membership: "revoked", canvasVisibility: "shared" }))
+        .disabledReason
+    ).toBe("membership_revoked");
+    expect(
+      evaluateEffectiveAccess(evaluation({ session: "expired", canvasVisibility: "shared" }))
+        .disabledReason
+    ).toBe("session_expired");
     const revoked = { ...grant("canvas", "editor"), revokedAt: timestamp };
-    expect(evaluateEffectiveAccess(evaluation({ canvasGrant: revoked })).disabledReason).toBe("grant_revoked");
+    expect(evaluateEffectiveAccess(evaluation({ canvasGrant: revoked })).disabledReason).toBe(
+      "grant_revoked"
+    );
 
     const duplicateIdsInOtherWorkspace = evaluation();
     duplicateIdsInOtherWorkspace.canvas.registry.workspaceId = "workspace-other-001";
-    expect(() => effectiveAccessEvaluationSchema.parse(duplicateIdsInOtherWorkspace)).toThrow(/cross_canvas/);
+    expect(() => effectiveAccessEvaluationSchema.parse(duplicateIdsInOtherWorkspace)).toThrow(
+      /cross_canvas/
+    );
   });
 
   it("requires opaque scope CAS and binds mutation scope to authenticated workspace authority", () => {
@@ -209,7 +223,9 @@ describe("scoped access capability contracts", () => {
       role: "editor" as const
     };
     expect(accessMutationRequestSchema.parse(request)).toEqual(request);
-    expect(() => accessMutationRequestSchema.parse({ ...request, expectedAclRevision: -1 })).toThrow();
+    expect(() =>
+      accessMutationRequestSchema.parse({ ...request, expectedAclRevision: -1 })
+    ).toThrow();
     expect(
       accessMutationResultSchema.parse({
         status: "conflict",
@@ -217,14 +233,15 @@ describe("scoped access capability contracts", () => {
         aclRevision: 6
       })
     ).toMatchObject({ status: "conflict", aclRevision: 6 });
-    expect(
-      () =>
-        serverAccessMutationContextSchema.parse({
-          authenticatedWorkspaceId: "workspace-other-001",
-          request
-        })
+    expect(() =>
+      serverAccessMutationContextSchema.parse({
+        authenticatedWorkspaceId: "workspace-other-001",
+        request
+      })
     ).toThrow(/cross_workspace/);
-    expect(() => accessMutationRequestSchema.parse({ ...request, path: "/tmp/project", token: "secret" })).toThrow();
+    expect(() =>
+      accessMutationRequestSchema.parse({ ...request, path: "/tmp/project", token: "secret" })
+    ).toThrow();
   });
 
   it("keeps current-canvas people and loopback lifecycle read models redacted and bounded", () => {
@@ -276,8 +293,13 @@ describe("scoped access capability contracts", () => {
       projectAclRevision: 3,
       canvasAclRevision: 5
     });
-    expect(currentCanvasAccessViewSchema.safeParse({ ...currentCanvasView, aclRevision: 5 }).success).toBe(false);
-    expect(currentCanvasAccessViewSchema.safeParse({ ...currentCanvasView, current: canvasAccess }).success).toBe(false);
+    expect(
+      currentCanvasAccessViewSchema.safeParse({ ...currentCanvasView, aclRevision: 5 }).success
+    ).toBe(false);
+    expect(
+      currentCanvasAccessViewSchema.safeParse({ ...currentCanvasView, current: canvasAccess })
+        .success
+    ).toBe(false);
     expect(
       currentCanvasAccessViewSchema.safeParse({
         ...currentCanvasView,
@@ -305,13 +327,26 @@ describe("scoped access capability contracts", () => {
       serverBaseUrl: "https://server.example.com/",
       allowInsecureTransport: false
     });
-    expect(loopbackServerLifecycleRequestSchema.parse({ action: "start", profile: loopback }).action).toBe("start");
-    expect(loopbackServerLifecycleRequestSchema.parse({ action: "stop", profileId: loopback.profileId }).action).toBe("stop");
+    expect(
+      loopbackServerLifecycleRequestSchema.parse({ action: "start", profile: loopback }).action
+    ).toBe("start");
+    expect(
+      loopbackServerLifecycleRequestSchema.parse({ action: "stop", profileId: loopback.profileId })
+        .action
+    ).toBe("stop");
     expect(() =>
-      loopbackServerLifecycleRequestSchema.parse({ action: "start", profile: { ...loopback, command: "sh" } })
+      loopbackServerLifecycleRequestSchema.parse({
+        action: "start",
+        profile: { ...loopback, command: "sh" }
+      })
     ).toThrow();
     expect(
-      loopbackServerStatusSchema.parse({ profile: loopback, state: "running", startedAt: timestamp, reason: null }).state
+      loopbackServerStatusSchema.parse({
+        profile: loopback,
+        state: "running",
+        startedAt: timestamp,
+        reason: null
+      }).state
     ).toBe("running");
     expect(() =>
       loopbackOwnerConnectionRequestSchema.parse({

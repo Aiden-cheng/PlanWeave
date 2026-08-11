@@ -188,7 +188,9 @@ describe("CanvasReplicaDocument", () => {
       executor: "codex",
       acceptance: ["Accepted"]
     });
-    expect(task(document, "T-001").blocks.every((block) => block.executor === undefined)).toBe(true);
+    expect(task(document, "T-001").blocks.every((block) => block.executor === undefined)).toBe(
+      true
+    );
     expect(document.promptMarkdownByPath[task(document, "T-001").prompt]).toBe("task body");
 
     document = apply(document, {
@@ -291,9 +293,7 @@ describe("CanvasReplicaDocument", () => {
       oldToTaskId: "T-001",
       newToTaskId: "T-001"
     });
-    expect(document.manifest.edges).toEqual([
-      { type: "depends_on", from: "T-002", to: "T-001" }
-    ]);
+    expect(document.manifest.edges).toEqual([{ type: "depends_on", from: "T-002", to: "T-001" }]);
     document = apply(document, {
       kind: "remove_task_dependency",
       fromTaskId: "T-001",
@@ -306,7 +306,9 @@ describe("CanvasReplicaDocument", () => {
       taskId: "T-002"
     });
     expect(document.manifest.nodes.map((node) => node.id)).toEqual(["T-001"]);
-    expect(Object.keys(document.promptMarkdownByPath).some((path) => path.includes("T-002"))).toBe(false);
+    expect(Object.keys(document.promptMarkdownByPath).some((path) => path.includes("T-002"))).toBe(
+      false
+    );
     expect(document.layout.nodes.map((node) => node.nodeId)).toEqual(["T-001"]);
   });
 

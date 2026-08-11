@@ -634,9 +634,11 @@ describe("desktop auto run API", () => {
       cleanupStep: "session_cancel",
       name: "RunnerCleanupOperationError"
     });
-    const spy = vi.spyOn(activeAgentRunRegistryApi, "shutdownDesktopAgentRun").mockRejectedValue(
-      new RunnerCleanupError([cleanupFailure], { history: [], alreadyCleaned: false })
-    );
+    const spy = vi
+      .spyOn(activeAgentRunRegistryApi, "shutdownDesktopAgentRun")
+      .mockRejectedValue(
+        new RunnerCleanupError([cleanupFailure], { history: [], alreadyCleaned: false })
+      );
     try {
       const manifest = manifestTestBuilder()
         .withExecutor("slow-codex", {

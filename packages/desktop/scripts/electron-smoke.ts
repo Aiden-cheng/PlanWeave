@@ -19,17 +19,12 @@ async function resolvePackagedExecutable(): Promise<string> {
   if (!entries.some((entry) => entry.isDirectory() && entry.name === expectedDirectory)) {
     throw new Error(`Current packaged desktop app is missing ${expectedDirectory}.`);
   }
-  return resolve(
-    releaseDir,
-    expectedDirectory,
-    "PlanWeave.app",
-    "Contents",
-    "MacOS",
-    "PlanWeave"
-  );
+  return resolve(releaseDir, expectedDirectory, "PlanWeave.app", "Contents", "MacOS", "PlanWeave");
 }
 
-async function packageCurrentDesktopApp(onOutput: (text: string, stream: "stdout" | "stderr") => void): Promise<void> {
+async function packageCurrentDesktopApp(
+  onOutput: (text: string, stream: "stdout" | "stderr") => void
+): Promise<void> {
   const child = spawn("pnpm", ["pack:mac"], {
     cwd: process.cwd(),
     env: process.env,

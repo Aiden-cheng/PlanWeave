@@ -193,9 +193,7 @@ function blockClaim(ref: string): Extract<ClaimResult, { kind: "block" }> {
   };
 }
 
-function feedbackClaim(
-  feedbackId = "FE-001"
-): Extract<ClaimResult, { kind: "feedback" }> {
+function feedbackClaim(feedbackId = "FE-001"): Extract<ClaimResult, { kind: "feedback" }> {
   return {
     kind: "feedback",
     feedbackId,
@@ -235,7 +233,10 @@ function renderRun(input?: {
   endpoint?: AvailableAgentEndpoint;
   endpoints?: AvailableAgentEndpoint[];
   graph?: DesktopGraphViewModel;
-  preferences?: Record<string, { kind: "remote"; remoteEndpointId: string } | { kind: "local"; executorName: string }>;
+  preferences?: Record<
+    string,
+    { kind: "remote"; remoteEndpointId: string } | { kind: "local"; executorName: string }
+  >;
   readRuntimeStatus?: ReturnType<typeof vi.fn>;
   previewClaimNext?: ReturnType<typeof vi.fn>;
   resolveLiveRemoteBinding?: ReturnType<typeof vi.fn>;
@@ -259,9 +260,7 @@ function renderRun(input?: {
   };
   // Real Desktop Auto Run: start → running, then stepLimit settles as paused + Step limit reached.
   const startLocal = vi.fn(async () => localRunState("running"));
-  const stopLocal = vi.fn(async () =>
-    localRunState("stopped", { error: null, stepCount: 1 })
-  );
+  const stopLocal = vi.fn(async () => localRunState("stopped", { error: null, stepCount: 1 }));
   const readRuntimeStatus =
     input?.readRuntimeStatus ??
     vi
@@ -669,15 +668,21 @@ describe("workspace Agent Endpoint routing", () => {
 
   it("fails Project preflight before partial execution when a selected endpoint is unavailable", async () => {
     const previewClaimNext = vi.fn();
-    const { result, dispatch, readRuntimeStatus, setError, startLocal, previewClaimNext: preview } =
-      renderRun({
-        endpoint: {
-          ...remoteEndpoint,
-          available: false,
-          unavailableReason: "agent_endpoint_host_offline"
-        },
-        previewClaimNext
-      });
+    const {
+      result,
+      dispatch,
+      readRuntimeStatus,
+      setError,
+      startLocal,
+      previewClaimNext: preview
+    } = renderRun({
+      endpoint: {
+        ...remoteEndpoint,
+        available: false,
+        unavailableReason: "agent_endpoint_host_offline"
+      },
+      previewClaimNext
+    });
 
     await act(() => result.current({ kind: "project" }));
 
@@ -703,7 +708,13 @@ describe("workspace Agent Endpoint routing", () => {
       remoteEndpointId: null
     };
     const previewClaimNext = vi.fn();
-    const { result, dispatch, setError, startLocal, previewClaimNext: preview } = renderRun({
+    const {
+      result,
+      dispatch,
+      setError,
+      startLocal,
+      previewClaimNext: preview
+    } = renderRun({
       endpoint: localEndpoint,
       previewClaimNext
     });
@@ -786,7 +797,13 @@ describe("workspace Agent Endpoint routing", () => {
       capabilities: [],
       remoteEndpointId: null
     };
-    const { result, dispatch, setError, startLocal, previewClaimNext: preview } = renderRun({
+    const {
+      result,
+      dispatch,
+      setError,
+      startLocal,
+      previewClaimNext: preview
+    } = renderRun({
       endpoints: [remoteEndpoint, localReview],
       graph: mixedGraph,
       preferences: {
@@ -1123,7 +1140,12 @@ describe("workspace Agent Endpoint routing", () => {
           blocks: [{ ref: "T-001#B-001", status: "completed", dispatchable: false }]
         })
       );
-    const { result, dispatch, previewClaimNext: preview, setError } = renderRun({
+    const {
+      result,
+      dispatch,
+      previewClaimNext: preview,
+      setError
+    } = renderRun({
       previewClaimNext,
       readRuntimeStatus
     });

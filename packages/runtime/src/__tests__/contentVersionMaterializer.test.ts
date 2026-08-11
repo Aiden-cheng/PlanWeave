@@ -29,7 +29,9 @@ afterEach(async () => {
   else process.env.PLANWEAVE_HOME = originalHome;
   if (originalSettingsFile === undefined) delete process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE;
   else process.env.PLANWEAVE_DESKTOP_SETTINGS_FILE = originalSettingsFile;
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+  );
 });
 
 function sha256(content: string): string {
@@ -61,7 +63,12 @@ async function contentFromWorkspace(projectRoot: string): Promise<CompleteConten
   const layout = await getDesktopLayout(workspace);
   const members = [
     ...snapshot.snapshot.files.map((file) => ({
-      kind: file.path === "manifest.json" ? "manifest" as const : file.path.includes("/blocks/") ? "block_prompt" as const : "task_prompt" as const,
+      kind:
+        file.path === "manifest.json"
+          ? ("manifest" as const)
+          : file.path.includes("/blocks/")
+            ? ("block_prompt" as const)
+            : ("task_prompt" as const),
       path: file.path,
       content: file.content,
       digestSha256: file.digestSha256,
@@ -74,10 +81,17 @@ async function contentFromWorkspace(projectRoot: string): Promise<CompleteConten
       digestSha256: "",
       sizeBytes: 0
     }
-  ].map((member) => member.kind === "desktop_layout"
-    ? { ...member, digestSha256: sha256(member.content), sizeBytes: Buffer.byteLength(member.content, "utf8") }
-    : member
-  ).sort((left, right) => left.path.localeCompare(right.path));
+  ]
+    .map((member) =>
+      member.kind === "desktop_layout"
+        ? {
+            ...member,
+            digestSha256: sha256(member.content),
+            sizeBytes: Buffer.byteLength(member.content, "utf8")
+          }
+        : member
+    )
+    .sort((left, right) => left.path.localeCompare(right.path));
   const totalBytes = members.reduce((total, member) => total + member.sizeBytes, 0);
   const provisional = { members, totalBytes, canonicalDigest: "0".repeat(64) };
   return completeContentVersionSchema.parse({
@@ -108,10 +122,12 @@ describe("authoritative content materializer", () => {
 
     expect(created.project.projectId).not.toBe(authority.init.workspace.id);
     expect(created.canvasId).toBe("default");
-    expect(await listProjects()).toContainEqual(expect.objectContaining({
-      projectId: created.project.projectId,
-      activeCanvasId: "default"
-    }));
+    expect(await listProjects()).toContainEqual(
+      expect.objectContaining({
+        projectId: created.project.projectId,
+        activeCanvasId: "default"
+      })
+    );
     await expect(getDesktopLayout(created.project.rootPath)).resolves.toMatchObject({
       projectId: created.project.projectId
     });
@@ -127,16 +143,26 @@ describe("authoritative content materializer", () => {
     const malformed = withRecomputedContent(content, (members) =>
       members.map((member) =>
         member.path === contentVersionDesktopLayoutMemberPath
-          ? { ...member, content: JSON.stringify({ version: "desktop-layout/v1", projectId: "wrong", nodes: [], updatedAt: "2026-08-01T00:00:00.000Z" }) }
+          ? {
+              ...member,
+              content: JSON.stringify({
+                version: "desktop-layout/v1",
+                projectId: "wrong",
+                nodes: [],
+                updatedAt: "2026-08-01T00:00:00.000Z"
+              })
+            }
           : member
       )
     );
     const before = await listProjects();
 
-    await expect(createManagedProjectFromAuthoritativeContent({
-      authorityProjectId: authority.init.workspace.id,
-      content: malformed
-    })).rejects.toThrow("content_version_layout_invalid");
+    await expect(
+      createManagedProjectFromAuthoritativeContent({
+        authorityProjectId: authority.init.workspace.id,
+        content: malformed
+      })
+    ).rejects.toThrow("content_version_layout_invalid");
 
     expect(await listProjects()).toEqual(before);
   });
@@ -187,25 +213,28 @@ describe("authoritative content materializer", () => {
       updatedAt: "2026-07-28T00:02:00.000Z"
     });
     const content = await contentFromWorkspace(workspace.root);
-    const members = content.members.map((member) => member.path === "manifest.json"
-      ? { ...member, digestSha256: "0".repeat(64) }
-      : member
+    const members = content.members.map((member) =>
+      member.path === "manifest.json" ? { ...member, digestSha256: "0".repeat(64) } : member
     );
     const malformed = completeContentVersionSchema.parse({
       members,
       totalBytes: content.totalBytes,
-      canonicalDigest: sha256(canonicalContentVersionDigestPayload({
-        members,
-        totalBytes: content.totalBytes,
-        canonicalDigest: "0".repeat(64)
-      }))
+      canonicalDigest: sha256(
+        canonicalContentVersionDigestPayload({
+          members,
+          totalBytes: content.totalBytes,
+          canonicalDigest: "0".repeat(64)
+        })
+      )
     });
 
-    await expect(materializeAuthoritativeCanvasContent({
-      projectRoot: workspace.root,
-      canvasId: "default",
-      content: malformed
-    })).rejects.toThrow("content_version_member_digest_mismatch");
+    await expect(
+      materializeAuthoritativeCanvasContent({
+        projectRoot: workspace.root,
+        canvasId: "default",
+        content: malformed
+      })
+    ).rejects.toThrow("content_version_member_digest_mismatch");
 
     await expect(readFile(promptPath, "utf8")).resolves.toBe("# preserve this prompt\n");
     await expect(getDesktopLayout(workspace.root)).resolves.toMatchObject({
@@ -217,7 +246,9 @@ describe("authoritative content materializer", () => {
     const cases = [
       (content: CompleteContentVersion) =>
         withRecomputedContent(content, (members) =>
-          members.map((member) => (member.path === "manifest.json" ? { ...member, content: "{}" } : member))
+          members.map((member) =>
+            member.path === "manifest.json" ? { ...member, content: "{}" } : member
+          )
         ),
       (content: CompleteContentVersion) =>
         withRecomputedContent(content, (members) =>
@@ -237,7 +268,9 @@ describe("authoritative content materializer", () => {
       (content: CompleteContentVersion) =>
         withRecomputedContent(content, (members) =>
           members.map((member) =>
-            member.path === contentVersionDesktopLayoutMemberPath ? { ...member, content: "{}" } : member
+            member.path === contentVersionDesktopLayoutMemberPath
+              ? { ...member, content: "{}" }
+              : member
           )
         ),
       (content: CompleteContentVersion) => {

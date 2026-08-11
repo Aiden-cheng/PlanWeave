@@ -424,14 +424,7 @@ export function usePromptDrafts({
     }
     setPromptConflicts({});
     await refreshGraph();
-  }, [
-    promptConflicts,
-    refreshGraph,
-    selectedCanvasId,
-    selectedProject,
-    setError,
-    sharedCanvas
-  ]);
+  }, [promptConflicts, refreshGraph, selectedCanvasId, selectedProject, setError, sharedCanvas]);
 
   useEffect(() => {
     if (!bridge || !selectedProject || !graph) {

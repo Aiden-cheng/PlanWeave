@@ -96,7 +96,9 @@ function observation(
   };
 }
 
-function selection(snapshotRemoteExecution: RemoteBlockExecutionReadModel | null): AgentEndpointBlockSelection {
+function selection(
+  snapshotRemoteExecution: RemoteBlockExecutionReadModel | null
+): AgentEndpointBlockSelection {
   return {
     task,
     block: block(snapshotRemoteExecution),
@@ -190,7 +192,9 @@ describe("createAgentEndpointBlockExecutor live remote binding (C3)", () => {
     const ensureWorkAuthority = vi.fn(async () => ({
       revisions: { responsibilityRevision: 3, reviewerRevision: 4 }
     }));
-    const waitForRemoteTerminal = vi.fn(async () => observation("operation-re-review", "completed"));
+    const waitForRemoteTerminal = vi.fn(async () =>
+      observation("operation-re-review", "completed")
+    );
 
     const execute = createAgentEndpointBlockExecutor({
       activeProjectId: "project-server",

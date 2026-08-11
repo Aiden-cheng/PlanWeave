@@ -121,7 +121,7 @@ describe("desktop renderer hook interfaces", () => {
   });
 
   it("does not clear the committed collaboration selection while projects are restoring", async () => {
-    const projectsResult = deferred<typeof project[]>();
+    const projectsResult = deferred<(typeof project)[]>();
     const bridge = createDesktopBridgeMock({
       listProjects: vi.fn(() => projectsResult.promise),
       getDesktopProjectSnapshot: vi.fn().mockResolvedValue(projectSnapshot()),

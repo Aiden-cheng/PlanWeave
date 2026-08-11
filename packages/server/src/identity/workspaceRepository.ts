@@ -639,9 +639,11 @@ export class WorkspaceIdentityRepository {
    * are honored when present; unbound fleet Hosts remain usable.
    */
   hostUsable(hostId: string, now: Date, workspaceId?: string): boolean {
-    const host = this.database.prepare("SELECT revoked_at,credential_expires_at FROM agent_hosts WHERE id=?").get(
-      hostId
-    ) as { revoked_at: string | null; credential_expires_at: string | null } | undefined;
+    const host = this.database
+      .prepare("SELECT revoked_at,credential_expires_at FROM agent_hosts WHERE id=?")
+      .get(hostId) as
+      | { revoked_at: string | null; credential_expires_at: string | null }
+      | undefined;
     if (!host) return false;
     if (host.revoked_at !== null) return false;
     if (

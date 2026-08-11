@@ -52,12 +52,19 @@ function requireReplicaPrompt(
 function promptIndex(document: CanvasReplicaDocument) {
   const index = new Map<
     string,
-    { ownerKind: "task" | "block"; ownerRef: string; path: string; contentHash: string; preview: string }
+    {
+      ownerKind: "task" | "block";
+      ownerRef: string;
+      path: string;
+      contentHash: string;
+      preview: string;
+    }
   >();
   const markdownByPath = new Map(Object.entries(document.promptMarkdownByPath));
   for (const task of document.manifest.nodes) {
     const taskMarkdown = markdownByPath.get(task.prompt);
-    if (taskMarkdown === undefined) throw new Error(`canvas_replica_task_prompt_missing:${task.id}`);
+    if (taskMarkdown === undefined)
+      throw new Error(`canvas_replica_task_prompt_missing:${task.id}`);
     index.set(task.prompt, {
       ownerKind: "task",
       ownerRef: task.id,
@@ -68,7 +75,8 @@ function promptIndex(document: CanvasReplicaDocument) {
     for (const block of task.blocks) {
       const ref = blockRef(task.id, block.id);
       const blockMarkdown = markdownByPath.get(block.prompt);
-      if (blockMarkdown === undefined) throw new Error(`canvas_replica_block_prompt_missing:${ref}`);
+      if (blockMarkdown === undefined)
+        throw new Error(`canvas_replica_block_prompt_missing:${ref}`);
       index.set(block.prompt, {
         ownerKind: "block",
         ownerRef: ref,
@@ -137,9 +145,7 @@ function failClosed(content: CanvasReplicaGraphContent): CanvasReplicaGraphConte
       ...group,
       activeBlockRefs: []
     })),
-    taskOpenFeedbackCountByTaskId: Object.fromEntries(
-      tasks.map((task) => [task.taskId, 0])
-    )
+    taskOpenFeedbackCountByTaskId: Object.fromEntries(tasks.map((task) => [task.taskId, 0]))
   };
 }
 
@@ -239,11 +245,7 @@ export function overlayCanvasReplicaRuntimeStatus(input: {
 }): CanvasReplicaGraphContent {
   const { content, status, scope } = input;
   const baseline = failClosed(content);
-  if (
-    !status ||
-    !sameScope(status.scope, scope) ||
-    !hasExactRuntimeIdentity(content, status)
-  ) {
+  if (!status || !sameScope(status.scope, scope) || !hasExactRuntimeIdentity(content, status)) {
     return baseline;
   }
   const contentMatchesRuntime = status.packageFingerprint === content.packageFingerprint;
@@ -254,7 +256,11 @@ export function overlayCanvasReplicaRuntimeStatus(input: {
     const remoteTask = requireMapValue(taskStatuses, task.taskId, "canvasReplicaTaskStatusById");
     taskOpenFeedbackCountByTaskId[task.taskId] = remoteTask.openFeedbackCount;
     const blocks = task.blocks.map((block) => {
-      const remoteBlock = requireMapValue(blockStatuses, block.ref, "canvasReplicaBlockStatusByRef");
+      const remoteBlock = requireMapValue(
+        blockStatuses,
+        block.ref,
+        "canvasReplicaBlockStatusByRef"
+      );
       return {
         ...block,
         status: remoteBlock.status,
@@ -281,9 +287,7 @@ export function overlayCanvasReplicaRuntimeStatus(input: {
     tasks,
     sharedResourceGroups: baseline.sharedResourceGroups.map((group) => ({
       ...group,
-      activeBlockRefs: group.memberBlockRefs.filter(
-        (ref) => statusByRef.get(ref) === "in_progress"
-      )
+      activeBlockRefs: group.memberBlockRefs.filter((ref) => statusByRef.get(ref) === "in_progress")
     })),
     taskOpenFeedbackCountByTaskId
   };

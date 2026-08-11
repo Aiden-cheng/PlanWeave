@@ -35,10 +35,7 @@ export type CanvasCommandReconnectInput = {
 };
 
 export type CanvasCommandMaterializationHooks = {
-  beforeAccepted?: (
-    outcome: CanvasCommandAccepted,
-    intent: CanvasCommandIntent
-  ) => Promise<void>;
+  beforeAccepted?: (outcome: CanvasCommandAccepted, intent: CanvasCommandIntent) => Promise<void>;
   beforeReconnect?: (input: {
     response: CanvasReconnectResponse;
     entriesToApply: CanvasJournalEntry[];
@@ -88,9 +85,7 @@ export class CanvasCommandClient {
     }
     this.session.bind(canvasId);
     const expectedRevision =
-      input.expectedRevision !== undefined
-        ? input.expectedRevision
-        : this.session.getRevision();
+      input.expectedRevision !== undefined ? input.expectedRevision : this.session.getRevision();
     const body = canvasCommandSubmitSchema.parse({
       type: "canvas.command.submit",
       protocolVersion: CANVAS_COMMAND_PROTOCOL_VERSION,

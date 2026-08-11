@@ -80,7 +80,9 @@ function expectedPromptMembers(
 function validateManifest(manifest: PlanPackageManifest): void {
   const diagnostics = compileTaskGraph(manifest).diagnostics.errors;
   if (diagnostics.length > 0) {
-    throw new Error(`canvas_replica_manifest_invalid:${diagnostics.map((item) => item.code).join(",")}`);
+    throw new Error(
+      `canvas_replica_manifest_invalid:${diagnostics.map((item) => item.code).join(",")}`
+    );
   }
 }
 

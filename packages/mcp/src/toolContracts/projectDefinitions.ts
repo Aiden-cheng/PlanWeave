@@ -1,10 +1,6 @@
 import * as z from "zod/v4";
 import { projectInput } from "./inputShapes.js";
-import {
-  defineToolDefinitions,
-  readOnlyAnnotations,
-  writeAnnotations
-} from "./types.js";
+import { defineToolDefinitions, readOnlyAnnotations, writeAnnotations } from "./types.js";
 
 export const projectToolDefinitions = defineToolDefinitions({
   get_project_tree: {

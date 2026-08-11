@@ -19,13 +19,15 @@ export type ContentAuthorityStore = {
     createdBy: ActorRef;
     createdAt?: string;
   }): AuthoritativeContentVersion;
-  readVersion(scope: CanvasScopeKey, content: CompletedContentVersionRef): AuthoritativeContentVersion;
+  readVersion(
+    scope: CanvasScopeKey,
+    content: CompletedContentVersionRef
+  ): AuthoritativeContentVersion;
   head(scope: CanvasScopeKey): AuthoritativeContentHead | null;
-  publishInitial(input: {
-    scope: CanvasScopeKey;
-    content: unknown;
-    createdBy: ActorRef;
-  }): { version: AuthoritativeContentVersion; head: AuthoritativeContentHead };
+  publishInitial(input: { scope: CanvasScopeKey; content: unknown; createdBy: ActorRef }): {
+    version: AuthoritativeContentVersion;
+    head: AuthoritativeContentHead;
+  };
   acknowledge(input: {
     scope: CanvasScopeKey;
     deviceSessionId: string;

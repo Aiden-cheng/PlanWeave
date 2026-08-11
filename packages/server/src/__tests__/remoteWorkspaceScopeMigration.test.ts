@@ -144,7 +144,9 @@ describe("remote workspace scope migration", () => {
     recreateRemoteWorkspaceScope(database);
 
     expect(
-      database.prepare("SELECT workspace_id FROM remote_operations WHERE id=?").get("operation-revoked")
+      database
+        .prepare("SELECT workspace_id FROM remote_operations WHERE id=?")
+        .get("operation-revoked")
     ).toBeUndefined();
     expect(
       database.prepare("SELECT workspace_id FROM dispatches WHERE id=?").get("dispatch-revoked")
@@ -186,7 +188,9 @@ describe("remote workspace scope migration", () => {
         .some((column) => column.name === "workspace_id")
     ).toBe(false);
     expect(
-      database.prepare("SELECT 1 FROM sqlite_master WHERE name='remote_operations_unscoped_legacy'").get()
+      database
+        .prepare("SELECT 1 FROM sqlite_master WHERE name='remote_operations_unscoped_legacy'")
+        .get()
     ).toBeUndefined();
   });
 });

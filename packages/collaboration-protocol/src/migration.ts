@@ -62,9 +62,7 @@ export const legacyProjectWorkspaceMappingSchema = z
     mappedAt: timestampSchema
   })
   .strict();
-export type LegacyProjectWorkspaceMapping = z.infer<
-  typeof legacyProjectWorkspaceMappingSchema
->;
+export type LegacyProjectWorkspaceMapping = z.infer<typeof legacyProjectWorkspaceMappingSchema>;
 
 /** Persisted migration state; nullable fields are explicit rather than optional. */
 export const identityMigrationStateSchema = z

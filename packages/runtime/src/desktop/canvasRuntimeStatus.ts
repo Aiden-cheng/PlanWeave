@@ -54,9 +54,7 @@ export async function buildAuthorizedCanvasRuntimeStatusProjection(input: {
       compiledGraph: context.graph
     }
   });
-  const claimHintByRef = new Map(
-    context.claimReadiness.claimHints.map((hint) => [hint.ref, hint])
-  );
+  const claimHintByRef = new Map(context.claimReadiness.claimHints.map((hint) => [hint.ref, hint]));
   return canvasRuntimeStatusProjectionSchema.parse({
     schemaVersion: "canvas-runtime-status/v2",
     scope: input.scope,

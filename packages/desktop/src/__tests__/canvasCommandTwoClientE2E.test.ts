@@ -43,9 +43,7 @@ afterEach(async () => {
   for (const client of clients.splice(0)) client.dispose();
   for (const composition of compositions.splice(0)) await composition.close();
   await Promise.all(
-    servers.splice(0).map(
-      (server) => new Promise<void>((resolve) => server.close(() => resolve()))
-    )
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
   );
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -280,7 +278,8 @@ describe("Desktop canvas command dual-client E2E (OSS-004 B-003)", () => {
     // Client B reconnects and converges on ordered history.
     const reconnect = await controllerB.reconnect();
     expect(reconnect.response.type).toBe("canvas.reconnect.snapshot");
-    if (reconnect.response.type !== "canvas.reconnect.snapshot") throw new Error("expected snapshot");
+    if (reconnect.response.type !== "canvas.reconnect.snapshot")
+      throw new Error("expected snapshot");
     expect(reconnect.response.snapshot.metadata.revision).toBe(1);
     expect(reconnect.response.snapshot.content.canonicalDigest).toBe(
       reconnect.response.snapshot.metadata.contentDigest

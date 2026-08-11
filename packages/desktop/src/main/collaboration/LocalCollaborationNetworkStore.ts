@@ -71,9 +71,9 @@ export class LocalCollaborationNetworkStore implements LocalCollaborationNetwork
               ? document.exposureMode === "tailscale_private"
                 ? "private_https"
                 : document.exposureMode
-            : document.lanSharingEnabled
-              ? "lan_http"
-              : "local_only",
+              : document.lanSharingEnabled
+                ? "lan_http"
+                : "local_only",
         preferredPort: document.version === 1 ? null : document.preferredPort
       };
     } catch (error) {

@@ -595,7 +595,8 @@ export async function createDistributedServerComposition(
       credentials: config.operatorCredentials,
       trustedProjectIds: [...new Set(runtimeRegistry.expansions.map((canvas) => canvas.projectId))],
       serverAdminAnchorWorkspaceId:
-        runtimeRegistry.expansions[0]?.workspaceId ?? ownerRuntimeRegistry.expansions[0]?.workspaceId,
+        runtimeRegistry.expansions[0]?.workspaceId ??
+        ownerRuntimeRegistry.expansions[0]?.workspaceId,
       workspaceForProject: (projectId) => {
         const scopes = runtimeRegistry.expansions.filter(
           (expansion) => expansion.projectId === projectId

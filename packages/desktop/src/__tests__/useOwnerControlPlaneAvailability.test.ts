@@ -42,7 +42,9 @@ describe("deriveFleetCatalogBlockedCode", () => {
     expect(
       derive(
         status({
-          profiles: [profile({ hasOperatorCredential: false, operatorCredentialPersistence: "missing" })]
+          profiles: [
+            profile({ hasOperatorCredential: false, operatorCredentialPersistence: "missing" })
+          ]
         })
       )
     ).toBe("operator_credential_missing");

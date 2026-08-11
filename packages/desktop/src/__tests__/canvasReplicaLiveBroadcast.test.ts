@@ -453,10 +453,7 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
 
   it("ignores late live entries after clear/rebind generation change", async () => {
     const harness = await bindWorker();
-    const entry = harness.advanceRemote(
-      layoutIntent(3, "2026-08-02T12:05:00.000Z"),
-      "op-late"
-    );
+    const entry = harness.advanceRemote(layoutIntent(3, "2026-08-02T12:05:00.000Z"), "op-late");
     harness.worker.clear(baseScope);
     await harness.worker.applyLiveEntry(baseScope, entry);
     expect(harness.store.projection(baseScope)).toBeNull();
@@ -711,12 +708,14 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(liveSync.helloRevision()).toBe(1);
-    expect(store.revision({
-      authorityId: baseScope.authorityId,
-      workspaceId: baseScope.workspaceId,
-      projectId: baseScope.projectId,
-      canvasId: baseScope.canvasId
-    })).toBe(1);
+    expect(
+      store.revision({
+        authorityId: baseScope.authorityId,
+        workspaceId: baseScope.workspaceId,
+        projectId: baseScope.projectId,
+        canvasId: baseScope.canvasId
+      })
+    ).toBe(1);
 
     const socket = MiniSocket.instances[0];
     expect(socket).toBeDefined();
@@ -739,12 +738,14 @@ describe("Canvas replica live broadcast (Phase 5B)", () => {
     await vi.waitFor(() => {
       expect(liveSync.helloRevision()).toBe(5);
     });
-    expect(store.revision({
-      authorityId: baseScope.authorityId,
-      workspaceId: baseScope.workspaceId,
-      projectId: baseScope.projectId,
-      canvasId: baseScope.canvasId
-    })).toBe(5);
+    expect(
+      store.revision({
+        authorityId: baseScope.authorityId,
+        workspaceId: baseScope.workspaceId,
+        projectId: baseScope.projectId,
+        canvasId: baseScope.canvasId
+      })
+    ).toBe(5);
     // Strict +1 would have ignored 1 → 5; only materialized-head ack advances here.
     facade.clearAllSessions();
   });

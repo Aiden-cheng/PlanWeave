@@ -98,8 +98,7 @@ export function summarizeChromiumAccessibilityTree(
     const role = axValue(node.role?.value).trim().toLocaleLowerCase();
     const name = axValue(node.name?.value).trim().toLocaleLowerCase();
     return (
-      allowedRoles.has(role) &&
-      expectedNames.some((expectedName) => name.includes(expectedName))
+      allowedRoles.has(role) && expectedNames.some((expectedName) => name.includes(expectedName))
     );
   });
 

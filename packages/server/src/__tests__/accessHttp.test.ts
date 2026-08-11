@@ -12,7 +12,9 @@ const servers: HttpServer[] = [];
 const databases: SqliteDatabase[] = [];
 
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  await Promise.all(
+    servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve())))
+  );
   for (const database of databases.splice(0)) database.close();
 });
 
@@ -30,14 +32,22 @@ async function fixture() {
     displayName: "Owner",
     issuedAt: "2026-01-01T00:00:00.000Z"
   });
-  const invitation = identity.createInvitation({ projectId: "project-a", createdByHumanPrincipalId: "owner" });
+  const invitation = identity.createInvitation({
+    projectId: "project-a",
+    createdByHumanPrincipalId: "owner"
+  });
   const viewer = identity.consumeInvitation({
     projectId: "project-a",
     invitationToken: invitation.invitationToken,
     displayName: "Viewer"
   });
   const access = new ProjectAccessRepository(database, () => new Date("2026-01-02T00:00:00.000Z"));
-  access.registerProjectInternal({ workspaceId, projectId: "project-a", projectRoot: "/srv/a", ownerHumanPrincipalId: "owner" });
+  access.registerProjectInternal({
+    workspaceId,
+    projectId: "project-a",
+    projectRoot: "/srv/a",
+    ownerHumanPrincipalId: "owner"
+  });
   access.registerCanvasInternal({
     workspaceId,
     projectId: "project-a",
@@ -70,9 +80,12 @@ async function fixture() {
 describe("access HTTP", () => {
   it("does not expose People for a private active workspace member", async () => {
     const state = await fixture();
-    const response = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
-      headers: { Authorization: `Bearer ${state.viewer.deviceToken}` }
-    });
+    const response = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        headers: { Authorization: `Bearer ${state.viewer.deviceToken}` }
+      }
+    );
     expect(response.status).toBe(403);
     const body = await response.json();
     expect(body).toEqual({ error: "scope_private" });
@@ -81,9 +94,12 @@ describe("access HTTP", () => {
 
   it("returns redacted current scope only to readers and rejects cross-workspace mutation scope", async () => {
     const state = await fixture();
-    const current = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
-      headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
-    });
+    const current = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+      }
+    );
     expect(current.status).toBe(200);
     const view = await current.json();
     expect(view.project.effectiveRole).toBe("owner");
@@ -95,37 +111,62 @@ describe("access HTTP", () => {
       `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${state.owner.deviceToken}`, "content-type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${state.owner.deviceToken}`,
+          "content-type": "application/json"
+        },
         body: JSON.stringify({
           operation: "visibility",
-          scope: { scopeKind: "project", workspaceId: state.workspaceId, projectId: "project-a", canvasId: null },
+          scope: {
+            scopeKind: "project",
+            workspaceId: state.workspaceId,
+            projectId: "project-a",
+            canvasId: null
+          },
           expectedAclRevision: 0,
           visibility: "shared"
         })
       }
     );
     expect(projectVisibility.status).toBe(200);
-    await expect(projectVisibility.json()).resolves.toMatchObject({ status: "applied", aclRevision: 1 });
+    await expect(projectVisibility.json()).resolves.toMatchObject({
+      status: "applied",
+      aclRevision: 1
+    });
 
     const canvasVisibility = await fetch(
       `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${state.owner.deviceToken}`, "content-type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${state.owner.deviceToken}`,
+          "content-type": "application/json"
+        },
         body: JSON.stringify({
           operation: "visibility",
-          scope: { scopeKind: "canvas", workspaceId: state.workspaceId, projectId: "project-a", canvasId: "default" },
+          scope: {
+            scopeKind: "canvas",
+            workspaceId: state.workspaceId,
+            projectId: "project-a",
+            canvasId: "default"
+          },
           expectedAclRevision: 0,
           visibility: "shared"
         })
       }
     );
     expect(canvasVisibility.status).toBe(200);
-    await expect(canvasVisibility.json()).resolves.toMatchObject({ status: "applied", aclRevision: 1 });
-
-    const revised = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
-      headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+    await expect(canvasVisibility.json()).resolves.toMatchObject({
+      status: "applied",
+      aclRevision: 1
     });
+
+    const revised = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+      }
+    );
     await expect(revised.json()).resolves.toMatchObject({
       projectVisibility: "shared",
       canvasVisibility: "shared",
@@ -137,10 +178,18 @@ describe("access HTTP", () => {
       `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${state.owner.deviceToken}`, "content-type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${state.owner.deviceToken}`,
+          "content-type": "application/json"
+        },
         body: JSON.stringify({
           operation: "visibility",
-          scope: { scopeKind: "project", workspaceId: state.workspaceId, projectId: "project-a", canvasId: null },
+          scope: {
+            scopeKind: "project",
+            workspaceId: state.workspaceId,
+            projectId: "project-a",
+            canvasId: null
+          },
           expectedAclRevision: 0,
           visibility: "private"
         })
@@ -153,16 +202,27 @@ describe("access HTTP", () => {
       aclRevision: 1
     });
 
-    const crossWorkspace = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${state.owner.deviceToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        operation: "visibility",
-        scope: { scopeKind: "canvas", workspaceId: "workspace-other", projectId: "project-a", canvasId: "default" },
-        expectedAclRevision: 0,
-        visibility: "shared"
-      })
-    });
+    const crossWorkspace = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${state.owner.deviceToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          operation: "visibility",
+          scope: {
+            scopeKind: "canvas",
+            workspaceId: "workspace-other",
+            projectId: "project-a",
+            canvasId: "default"
+          },
+          expectedAclRevision: 0,
+          visibility: "shared"
+        })
+      }
+    );
     expect(crossWorkspace.status).toBe(403);
     await expect(crossWorkspace.json()).resolves.toEqual({ error: "cross_workspace" });
   });
@@ -184,13 +244,20 @@ describe("access HTTP", () => {
       role: "viewer",
       grantedBy: { kind: "human", id: "owner" }
     });
-    const current = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
-      headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
-    });
-    const view = (await current.json()) as { people: Array<{ humanPrincipalId: string; grants: unknown[] }> };
+    const current = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+      }
+    );
+    const view = (await current.json()) as {
+      people: Array<{ humanPrincipalId: string; grants: unknown[] }>;
+    };
     expect(view.people.find((person) => person.humanPrincipalId === "owner")?.grants).toEqual([]);
     expect(
-      view.people.find((person) => person.humanPrincipalId === state.viewer.principal.humanPrincipalId)?.grants
+      view.people.find(
+        (person) => person.humanPrincipalId === state.viewer.principal.humanPrincipalId
+      )?.grants
     ).toEqual([
       { grantId: projectGrant.grantId, scopeKind: "project", role: "editor" },
       { grantId: canvasGrant.grantId, scopeKind: "canvas", role: "viewer" }
@@ -212,13 +279,19 @@ describe("access HTTP", () => {
       actor: { kind: "human", id: "owner" },
       expectedAclRevision: 1
     });
-    const refreshed = await fetch(`${state.origin}/api/v1/projects/project-a/canvases/default/access`, {
-      headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
-    });
-    const refreshedView = (await refreshed.json()) as { people: Array<{ humanPrincipalId: string; grants: unknown[] }> };
+    const refreshed = await fetch(
+      `${state.origin}/api/v1/projects/project-a/canvases/default/access`,
+      {
+        headers: { Authorization: `Bearer ${state.owner.deviceToken}` }
+      }
+    );
+    const refreshedView = (await refreshed.json()) as {
+      people: Array<{ humanPrincipalId: string; grants: unknown[] }>;
+    };
     expect(
-      refreshedView.people.find((person) => person.humanPrincipalId === state.viewer.principal.humanPrincipalId)
-        ?.grants
+      refreshedView.people.find(
+        (person) => person.humanPrincipalId === state.viewer.principal.humanPrincipalId
+      )?.grants
     ).toEqual([]);
   });
 });

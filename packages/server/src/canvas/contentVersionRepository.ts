@@ -150,7 +150,9 @@ export class ContentVersionRepository implements ContentAuthorityStore {
            FROM canvas_content_versions
           WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?`
       )
-      .get(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId) as VersionRow | undefined;
+      .get(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId) as
+      | VersionRow
+      | undefined;
     if (!row || String(row.canonical_digest) !== content.canonicalDigest) {
       throw new Error("content_version_not_found");
     }
@@ -173,7 +175,9 @@ export class ContentVersionRepository implements ContentAuthorityStore {
       createdBy: {
         kind: row.creator_kind as ActorRef["kind"],
         id: String(row.creator_id),
-        ...(row.creator_display_name === null ? {} : { displayName: String(row.creator_display_name) })
+        ...(row.creator_display_name === null
+          ? {}
+          : { displayName: String(row.creator_display_name) })
       }
     };
     return {
@@ -192,12 +196,7 @@ export class ContentVersionRepository implements ContentAuthorityStore {
          FROM canvas_content_version_members
         WHERE workspace_id=? AND project_id=? AND canvas_id=? AND version_id=?`
       )
-      .all(
-        scope.workspaceId,
-        scope.projectId,
-        scope.canvasId,
-        content.versionId
-      )
+      .all(scope.workspaceId, scope.projectId, scope.canvasId, content.versionId)
       .map((row) => String(row.member_path))
       .sort(compareContentVersionMemberPaths);
     const readMember = this.database.prepare(
@@ -402,14 +401,17 @@ export class ContentVersionRepository implements ContentAuthorityStore {
            FROM canvas_content_acknowledgements
           WHERE workspace_id=? AND project_id=? AND canvas_id=? AND device_session_id=?`
       )
-      .get(scope.workspaceId, scope.projectId, scope.canvasId, deviceSessionId) as VersionRow | undefined;
+      .get(scope.workspaceId, scope.projectId, scope.canvasId, deviceSessionId) as
+      | VersionRow
+      | undefined;
     if (!row) return null;
     const content = completedContentVersionRefSchema.parse({
       versionId: row.version_id,
       canonicalDigest: row.canonical_digest,
       verification: "complete"
     });
-    if (!this.versionExists(scope, content)) throw new Error("content_version_acknowledgement_invalid");
+    if (!this.versionExists(scope, content))
+      throw new Error("content_version_acknowledgement_invalid");
     return contentVersionAcknowledgementSchema.parse({
       scope,
       deviceSessionId,
@@ -482,8 +484,7 @@ export class ContentVersionRepository implements ContentAuthorityStore {
             : "fetch_head",
       canPublishInitial,
       canMaterialize: authoritativeHead !== null,
-      canRecover:
-        (authoritativeHead !== null && replicaStatus !== "in_sync") || canPublishInitial
+      canRecover: (authoritativeHead !== null && replicaStatus !== "in_sync") || canPublishInitial
     });
   }
 
@@ -497,7 +498,8 @@ export class ContentVersionRepository implements ContentAuthorityStore {
       return input.localReplica === null ? "snapshot_required" : "diverged";
     }
     if (input.localReplica === null) return "snapshot_required";
-    if (input.localReplica.versionId === input.authoritativeHead.content.versionId) return "in_sync";
+    if (input.localReplica.versionId === input.authoritativeHead.content.versionId)
+      return "in_sync";
 
     const journalRevision = this.journalRevisionFor(input.scope, input.localReplica);
     if (journalRevision === null) return "diverged";

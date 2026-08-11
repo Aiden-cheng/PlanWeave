@@ -60,7 +60,9 @@ describe("PlanWeave MCP tool registry", () => {
     const registryClient = await connectRegistry();
     const tools = await registryClient.listTools();
 
-    expect(tools.tools.map((tool) => tool.name).sort()).toEqual([...defaultPlanweaveToolNames].sort());
+    expect(tools.tools.map((tool) => tool.name).sort()).toEqual(
+      [...defaultPlanweaveToolNames].sort()
+    );
     for (const tool of tools.tools) {
       expect(tool.inputSchema).toMatchObject({
         additionalProperties: false

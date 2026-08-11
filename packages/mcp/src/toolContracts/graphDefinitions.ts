@@ -29,13 +29,9 @@ import {
   reviewPipelineBulkUpdateSchema,
   semanticTaskDependencyInput,
   taskDependencyEdgeSchema,
-  taskDependencyUpdateSchema,
+  taskDependencyUpdateSchema
 } from "./inputShapes.js";
-import {
-  defineToolDefinitions,
-  readOnlyAnnotations,
-  writeAnnotations
-} from "./types.js";
+import { defineToolDefinitions, readOnlyAnnotations, writeAnnotations } from "./types.js";
 
 export const graphToolDefinitions = defineToolDefinitions({
   preview_execution_graph: {

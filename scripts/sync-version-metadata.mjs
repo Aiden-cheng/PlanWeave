@@ -45,13 +45,7 @@ const versionFlagTargets = {
   "--collaboration-protocol": ["collaboration-protocol"],
   "--agent-host": ["agent-host"],
   "--server": ["server"],
-  "--npm": [
-    "agent-host-protocol",
-    "collaboration-protocol",
-    "runtime",
-    "mcp",
-    "cli"
-  ],
+  "--npm": ["agent-host-protocol", "collaboration-protocol", "runtime", "mcp", "cli"],
   "--all": [
     "root",
     "runtime",

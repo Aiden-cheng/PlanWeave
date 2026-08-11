@@ -192,14 +192,7 @@ export function useSelectedBlock({
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [
-    refreshGraph,
-    selectedBlock,
-    selectedCanvasId,
-    selectedProject,
-    setError,
-    sharedCanvas
-  ]);
+  }, [refreshGraph, selectedBlock, selectedCanvasId, selectedProject, setError, sharedCanvas]);
 
   const saveSelectedBlockPrompt = useCallback(async () => {
     if (!selectedProject || !selectedBlock) {
@@ -243,14 +236,7 @@ export function useSelectedBlock({
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [
-    refreshGraph,
-    selectedBlock,
-    selectedCanvasId,
-    selectedProject,
-    setError,
-    sharedCanvas
-  ]);
+  }, [refreshGraph, selectedBlock, selectedCanvasId, selectedProject, setError, sharedCanvas]);
 
   return {
     blockFeedbackRecords,

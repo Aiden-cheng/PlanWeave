@@ -241,7 +241,9 @@ export class AgentHostState implements AgentHostStateRepository {
     activeLeases: ReadonlyArray<AgentHostRemoteExecutionIdentity>,
     readiness?: HostReadinessObservation
   ): HostEvent {
-    return inWriteTransaction(this.database, () => this.events.queueHeartbeat(activeLeases, readiness));
+    return inWriteTransaction(this.database, () =>
+      this.events.queueHeartbeat(activeLeases, readiness)
+    );
   }
 
   acknowledgeEvent(messageId: string): boolean {

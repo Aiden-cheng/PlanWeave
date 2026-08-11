@@ -65,17 +65,14 @@ function provisionAdmin(database: SqliteDatabase, projectId = "project-setup") {
 }
 
 function principal(database: SqliteDatabase) {
-  const auth = new OperatorTokenRegistry(
-    database,
-    [
-      {
-        operatorId: "operator-admin",
-        tokenSha256: hashOperatorToken(adminToken),
-        projectIds: ["project-setup"],
-        serverAdmin: false
-      }
-    ]
-  );
+  const auth = new OperatorTokenRegistry(database, [
+    {
+      operatorId: "operator-admin",
+      tokenSha256: hashOperatorToken(adminToken),
+      projectIds: ["project-setup"],
+      serverAdmin: false
+    }
+  ]);
   const principal = auth.authenticate(`Bearer ${adminToken}`);
   if (!principal) throw new Error("missing principal");
   return principal;
@@ -115,9 +112,7 @@ describe("setup code issue/redeem/revoke", () => {
       displayOnce: issued.displayOnce
     });
 
-    const persisted = JSON.stringify(
-      database.prepare("SELECT * FROM setup_code_grants").all()
-    );
+    const persisted = JSON.stringify(database.prepare("SELECT * FROM setup_code_grants").all());
     expect(persisted).not.toContain(issued.setupCode);
     expect(persisted).toContain(createHash("sha256").update(issued.setupCode).digest("hex"));
 
@@ -165,17 +160,14 @@ describe("setup code issue/redeem/revoke", () => {
     });
     expect(operatorRedeem.purpose).toBe("operator_session");
     if (operatorRedeem.purpose !== "operator_session") throw new Error("expected operator");
-    const auth = new OperatorTokenRegistry(
-      database,
-      [
-        {
-          operatorId: "operator-admin",
-          tokenSha256: hashOperatorToken(adminToken),
-          projectIds: ["project-setup"],
-          serverAdmin: false
-        }
-      ]
-    );
+    const auth = new OperatorTokenRegistry(database, [
+      {
+        operatorId: "operator-admin",
+        tokenSha256: hashOperatorToken(adminToken),
+        projectIds: ["project-setup"],
+        serverAdmin: false
+      }
+    ]);
     const minted = auth.authenticate(`Bearer ${operatorRedeem.operatorToken}`);
     expect(minted?.operatorId).toBe(operatorRedeem.operatorId);
     expect(minted?.workspaceId).toBe(workspaceId);
@@ -209,11 +201,7 @@ describe("setup code issue/redeem/revoke", () => {
     expect(hostRedeem.purpose).toBe("host_enrollment");
     if (hostRedeem.purpose !== "host_enrollment") throw new Error("expected host");
     expect(
-      new AgentHostRepository(database).authenticate(
-        hostRedeem.hostId,
-        hostToken,
-        workspaceId
-      )?.id
+      new AgentHostRepository(database).authenticate(hostRedeem.hostId, hostToken, workspaceId)?.id
     ).toBe(hostRedeem.hostId);
   });
 
@@ -241,13 +229,11 @@ describe("setup code issue/redeem/revoke", () => {
     const committedBeforeResponseLoss = setup.redeem(request);
     const resumed = setup.redeem(request);
     expect(resumed).toEqual(committedBeforeResponseLoss);
-    expect(
-      database.prepare("SELECT COUNT(*) AS count FROM agent_hosts").get()?.count
-    ).toBe(1);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM agent_hosts").get()?.count).toBe(1);
 
-    expect(() =>
-      setup.redeem({ ...request, enrollmentAttemptId: "enroll-recovery-002" })
-    ).toThrow(/setup_code_redeemed/);
+    expect(() => setup.redeem({ ...request, enrollmentAttemptId: "enroll-recovery-002" })).toThrow(
+      /setup_code_redeemed/
+    );
     expect(() =>
       setup.redeem({
         ...request,
@@ -553,19 +539,16 @@ describe("setup code issue/redeem/revoke", () => {
     });
     servers.push(strict);
     const strictPort = await listen(strict);
-    const rejected = await fetch(
-      `http://127.0.0.1:${strictPort}/api/v1/setup-codes/redeem`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          schemaVersion: "workspace-setup/v1",
-          purpose: "device_session",
-          setupCode: `pw_setup_${randomBytes(32).toString("base64url")}`,
-          displayName: "X"
-        })
-      }
-    );
+    const rejected = await fetch(`http://127.0.0.1:${strictPort}/api/v1/setup-codes/redeem`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: "workspace-setup/v1",
+        purpose: "device_session",
+        setupCode: `pw_setup_${randomBytes(32).toString("base64url")}`,
+        displayName: "X"
+      })
+    });
     expect(rejected.status).toBe(426);
   });
 

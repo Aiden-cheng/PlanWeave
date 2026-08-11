@@ -21,7 +21,9 @@ function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-function expectedPromptMembers(manifest: PlanPackageManifest): Map<string, ContentVersionMemberKind> {
+function expectedPromptMembers(
+  manifest: PlanPackageManifest
+): Map<string, ContentVersionMemberKind> {
   const expected = new Map<string, ContentVersionMemberKind>();
   const add = (path: string, kind: ContentVersionMemberKind) => {
     const existing = expected.get(path);

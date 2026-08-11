@@ -550,9 +550,7 @@ function normalizeV1Config(config: z.infer<typeof serverConfigV1Schema>): Server
     ? deploymentEndpointSchema.parse({
         ...config.deployment,
         topology:
-          config.deployment.topology === "lan_https"
-            ? "private_https"
-            : config.deployment.topology
+          config.deployment.topology === "lan_https" ? "private_https" : config.deployment.topology
       })
     : null;
   if (config.allowInsecureLan) {
@@ -595,7 +593,7 @@ function normalizeV1Config(config: z.infer<typeof serverConfigV1Schema>): Server
     version: "server-config/v2",
     transport,
     deployment,
-    allowedClientOrigins: config.deployment ? deployment?.allowedClientOrigins ?? null : null,
+    allowedClientOrigins: config.deployment ? (deployment?.allowedClientOrigins ?? null) : null,
     insecurePolicy: normalizedPolicy(transport.mode)
   });
 }
@@ -698,20 +696,10 @@ export const serverConfigSummarySchema = z
       })
       .strict(),
     advertisedOrigin: z.url(),
-    transportMode: z.enum([
-      "loopback_http",
-      "lan_http",
-      "reverse_proxy_https",
-      "direct_https"
-    ]),
+    transportMode: z.enum(["loopback_http", "lan_http", "reverse_proxy_https", "direct_https"]),
     deployment: z
       .object({
-        topology: z.enum([
-          "loopback_http",
-          "loopback_https",
-          "private_https",
-          "public_https"
-        ]),
+        topology: z.enum(["loopback_http", "loopback_https", "private_https", "public_https"]),
         allowedClientOrigins: z.array(z.url()).max(32)
       })
       .nullable(),
