@@ -7,7 +7,7 @@ import {
 } from "../index.js";
 
 const handoff = agentHostSetupHandoffSchema.parse({
-  version: "agent-host-setup/v1",
+  version: "agent-host-setup/v2",
   endpoint: {
     topology: "private_https",
     serverOrigin: "https://planweave.tail1234.ts.net",
@@ -17,6 +17,8 @@ const handoff = agentHostSetupHandoffSchema.parse({
   workspaceId: "workspace-1",
   enrollmentCode: `pw_enroll_${"a".repeat(43)}`,
   expiresAt: "2030-01-01T00:00:00.000Z",
+  credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+  credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
   display: { workspaceName: "Studio", serverName: "Private server" }
 });
 
@@ -31,10 +33,12 @@ describe("Agent Host setup handoff", () => {
 
   it("round-trips server-scoped fleet handoffs without workspace binding", () => {
     const fleetHandoff = agentHostSetupHandoffSchema.parse({
-      version: "agent-host-setup/v1",
+      version: "agent-host-setup/v2",
       endpoint: handoff.endpoint,
       enrollmentCode: handoff.enrollmentCode,
       expiresAt: handoff.expiresAt,
+      credentialExpiresAt: handoff.credentialExpiresAt,
+      credentialPolicy: handoff.credentialPolicy,
       display: { workspaceName: "Owner fleet", serverName: "Private server" }
     });
     const encoded = serializeAgentHostSetupHandoff(fleetHandoff);

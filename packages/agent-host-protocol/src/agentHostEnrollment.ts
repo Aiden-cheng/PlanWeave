@@ -4,8 +4,12 @@ import { hostCapacitySchema } from "./agentHostProtocol.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
 import { agentHostProtocolVersionSchema } from "./version.js";
 import { hostCredentialTokenSchema, hostEnrollmentCodeSchema } from "./agentHostCredentials.js";
+import { hostCredentialPolicySchema } from "./credentialLifecycle.js";
 
 export const HOST_DISPLAY_NAME_MAX_LENGTH = 128 as const;
+
+/** Stable random identity for one Agent Host installation, independent of credential generations. */
+export const hostInstallationIdSchema = z.string().uuid();
 
 const versioned = z.object({ protocolVersion: agentHostProtocolVersionSchema }).strict();
 
@@ -13,6 +17,8 @@ export const hostEnrollmentRequestSchema = versioned.extend({
   type: z.literal("host.enrollment.request"),
   enrollmentCode: hostEnrollmentCodeSchema,
   enrollmentAttemptId: opaqueIdentifierSchema,
+  installationId: hostInstallationIdSchema,
+  supersedesHostId: opaqueIdentifierSchema.optional(),
   credentialToken: hostCredentialTokenSchema,
   displayName: z.string().trim().min(1).max(HOST_DISPLAY_NAME_MAX_LENGTH),
   capabilities: capabilitiesSchema,
@@ -25,7 +31,8 @@ export const hostEnrollmentCompletedSchema = versioned.extend({
   hostId: opaqueIdentifierSchema,
   /** Optional legacy collaboration workspace scope; server-scoped fleet enrollment does not require it. */
   workspaceId: opaqueIdentifierSchema.optional(),
-  credentialExpiresAt: z.string().datetime()
+  credentialExpiresAt: z.string().datetime(),
+  credentialPolicy: hostCredentialPolicySchema
 });
 
 export const hostEnrollmentErrorCodeSchema = z.enum([

@@ -1,5 +1,23 @@
 export { artifactRefSchema, type ArtifactRef } from "./artifacts.js";
 export {
+  DEFAULT_HOST_CREDENTIAL_LIFETIME_DAYS,
+  HOST_CREDENTIAL_LIFETIME_DAY_OPTIONS,
+  HOST_CREDENTIAL_PREVIOUS_TOKEN_GRACE_MS,
+  hostCredentialLifetimeDaysSchema,
+  hostCredentialPolicySchema,
+  hostCredentialRenewalErrorCodeSchema,
+  hostCredentialRenewalErrorSchema,
+  hostCredentialRenewalStatusSchema,
+  hostCredentialRotationRequestSchema,
+  hostCredentialRotationResponseSchema,
+  type HostCredentialLifetimeDays,
+  type HostCredentialPolicy,
+  type HostCredentialRenewalErrorCode,
+  type HostCredentialRenewalStatus,
+  type HostCredentialRotationRequest,
+  type HostCredentialRotationResponse
+} from "./credentialLifecycle.js";
+export {
   agentHostSetupHandoffPrefix,
   agentHostSetupHandoffSchema,
   agentHostSetupHandoffVersion,
@@ -197,6 +215,7 @@ export {
   hostEnrollmentErrorCodeSchema,
   hostEnrollmentErrorSchema,
   hostEnrollmentRequestSchema,
+  hostInstallationIdSchema,
   type HostEnrollmentCompleted,
   type HostEnrollmentError,
   type HostEnrollmentErrorCode,
@@ -230,6 +249,8 @@ export {
   operatorHostAvailabilitySchema,
   operatorHostPageSchema,
   operatorHostRevokeResponseSchema,
+  operatorHostRenewalRequestSchema,
+  operatorHostRenewalResponseSchema,
   operatorHostViewSchema,
   operatorPageQuerySchema,
   operatorTokenSchema,
@@ -239,6 +260,7 @@ export {
   type OperatorHostAvailabilityReason,
   type OperatorHostPage,
   type OperatorHostView,
+  type OperatorHostRenewalRequest,
   type OperatorPageQuery
 } from "./operatorControl.js";
 export {

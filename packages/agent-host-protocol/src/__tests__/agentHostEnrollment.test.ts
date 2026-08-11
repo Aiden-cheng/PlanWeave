@@ -15,6 +15,8 @@ function request() {
     protocolVersion: 1,
     enrollmentCode: secret("pw_enroll_"),
     enrollmentAttemptId: "attempt-enrollment-001",
+    installationId: "4b3ba96d-0f84-4cf4-aac5-87ef90f58ec2",
+    supersedesHostId: "host-enrolled-previous",
     credentialToken: secret("pw_host_"),
     displayName: "Build Host",
     capabilities: ["linux", "workspace.git"],
@@ -32,7 +34,8 @@ describe("Agent Host enrollment protocol", () => {
         enrollmentAttemptId: "attempt-enrollment-001",
         hostId: "host-enrolled-001",
         workspaceId: "workspace-enrolled-001",
-        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }).hostId
     ).toBe("host-enrolled-001");
     expect(
@@ -41,7 +44,8 @@ describe("Agent Host enrollment protocol", () => {
         protocolVersion: 1,
         enrollmentAttemptId: "attempt-enrollment-001",
         hostId: "host-enrolled-001",
-        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }).workspaceId
     ).toBeUndefined();
     expect(
@@ -68,6 +72,9 @@ describe("Agent Host enrollment protocol", () => {
     );
     expect(
       hostEnrollmentRequestSchema.safeParse({ ...request(), enrollmentCode: "secret" }).success
+    ).toBe(false);
+    expect(
+      hostEnrollmentRequestSchema.safeParse({ ...request(), installationId: "not-a-uuid" }).success
     ).toBe(false);
   });
 });

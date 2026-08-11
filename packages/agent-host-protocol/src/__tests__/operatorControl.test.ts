@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   operatorEnrollmentGrantRequestSchema,
   operatorEnrollmentGrantResponseSchema,
+  operatorHostRenewalRequestSchema,
   operatorHostPageSchema,
   operatorPageQuerySchema,
   operatorTokenSchema
@@ -72,14 +73,20 @@ describe("operator control wire contracts", () => {
     expect(() =>
       operatorEnrollmentGrantRequestSchema.parse({
         expiresAt: "not-a-date",
-        credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     ).toThrow();
     expect(() =>
       operatorEnrollmentGrantRequestSchema.parse({
         expiresAt: "2030-01-01T00:00:00.000Z",
-        credentialExpiresAt: "2030-01-01T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
         operatorToken: "operator_token_abcdefghijklmnopqrstuvwxyz_1234"
+      })
+    ).toThrow();
+    expect(() =>
+      operatorEnrollmentGrantRequestSchema.parse({
+        expiresAt: "2030-01-01T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 181, renewal: "automatic" }
       })
     ).toThrow();
     expect(() =>
@@ -91,15 +98,21 @@ describe("operator control wire contracts", () => {
     expect(
       operatorEnrollmentGrantResponseSchema.parse({
         enrollmentCode: `pw_enroll_${"A".repeat(43)}`,
-        expiresAt: "2030-01-01T00:15:00.000Z"
+        expiresAt: "2030-01-01T00:15:00.000Z",
+        credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }).enrollmentCode
     ).toBe(`pw_enroll_${"A".repeat(43)}`);
     expect(
       operatorEnrollmentGrantResponseSchema.parse({
         enrollmentCode: `pw_enroll_${"A".repeat(43)}`,
         workspaceId: "workspace-1",
-        expiresAt: "2030-01-01T00:15:00.000Z"
+        expiresAt: "2030-01-01T00:15:00.000Z",
+        credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }).workspaceId
     ).toBe("workspace-1");
+    expect(operatorHostRenewalRequestSchema.parse({})).toEqual({});
+    expect(() => operatorHostRenewalRequestSchema.parse({ lifetimeDays: 180 })).toThrow();
   });
 });

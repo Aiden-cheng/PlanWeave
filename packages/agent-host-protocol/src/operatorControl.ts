@@ -3,6 +3,7 @@ import { capabilitiesSchema } from "./capabilities.js";
 import { hostEnrollmentCodeSchema } from "./agentHostCredentials.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
 import { hostReadinessObservationSchema } from "./agentHostProtocol.js";
+import { hostCredentialPolicySchema } from "./credentialLifecycle.js";
 
 /** Bounded operator credential accepted by Server and held only by Desktop main. */
 export const operatorTokenSchema = z
@@ -28,7 +29,7 @@ export const operatorEnrollmentGrantRequestSchema = z
     /** Target scope selector; Server validates it against the authenticated operator. */
     workspaceId: opaqueIdentifierSchema.optional(),
     expiresAt: timestampSchema,
-    credentialExpiresAt: timestampSchema
+    credentialPolicy: hostCredentialPolicySchema
   })
   .strict();
 
@@ -37,7 +38,9 @@ export const operatorEnrollmentGrantResponseSchema = z
     enrollmentCode: hostEnrollmentCodeSchema,
     /** Optional legacy collaboration workspace scope; server-scoped fleet grants omit it. */
     workspaceId: opaqueIdentifierSchema.optional(),
-    expiresAt: timestampSchema
+    expiresAt: timestampSchema,
+    credentialExpiresAt: timestampSchema,
+    credentialPolicy: hostCredentialPolicySchema
   })
   .strict();
 
@@ -79,6 +82,8 @@ export const operatorHostViewSchema = z
     lastSeenAt: timestampSchema.optional(),
     revokedAt: timestampSchema.optional(),
     credentialExpiresAt: timestampSchema.optional(),
+    credentialPolicy: hostCredentialPolicySchema.optional(),
+    credentialRenewalRequestedAt: timestampSchema.optional(),
     readinessObservation: hostReadinessObservationSchema.optional(),
     availability: operatorHostAvailabilitySchema
   })
@@ -93,6 +98,8 @@ export const operatorHostPageSchema = z
 
 /** Revoke returns the same redacted Host projection as GET /hosts/:hostId. */
 export const operatorHostRevokeResponseSchema = operatorHostViewSchema;
+export const operatorHostRenewalRequestSchema = z.object({}).strict();
+export const operatorHostRenewalResponseSchema = operatorHostViewSchema;
 
 export type OperatorEnrollmentGrantRequest = z.infer<typeof operatorEnrollmentGrantRequestSchema>;
 export type OperatorEnrollmentGrantResponse = z.infer<typeof operatorEnrollmentGrantResponseSchema>;
@@ -101,3 +108,4 @@ export type OperatorHostAvailability = z.infer<typeof operatorHostAvailabilitySc
 export type OperatorHostAvailabilityReason = z.infer<typeof operatorHostAvailabilityReasonSchema>;
 export type OperatorHostPage = z.infer<typeof operatorHostPageSchema>;
 export type OperatorPageQuery = z.infer<typeof operatorPageQuerySchema>;
+export type OperatorHostRenewalRequest = z.infer<typeof operatorHostRenewalRequestSchema>;

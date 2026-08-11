@@ -2,9 +2,10 @@ import { z } from "zod";
 import { hostEnrollmentCodeSchema } from "./agentHostCredentials.js";
 import { deploymentEndpointSchema } from "./deploymentEndpoint.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
+import { hostCredentialPolicySchema } from "./credentialLifecycle.js";
 
 export const agentHostSetupHandoffPrefix = "planweave-agent-host-setup:" as const;
-export const agentHostSetupHandoffVersion = "agent-host-setup/v1" as const;
+export const agentHostSetupHandoffVersion = "agent-host-setup/v2" as const;
 
 export const agentHostSetupHandoffSchema = z
   .object({
@@ -14,6 +15,8 @@ export const agentHostSetupHandoffSchema = z
     workspaceId: opaqueIdentifierSchema.optional(),
     enrollmentCode: hostEnrollmentCodeSchema,
     expiresAt: z.string().datetime(),
+    credentialExpiresAt: z.string().datetime(),
+    credentialPolicy: hostCredentialPolicySchema,
     display: z
       .object({
         workspaceName: z.string().trim().min(1).max(128),
