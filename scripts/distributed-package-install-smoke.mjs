@@ -498,7 +498,14 @@ async function main() {
         publicUrl: `http://127.0.0.1:${port}`,
         allowInsecureDevelopment: true,
         dataDirectory: join(smokeDir, "server-data"),
-        trustedProjects: [{ projectId: init.workspace.id, canvasId: "default", projectRoot }],
+        trustedProjects: [
+          {
+            workspaceId: "workspace-1",
+            projectId: init.workspace.id,
+            canvasId: "default",
+            projectRoot
+          }
+        ],
         operatorCredentials: [
           {
             operatorId: "admin",
