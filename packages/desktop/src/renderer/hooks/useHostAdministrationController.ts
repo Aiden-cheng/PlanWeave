@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { OperatorHostPage, OperatorHostView } from "@planweave-ai/agent-host-protocol";
+import {
+  DEFAULT_HOST_CREDENTIAL_LIFETIME_DAYS,
+  type HostCredentialLifetimeDays,
+  type OperatorHostPage,
+  type OperatorHostView
+} from "@planweave-ai/agent-host-protocol";
 import {
   OperatorControlError,
   type OperatorHostBootstrapHandoffView,
@@ -25,6 +30,7 @@ export type HostAdministrationController = {
   memberSetupCodeHandoff: OperatorMemberSetupCodeHandoffView | null;
   localAgentHost: OperatorLocalAgentHostStatus | null;
   localAgentHostLoading: boolean;
+  credentialLifetimeDays: HostCredentialLifetimeDays;
   refresh: () => Promise<void>;
   refreshHosts: () => Promise<void>;
   saveProfile: (profile: OperatorControlProfileInput) => Promise<boolean>;
@@ -36,6 +42,8 @@ export type HostAdministrationController = {
   copyBootstrapHandoff: () => Promise<OperatorHostBootstrapHandoffView | null>;
   copyMemberSetupCode: () => Promise<OperatorMemberSetupCodeHandoffView | null>;
   revokeHost: (hostId: string) => Promise<OperatorHostView | null>;
+  renewHostCredential: (hostId: string) => Promise<OperatorHostView | null>;
+  setCredentialLifetimeDays: (days: HostCredentialLifetimeDays) => void;
   registerLocalAgentHost: (
     exposedProfileIds: readonly string[]
   ) => Promise<OperatorLocalAgentHostStatus | null>;
@@ -128,6 +136,9 @@ export function useHostAdministrationController(): HostAdministrationController 
     useState<OperatorMemberSetupCodeHandoffView | null>(null);
   const [localAgentHost, setLocalAgentHost] = useState<OperatorLocalAgentHostStatus | null>(null);
   const [localAgentHostLoading, setLocalAgentHostLoading] = useState(false);
+  const [credentialLifetimeDays, setCredentialLifetimeDays] = useState<HostCredentialLifetimeDays>(
+    DEFAULT_HOST_CREDENTIAL_LIFETIME_DAYS
+  );
 
   const refresh = useCallback(async () => {
     if (!operatorControlBridge) {
@@ -153,6 +164,12 @@ export function useHostAdministrationController(): HostAdministrationController 
   const activeProfileId = activeProfile?.profileId;
   const activeProfileHasOperatorCredential = activeProfile?.hasOperatorCredential === true;
   const previousActiveProfileId = useRef(activeProfile?.profileId);
+  const activeProfileIdRef = useRef(activeProfileId);
+  activeProfileIdRef.current = activeProfileId;
+  const hostRefreshInFlight = useRef<{
+    profileId: string;
+    promise: Promise<void>;
+  } | null>(null);
 
   useEffect(() => {
     const activeProfileId = activeProfile?.profileId;
@@ -162,26 +179,42 @@ export function useHostAdministrationController(): HostAdministrationController 
     }
   }, [activeProfile?.profileId]);
 
-  const refreshHosts = useCallback(async () => {
-    if (!operatorControlBridge || !activeProfileId || !activeProfileHasOperatorCredential) {
-      setHosts([]);
-      return;
-    }
-    setHostsLoading(true);
-    try {
-      const page: OperatorHostPage = await operatorControlBridge.listOperatorHosts({
-        profileId: activeProfileId,
-        query: { cursor: 0, limit: 100 }
-      });
-      setHosts(page.items);
-      setError(null);
-    } catch (cause) {
-      setHosts([]);
-      setError(errorMessage(cause));
-    } finally {
-      setHostsLoading(false);
-    }
-  }, [activeProfileId, activeProfileHasOperatorCredential]);
+  const refreshHosts = useCallback(
+    (options?: { silent?: boolean }): Promise<void> => {
+      if (!operatorControlBridge || !activeProfileId || !activeProfileHasOperatorCredential) {
+        setHosts([]);
+        return Promise.resolve();
+      }
+      if (hostRefreshInFlight.current?.profileId === activeProfileId) {
+        return hostRefreshInFlight.current.promise;
+      }
+      if (!options?.silent) setHostsLoading(true);
+      const profileId = activeProfileId;
+      const promise = operatorControlBridge
+        .listOperatorHosts({ profileId, query: { cursor: 0, limit: 100 } })
+        .then((page: OperatorHostPage) => {
+          if (activeProfileIdRef.current !== profileId) return;
+          setHosts(page.items);
+          setError(null);
+        })
+        .catch((cause) => {
+          if (activeProfileIdRef.current !== profileId) return;
+          if (!options?.silent) setHosts([]);
+          setError(errorMessage(cause));
+        })
+        .finally(() => {
+          if (hostRefreshInFlight.current?.promise === promise) {
+            hostRefreshInFlight.current = null;
+          }
+          if (!options?.silent && activeProfileIdRef.current === profileId) {
+            setHostsLoading(false);
+          }
+        });
+      hostRefreshInFlight.current = { profileId, promise };
+      return promise;
+    },
+    [activeProfileId, activeProfileHasOperatorCredential]
+  );
 
   useEffect(() => {
     void refresh();
@@ -192,6 +225,21 @@ export function useHostAdministrationController(): HostAdministrationController 
   useEffect(() => {
     void refreshHosts();
   }, [refreshHosts]);
+
+  useEffect(() => {
+    if (!activeProfileId || !activeProfileHasOperatorCredential) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      await refreshHosts({ silent: true });
+      if (!cancelled) timer = setTimeout(() => void poll(), 5_000);
+    };
+    timer = setTimeout(() => void poll(), 5_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [activeProfileHasOperatorCredential, activeProfileId, refreshHosts]);
 
   useEffect(() => {
     if (!operatorControlBridge) {
@@ -300,7 +348,7 @@ export function useHostAdministrationController(): HostAdministrationController 
         profileId: activeProfile.profileId,
         request: {
           expiresAt: nextExpiry(15),
-          credentialExpiresAt: nextExpiry(24 * 60)
+          credentialPolicy: { lifetimeDays: credentialLifetimeDays, renewal: "automatic" }
         }
       });
       setHandoff(result);
@@ -312,7 +360,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     } finally {
       setBusy(false);
     }
-  }, [activeProfile]);
+  }, [activeProfile, credentialLifetimeDays]);
 
   const copyMemberSetupCode = useCallback(async () => {
     if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
@@ -360,6 +408,31 @@ export function useHostAdministrationController(): HostAdministrationController 
     [activeProfile]
   );
 
+  const renewHostCredential = useCallback(
+    async (hostId: string) => {
+      if (!operatorControlBridge || !activeProfile) {
+        setError("operator_profile_missing");
+        return null;
+      }
+      setBusy(true);
+      try {
+        const renewed = await operatorControlBridge.renewOperatorHostCredential({
+          profileId: activeProfile.profileId,
+          hostId
+        });
+        setHosts((current) => current.map((host) => (host.id === hostId ? renewed : host)));
+        setError(null);
+        return renewed;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeProfile]
+  );
+
   const registerLocalAgentHost = useCallback(
     async (exposedProfileIds: readonly string[]) => {
       if (!operatorControlBridge || !activeProfile || !activeProfile.hasOperatorCredential) {
@@ -372,7 +445,7 @@ export function useHostAdministrationController(): HostAdministrationController 
           profileId: activeProfile.profileId,
           request: {
             expiresAt: nextExpiry(15),
-            credentialExpiresAt: nextExpiry(24 * 60)
+            credentialPolicy: { lifetimeDays: credentialLifetimeDays, renewal: "automatic" }
           },
           exposedProfileIds: [...exposedProfileIds]
         });
@@ -399,7 +472,7 @@ export function useHostAdministrationController(): HostAdministrationController 
         setBusy(false);
       }
     },
-    [activeProfile, refreshHosts]
+    [activeProfile, credentialLifetimeDays, refreshHosts]
   );
 
   const enrollLocalAgentHost = useCallback(
@@ -478,6 +551,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     memberSetupCodeHandoff,
     localAgentHost,
     localAgentHostLoading,
+    credentialLifetimeDays,
     refresh,
     refreshHosts,
     saveProfile,
@@ -489,6 +563,8 @@ export function useHostAdministrationController(): HostAdministrationController 
     copyBootstrapHandoff,
     copyMemberSetupCode,
     revokeHost,
+    renewHostCredential,
+    setCredentialLifetimeDays,
     registerLocalAgentHost,
     repairLocalAgentHost,
     enrollLocalAgentHost,

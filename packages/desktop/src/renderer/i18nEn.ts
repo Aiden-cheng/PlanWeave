@@ -569,6 +569,12 @@ export const enCatalog = {
   hostAvailabilityEmpty: "No remote devices yet",
   hostAvailabilityEmptyHint: "Copy enrollment details above, then register another computer.",
   hostAvailabilityNoAgents: "This device is not sharing any agents yet",
+  hostCredentialExpiry_current: "Credential valid until {expiry}",
+  hostCredentialExpiry_expiring: "Credential renews soon · expires {expiry}",
+  hostCredentialExpiry_expired: "Credential expired at {expiry}",
+  hostCredentialExpiry_legacy: "Legacy credential · enroll again to enable renewal",
+  hostCredentialRenewNow: "Renew now",
+  hostCredentialRenewalPending: "Renewal requested",
   hostAvailabilityWorkspace: "Workspace mapping",
   hostAvailabilityProfiles: "ACP profiles",
   hostAvailabilityProfile_ready: "ready",
@@ -726,6 +732,11 @@ export const enCatalog = {
   hostAdminUpdateThisComputer: "Update exposed agents",
   hostAdminBootstrapDescription:
     "Copy one-time enrollment details for another Mac, Windows computer, or VPS.",
+  hostAdminCredentialLifetime: "Credential lifetime",
+  hostAdminCredentialLifetimeDays: "{days} days",
+  hostAdminCredentialLifetimeHint:
+    "The Agent Host renews automatically before expiry. You can also request renewal from this list.",
+  hostAdminCredentialExpiresAt: "The first credential is valid until {expiry}.",
   hostAdminBootstrapPasteDestination:
     "After copying, paste in Agent Host → This computer on the target Mac or Windows computer. On a VPS, use PlanWeave CLI.",
   hostAdminBootstrapIdle: "No device enrollment details have been created yet.",

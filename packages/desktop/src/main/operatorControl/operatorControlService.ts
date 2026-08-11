@@ -19,6 +19,7 @@ import {
   operatorRegisterLocalAgentHostInputSchema,
   operatorProfileIdInputSchema,
   operatorRevokeHostInputSchema,
+  operatorRenewHostCredentialInputSchema,
   operatorDispatchOwnerFleetRemoteOperationInputSchema,
   operatorObserveOwnerFleetRemoteOperationInputSchema,
   operatorReplayOwnerFleetRemoteOperationEventsInputSchema,
@@ -419,6 +420,8 @@ export class OperatorControlService {
           state: "ready",
           ...(grant.workspaceId ? { workspaceId: grant.workspaceId } : {}),
           expiresAt: grant.expiresAt,
+          credentialExpiresAt: grant.credentialExpiresAt,
+          credentialPolicy: grant.credentialPolicy,
           copiedAt: new Date().toISOString(),
           commandPreview: "planweave agent-host enroll <handoff>"
         });
@@ -459,6 +462,16 @@ export class OperatorControlService {
     const parsed = operatorRevokeHostInputSchema.parse(input);
     return this.enqueue(() =>
       this.withProfile(parsed, (client, value) => client.revokeHost(value.hostId))
+    );
+  }
+
+  async renewHostCredential(
+    input: unknown
+  ): Promise<Awaited<ReturnType<OperatorControlClient["requestHostCredentialRenewal"]>>> {
+    assertNoSmuggledOperatorSecrets(input, "renewHostCredential");
+    const parsed = operatorRenewHostCredentialInputSchema.parse(input);
+    return this.enqueue(() =>
+      this.withProfile(parsed, (client, value) => client.requestHostCredentialRenewal(value.hostId))
     );
   }
 

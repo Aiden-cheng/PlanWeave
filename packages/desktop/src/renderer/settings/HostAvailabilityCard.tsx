@@ -2,7 +2,7 @@ import type {
   OperatorHostAvailabilityReason,
   OperatorHostView
 } from "@planweave-ai/agent-host-protocol";
-import { RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { RefreshCwIcon, RotateCwIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
 
@@ -12,8 +12,30 @@ type HostAvailabilityCardProps = {
   loading: boolean;
   onRefresh: () => void;
   onRevoke: (host: OperatorHostView) => void;
+  onRenew: (host: OperatorHostView) => void;
   t: ReturnType<typeof createTranslator>;
 };
+
+export type HostCredentialExpiryState = "current" | "expiring" | "expired" | "legacy";
+
+export function hostCredentialExpiryState(
+  host: OperatorHostView,
+  now = new Date()
+): HostCredentialExpiryState {
+  if (!host.credentialExpiresAt || !host.credentialPolicy) return "legacy";
+  const remainingMs = Date.parse(host.credentialExpiresAt) - now.getTime();
+  if (remainingMs <= 0) return "expired";
+  const renewalWindowDays = Math.min(
+    30,
+    Math.max(1, Math.floor(host.credentialPolicy.lifetimeDays * 0.2))
+  );
+  return remainingMs <= renewalWindowDays * 24 * 60 * 60_000 ? "expiring" : "current";
+}
+
+function formatDate(value: string, locale: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString(locale);
+}
 
 function availabilityReason(host: OperatorHostView): "ready" | OperatorHostAvailabilityReason {
   if (host.availability.status === "available") return "ready";
@@ -39,9 +61,11 @@ export function HostAvailabilityCard({
   loading,
   onRefresh,
   onRevoke,
+  onRenew,
   t
 }: HostAvailabilityCardProps) {
   const activeHosts = hosts.filter((host) => !host.revokedAt);
+  const locale = t("hostAdminLocale");
 
   return (
     <section className="border-b border-border/70 py-8" data-testid="host-availability">
@@ -79,6 +103,7 @@ export function HostAvailabilityCard({
             {activeHosts.map((host) => {
               const reason = availabilityReason(host);
               const agents = agentNames(host);
+              const expiryState = hostCredentialExpiryState(host);
               return (
                 <li className="py-4" data-testid={`host-availability-${host.id}`} key={host.id}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -117,19 +142,62 @@ export function HostAvailabilityCard({
                           </span>
                         )}
                       </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <span
+                          className={
+                            expiryState === "expired" || expiryState === "expiring"
+                              ? "text-amber-700"
+                              : "text-text-muted"
+                          }
+                          data-testid={`host-credential-expiry-${host.id}`}
+                        >
+                          {host.credentialExpiresAt
+                            ? t(`hostCredentialExpiry_${expiryState}`).replace(
+                                "{expiry}",
+                                formatDate(host.credentialExpiresAt, locale)
+                              )
+                            : t("hostCredentialExpiry_legacy")}
+                        </span>
+                        {host.credentialRenewalRequestedAt ? (
+                          <span
+                            className="font-medium text-amber-700"
+                            data-testid={`host-credential-renewal-pending-${host.id}`}
+                          >
+                            {t("hostCredentialRenewalPending")}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-text-muted hover:text-destructive"
-                      data-testid={`host-admin-revoke-${host.id}`}
-                      disabled={busy}
-                      onClick={() => onRevoke(host)}
-                    >
-                      <Trash2Icon data-icon="inline-start" />
-                      {t("hostAdminRevoke")}
-                    </Button>
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {host.credentialPolicy && expiryState !== "expired" ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          data-testid={`host-admin-renew-${host.id}`}
+                          aria-label={`${t("hostCredentialRenewNow")}: ${host.displayName}`}
+                          disabled={busy || host.credentialRenewalRequestedAt !== undefined}
+                          onClick={() => onRenew(host)}
+                        >
+                          <RotateCwIcon data-icon="inline-start" />
+                          {host.credentialRenewalRequestedAt
+                            ? t("hostCredentialRenewalPending")
+                            : t("hostCredentialRenewNow")}
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-text-muted hover:text-destructive"
+                        data-testid={`host-admin-revoke-${host.id}`}
+                        disabled={busy}
+                        onClick={() => onRevoke(host)}
+                      >
+                        <Trash2Icon data-icon="inline-start" />
+                        {t("hostAdminRevoke")}
+                      </Button>
+                    </div>
                   </div>
                   {reason !== "ready" ? (
                     <p className="mt-3 text-xs leading-5 text-text-muted">

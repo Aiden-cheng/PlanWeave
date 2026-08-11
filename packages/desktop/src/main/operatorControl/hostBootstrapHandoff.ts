@@ -24,15 +24,15 @@ export function buildHostBootstrapHandoffPayload(
   if (!profile.endpoint) throw new Error("operator_deployment_endpoint_required");
   const endpoint: DeploymentEndpoint = profile.endpoint;
   const handoff = serializeAgentHostSetupHandoff({
-    version: "agent-host-setup/v1",
+    version: "agent-host-setup/v2",
     endpoint,
     ...(grant.workspaceId ? { workspaceId: grant.workspaceId } : {}),
     enrollmentCode: grant.enrollmentCode,
     expiresAt: grant.expiresAt,
+    credentialExpiresAt: grant.credentialExpiresAt,
+    credentialPolicy: grant.credentialPolicy,
     display: {
-      workspaceName: grant.workspaceId
-        ? `Workspace ${grant.workspaceId}`
-        : profile.displayName,
+      workspaceName: grant.workspaceId ? `Workspace ${grant.workspaceId}` : profile.displayName,
       serverName: profile.displayName
     }
   });

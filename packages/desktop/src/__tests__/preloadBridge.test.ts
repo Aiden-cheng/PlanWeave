@@ -211,6 +211,7 @@ describe("preload bridge invocation", () => {
     const operator = electronMock.exposed.get("planweaveOperatorControl") as {
       copyOperatorHostBootstrapHandoff: (input: unknown) => Promise<unknown>;
       copyOperatorMemberSetupCode: (input: unknown) => Promise<unknown>;
+      renewOperatorHostCredential: (input: unknown) => Promise<unknown>;
       getOperatorLocalAgentHostStatus: (input: unknown) => Promise<unknown>;
       registerOperatorLocalAgentHost: (input: unknown) => Promise<unknown>;
       repairOperatorLocalAgentHost: (input: unknown) => Promise<unknown>;
@@ -220,7 +221,7 @@ describe("preload bridge invocation", () => {
       profileId: "profile-a",
       request: {
         expiresAt: "2030-01-01T00:15:00.000Z",
-        credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }
     };
 
@@ -235,6 +236,12 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       operatorControlInvokeChannels.copyMemberSetupCode,
       { profileId: "profile-a" }
+    );
+
+    await operator.renewOperatorHostCredential({ profileId: "profile-a", hostId: "host-1" });
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      operatorControlInvokeChannels.renewHostCredential,
+      { profileId: "profile-a", hostId: "host-1" }
     );
 
     await operator.getOperatorLocalAgentHostStatus({ profileId: "profile-a" });

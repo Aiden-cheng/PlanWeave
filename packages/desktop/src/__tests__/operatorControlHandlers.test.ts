@@ -107,6 +107,7 @@ describe("operator control main-owned Host handoff", () => {
     const handler = electronMock.handlers.get(
       operatorControlInvokeChannels.copyHostBootstrapHandoff
     );
+    expect(electronMock.handlers.has(operatorControlInvokeChannels.renewHostCredential)).toBe(true);
     if (!handler) throw new Error("operator_handoff_handler_missing");
     await expect(
       handler({}, { profileId: "profile-a", enrollmentCode: `pw_enroll_${"A".repeat(43)}` })
@@ -116,7 +117,7 @@ describe("operator control main-owned Host handoff", () => {
 
   it("accepts an explicitly supplied Host handoff without reading the clipboard", async () => {
     const encodedHandoff = serializeAgentHostSetupHandoff({
-      version: "agent-host-setup/v1",
+      version: "agent-host-setup/v2",
       endpoint: {
         topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net",
@@ -126,6 +127,8 @@ describe("operator control main-owned Host handoff", () => {
       workspaceId: "workspace-handler",
       enrollmentCode: `pw_enroll_${"D".repeat(43)}`,
       expiresAt: "2030-01-01T00:15:00.000Z",
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
       display: { workspaceName: "Workspace", serverName: "Server" }
     });
     const register = vi.fn().mockResolvedValue({

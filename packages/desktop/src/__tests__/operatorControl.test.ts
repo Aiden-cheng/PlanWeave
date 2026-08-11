@@ -286,7 +286,9 @@ describe("Desktop operator control trust boundary", () => {
         JSON.stringify({
           enrollmentCode,
           workspaceId: "workspace-1",
-          expiresAt: "2030-01-01T00:15:00.000Z"
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         }),
         { status: 201 }
       );
@@ -328,7 +330,7 @@ describe("Desktop operator control trust boundary", () => {
         profileId: "profile-handoff",
         request: {
           expiresAt: "2030-01-01T00:15:00.000Z",
-          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         }
       },
       copyText
@@ -362,7 +364,12 @@ describe("Desktop operator control trust boundary", () => {
     const request = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("http://127.0.0.1:50653/api/v1/host-enrollments");
       return new Response(
-        JSON.stringify({ enrollmentCode, expiresAt: "2030-01-01T00:15:00.000Z" }),
+        JSON.stringify({
+          enrollmentCode,
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+        }),
         { status: 201 }
       );
     });
@@ -404,7 +411,7 @@ describe("Desktop operator control trust boundary", () => {
         profileId: "planweave-local-loopback",
         request: {
           expiresAt: "2030-01-01T00:15:00.000Z",
-          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         }
       },
       copyText
@@ -431,7 +438,9 @@ describe("Desktop operator control trust boundary", () => {
           JSON.stringify({
             enrollmentCode,
             workspaceId: "workspace-local",
-            expiresAt: "2030-01-01T00:15:00.000Z"
+            expiresAt: "2030-01-01T00:15:00.000Z",
+            credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+            credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
           }),
           { status: 201 }
         )
@@ -474,7 +483,7 @@ describe("Desktop operator control trust boundary", () => {
       profileId: "profile-local",
       request: {
         expiresAt: "2030-01-01T00:15:00.000Z",
-        credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       },
       exposedProfileIds: ["codex-acp"]
     });
@@ -506,7 +515,7 @@ describe("Desktop operator control trust boundary", () => {
         profileId: "profile-local",
         request: {
           expiresAt: "2030-01-01T00:15:00.000Z",
-          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         },
         exposedProfileIds: ["codex-acp"]
       })
@@ -516,7 +525,7 @@ describe("Desktop operator control trust boundary", () => {
 
   it("accepts a raw or copied Host command through the bounded enrollment contract", async () => {
     const encodedHandoff = serializeAgentHostSetupHandoff({
-      version: "agent-host-setup/v1",
+      version: "agent-host-setup/v2",
       endpoint: {
         topology: "private_https",
         serverOrigin: "https://planweave.example.ts.net",
@@ -526,6 +535,8 @@ describe("Desktop operator control trust boundary", () => {
       workspaceId: "workspace-clipboard",
       enrollmentCode: `pw_enroll_${"C".repeat(43)}`,
       expiresAt: "2030-01-01T00:15:00.000Z",
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
       display: { workspaceName: "Workspace", serverName: "Server" }
     });
     expect(parseAgentHostHandoffInput(encodedHandoff)).toMatchObject({
@@ -616,7 +627,7 @@ describe("Desktop operator control trust boundary", () => {
     await expect(
       service.enrollLocalAgentHost({
         handoff: serializeAgentHostSetupHandoff({
-          version: "agent-host-setup/v1",
+          version: "agent-host-setup/v2",
           endpoint: {
             topology: "private_https",
             serverOrigin: "https://server.example/",
@@ -626,6 +637,8 @@ describe("Desktop operator control trust boundary", () => {
           workspaceId: "workspace-diagnostics",
           enrollmentCode: `pw_enroll_${"D".repeat(43)}`,
           expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
           display: { workspaceName: "Workspace", serverName: "Server" }
         }),
         exposedProfileIds: ["codex-acp"]
@@ -723,6 +736,39 @@ describe("Desktop operator control trust boundary", () => {
     await expect(client.replayRemoteOperationEvents("operation-owner-001", 7)).resolves.toEqual(
       expect.objectContaining({ afterCursor: 7, cursor: 9, events: [] })
     );
+  });
+
+  it("requests one Host credential renewal through the fixed operator endpoint", async () => {
+    const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe(
+        "https://operator.example.test/api/v1/hosts/host-1/credential-renewal"
+      );
+      expect(init).toMatchObject({ method: "POST", body: "{}" });
+      return new Response(
+        JSON.stringify({
+          id: "host-1",
+          displayName: "Host 1",
+          capabilities: [],
+          capacity: 1,
+          online: true,
+          credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
+          credentialRenewalRequestedAt: "2030-01-01T00:00:00.000Z",
+          availability: { status: "unavailable", reason: "readiness_not_reported" }
+        }),
+        { status: 202 }
+      );
+    });
+    const client = new OperatorControlClient({
+      profile: profile("profile-a"),
+      credential: { getOperatorToken: () => tokenA },
+      request
+    });
+
+    await expect(client.requestHostCredentialRenewal("host-1")).resolves.toMatchObject({
+      id: "host-1",
+      credentialRenewalRequestedAt: "2030-01-01T00:00:00.000Z"
+    });
   });
 
   it("routes local-owned Operator HTTP through loopback instead of Tailscale origin", async () => {

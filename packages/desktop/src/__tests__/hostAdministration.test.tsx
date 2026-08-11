@@ -21,6 +21,7 @@ const bridgeMock = vi.hoisted(() => ({
   copyOperatorHostBootstrapHandoff: vi.fn(),
   copyOperatorMemberSetupCode: vi.fn(),
   revokeOperatorHost: vi.fn(),
+  renewOperatorHostCredential: vi.fn(),
   getOperatorLocalAgentHostStatus: vi.fn(),
   registerOperatorLocalAgentHost: vi.fn(),
   repairOperatorLocalAgentHost: vi.fn(),
@@ -89,7 +90,8 @@ const host = {
   online: false,
   availability: { status: "unavailable" as const, reason: "offline" as const },
   lastSeenAt: undefined,
-  credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+  credentialExpiresAt: "2030-01-02T00:00:00.000Z",
+  credentialPolicy: { lifetimeDays: 180 as const, renewal: "automatic" as const }
 };
 
 beforeEach(() => {
@@ -99,6 +101,8 @@ beforeEach(() => {
     state: "ready",
     workspaceId: "workspace-a",
     expiresAt: "2030-01-01T00:15:00.000Z",
+    credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+    credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
     copiedAt: "2030-01-01T00:00:00.000Z",
     commandPreview: "planweave agent-host enroll <handoff>"
   });
@@ -111,6 +115,10 @@ beforeEach(() => {
   bridgeMock.revokeOperatorHost.mockResolvedValue({
     ...host,
     revokedAt: "2030-01-01T00:01:00.000Z"
+  });
+  bridgeMock.renewOperatorHostCredential.mockResolvedValue({
+    ...host,
+    credentialRenewalRequestedAt: "2030-01-01T00:01:00.000Z"
   });
   bridgeMock.getOperatorLocalAgentHostStatus.mockResolvedValue({
     supported: true,
@@ -445,7 +453,7 @@ describe("Agent Host settings", () => {
       profileId: "profile-a",
       request: {
         expiresAt: expect.any(String),
-        credentialExpiresAt: expect.any(String)
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }
     });
     expect(
@@ -455,6 +463,31 @@ describe("Agent Host settings", () => {
 
     await user.click(screen.getByTestId("host-admin-close-grant"));
     expect(screen.queryByTestId("host-admin-grant-once")).not.toBeInTheDocument();
+  });
+
+  it("includes the selected credential lifetime and schedules an immediate renewal", async () => {
+    const user = userEvent.setup();
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+    await screen.findByTestId("host-administration");
+
+    await user.selectOptions(screen.getByTestId("host-admin-credential-lifetime"), "365");
+    await user.click(screen.getByTestId("host-admin-create-grant"));
+    expect(bridgeMock.copyOperatorHostBootstrapHandoff).toHaveBeenCalledWith({
+      profileId: "profile-a",
+      request: {
+        expiresAt: expect.any(String),
+        credentialPolicy: { lifetimeDays: 365, renewal: "automatic" }
+      }
+    });
+
+    await user.click(screen.getByTestId("host-admin-renew-host-1"));
+    expect(bridgeMock.renewOperatorHostCredential).toHaveBeenCalledWith({
+      profileId: "profile-a",
+      hostId: "host-1"
+    });
+    expect(await screen.findByTestId("host-credential-renewal-pending-host-1")).toHaveTextContent(
+      "Renewal requested"
+    );
   });
 
   it("shows one clear prerequisite instead of disabled enrollment steps", async () => {
@@ -487,7 +520,7 @@ describe("Agent Host settings", () => {
       profileId: "profile-a",
       request: {
         expiresAt: expect.any(String),
-        credentialExpiresAt: expect.any(String)
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       },
       exposedProfileIds: ["codex-acp"]
     });

@@ -110,6 +110,9 @@ export function registerOperatorControlHandlers(
   ipcMain.handle(operatorControlInvokeChannels.revokeHost, (_event, input: unknown) =>
     active.revokeHost(input)
   );
+  ipcMain.handle(operatorControlInvokeChannels.renewHostCredential, (_event, input: unknown) =>
+    active.renewHostCredential(input)
+  );
   ipcMain.handle(operatorControlInvokeChannels.getLocalAgentHostStatus, (_event, input: unknown) =>
     active.getLocalAgentHostStatus(input)
   );

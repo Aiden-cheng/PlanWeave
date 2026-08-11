@@ -223,7 +223,7 @@ async function connectEnrolledHost(origin: string, adminToken: string, workspace
     body: JSON.stringify({
       workspaceId,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      credentialExpiresAt: new Date(Date.now() + 3_600_000).toISOString()
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     })
   });
   expect(grantResponse.status).toBe(201);
@@ -234,6 +234,7 @@ async function connectEnrolledHost(origin: string, adminToken: string, workspace
     protocolVersion: 1,
     enrollmentCode: grant.enrollmentCode,
     enrollmentAttemptId: "desktop-e2e-host-enrollment",
+    installationId: "21fb9ea9-4e0d-49fb-a06c-a0fc71e7341e",
     credentialToken,
     displayName: "Desktop E2E Host",
     capabilities: ["acp.codex", "acp.session.load"],

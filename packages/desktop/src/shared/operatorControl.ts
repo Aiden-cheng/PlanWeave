@@ -7,6 +7,7 @@ import {
   type OperatorHostView
 } from "@planweave-ai/agent-host-protocol/operator-control";
 import {
+  hostCredentialPolicySchema,
   deploymentEndpointSchema,
   isPrivateDeploymentHostname
 } from "@planweave-ai/agent-host-protocol";
@@ -159,7 +160,10 @@ const operatorClipboardHandoffViewSchema = z
     commandPreview: z.literal("planweave agent-host enroll <handoff>").optional()
   })
   .strict();
-export const operatorHostBootstrapHandoffViewSchema = operatorClipboardHandoffViewSchema;
+export const operatorHostBootstrapHandoffViewSchema = operatorClipboardHandoffViewSchema.extend({
+  credentialExpiresAt: z.iso.datetime(),
+  credentialPolicy: hostCredentialPolicySchema
+});
 export type OperatorHostBootstrapHandoffView = z.infer<
   typeof operatorHostBootstrapHandoffViewSchema
 >;
@@ -176,6 +180,11 @@ export const operatorRevokeHostInputSchema = z
   })
   .strict();
 export type OperatorRevokeHostInput = z.infer<typeof operatorRevokeHostInputSchema>;
+
+export const operatorRenewHostCredentialInputSchema = operatorRevokeHostInputSchema;
+export type OperatorRenewHostCredentialInput = z.infer<
+  typeof operatorRenewHostCredentialInputSchema
+>;
 
 export const operatorDispatchOwnerFleetRemoteOperationInputSchema = z
   .object({
@@ -496,6 +505,9 @@ export type PlanWeaveOperatorControlApi = {
     input: OperatorCopyMemberSetupCodeInput
   ) => Promise<OperatorMemberSetupCodeHandoffView>;
   revokeOperatorHost: (input: OperatorRevokeHostInput) => Promise<OperatorHostView>;
+  renewOperatorHostCredential: (
+    input: OperatorRenewHostCredentialInput
+  ) => Promise<OperatorHostView>;
   getOperatorLocalAgentHostStatus: (
     input: OperatorGetLocalAgentHostStatusInput
   ) => Promise<OperatorLocalAgentHostStatus>;

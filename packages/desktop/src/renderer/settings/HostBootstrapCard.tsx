@@ -1,5 +1,10 @@
 import { ClipboardCopyIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  HOST_CREDENTIAL_LIFETIME_DAY_OPTIONS,
+  hostCredentialLifetimeDaysSchema,
+  type HostCredentialLifetimeDays
+} from "@planweave-ai/agent-host-protocol";
 import type {
   OperatorHostBootstrapHandoffView,
   OperatorProfileView
@@ -9,12 +14,14 @@ import type { createTranslator } from "../i18n";
 type HostBootstrapCardProps = {
   activeProfile: OperatorProfileView | null;
   busy: boolean;
+  credentialLifetimeDays: HostCredentialLifetimeDays;
   copyBootstrapHandoff: () => Promise<OperatorHostBootstrapHandoffView | null>;
   dismissHandoff: () => void;
   handoff: OperatorHostBootstrapHandoffView | null;
   t: ReturnType<typeof createTranslator>;
   handoffState?: "idle" | "pending" | "ready" | "failed" | "expired" | "revoked";
   onRetry?: () => void;
+  setCredentialLifetimeDays: (days: HostCredentialLifetimeDays) => void;
 };
 
 function formatDate(value: string, locale: string): string {
@@ -26,11 +33,13 @@ export function HostBootstrapCard({
   activeProfile,
   busy,
   copyBootstrapHandoff,
+  credentialLifetimeDays,
   dismissHandoff,
   handoff,
   t,
   handoffState = "idle",
-  onRetry
+  onRetry,
+  setCredentialLifetimeDays
 }: HostBootstrapCardProps) {
   const locale = t("hostAdminLocale");
   const resolvedHandoffState =
@@ -65,6 +74,30 @@ export function HostBootstrapCard({
           </div>
         ) : (
           <>
+            <label className="grid w-fit gap-1 text-xs text-text-muted">
+              <span>{t("hostAdminCredentialLifetime")}</span>
+              <select
+                className="h-9 min-w-40 rounded-md border border-input bg-background px-3 text-sm text-text-strong shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-testid="host-admin-credential-lifetime"
+                aria-label={t("hostAdminCredentialLifetime")}
+                disabled={busy}
+                value={credentialLifetimeDays}
+                onChange={(event) =>
+                  setCredentialLifetimeDays(
+                    hostCredentialLifetimeDaysSchema.parse(Number(event.currentTarget.value))
+                  )
+                }
+              >
+                {HOST_CREDENTIAL_LIFETIME_DAY_OPTIONS.map((days) => (
+                  <option key={days} value={days}>
+                    {t("hostAdminCredentialLifetimeDays").replace("{days}", String(days))}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="max-w-2xl text-xs leading-5 text-text-muted">
+              {t("hostAdminCredentialLifetimeHint")}
+            </p>
             <Button
               type="button"
               className="w-fit"
@@ -110,6 +143,12 @@ export function HostBootstrapCard({
             </p>
             <p className="text-xs leading-5 text-text-muted">
               {t("hostAdminBootstrapHeartbeatNote")}
+            </p>
+            <p className="text-xs leading-5 text-text-muted">
+              {t("hostAdminCredentialExpiresAt").replace(
+                "{expiry}",
+                formatDate(handoff.credentialExpiresAt, locale)
+              )}
             </p>
             <Button
               type="button"

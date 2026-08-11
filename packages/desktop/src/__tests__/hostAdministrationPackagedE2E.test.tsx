@@ -218,7 +218,7 @@ describe("packaged Host administration control plane", () => {
       },
       body: JSON.stringify({
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
-        credentialExpiresAt: new Date(Date.now() + 120_000).toISOString()
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     });
     expect(roleRejected.status).toBe(403);
@@ -230,7 +230,7 @@ describe("packaged Host administration control plane", () => {
         profileId,
         request: {
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          credentialExpiresAt: new Date(Date.now() + 3_600_000).toISOString()
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         }
       },
       (content) => copiedHandoffs.push(content)
@@ -307,7 +307,7 @@ describe("packaged Host administration control plane", () => {
       profileId,
       request: {
         expiresAt: new Date(Date.now() + 1_000).toISOString(),
-        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }
     });
     await wait(1_500);

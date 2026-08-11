@@ -140,6 +140,7 @@ export function HostAdministrationContent({
     activeProfile,
     busy,
     copyBootstrapHandoff,
+    credentialLifetimeDays,
     dismissHandoff,
     enrollLocalAgentHost,
     error,
@@ -152,7 +153,9 @@ export function HostAdministrationContent({
     refresh,
     refreshHosts,
     registerLocalAgentHost,
-    repairLocalAgentHost
+    repairLocalAgentHost,
+    renewHostCredential,
+    setCredentialLifetimeDays
   } = controller;
 
   const handleRevoke = async (host: OperatorHostView) => {
@@ -227,6 +230,7 @@ export function HostAdministrationContent({
         loading={hostsLoading}
         onRefresh={() => void refreshHosts()}
         onRevoke={(host) => void handleRevoke(host)}
+        onRenew={(host) => void renewHostCredential(host.id)}
         t={t}
       />
 
@@ -234,10 +238,12 @@ export function HostAdministrationContent({
         activeProfile={activeProfile}
         busy={busy}
         copyBootstrapHandoff={copyBootstrapHandoff}
+        credentialLifetimeDays={credentialLifetimeDays}
         dismissHandoff={dismissHandoff}
         handoff={handoff}
         handoffState={busy ? "pending" : handoff ? "ready" : error ? "failed" : "idle"}
         onRetry={copyBootstrapHandoff}
+        setCredentialLifetimeDays={setCredentialLifetimeDays}
         t={t}
       />
 

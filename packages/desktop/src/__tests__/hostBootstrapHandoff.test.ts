@@ -22,10 +22,16 @@ describe("main-owned Host setup handoff", () => {
         profileId: "profile-a",
         request: {
           expiresAt: "2030-01-01T00:15:00.000Z",
-          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         }
       },
-      { enrollmentCode, workspaceId: "workspace-a", expiresAt: "2030-01-01T00:15:00.000Z" }
+      {
+        enrollmentCode,
+        workspaceId: "workspace-a",
+        expiresAt: "2030-01-01T00:15:00.000Z",
+        credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+      }
     );
 
     expect(command).toMatch(/^planweave agent-host enroll planweave-agent-host-setup:/);
@@ -57,10 +63,15 @@ describe("main-owned Host setup handoff", () => {
         profileId: "profile-a",
         request: {
           expiresAt: "2030-01-01T00:15:00.000Z",
-          credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         }
       },
-      { enrollmentCode, expiresAt: "2030-01-01T00:15:00.000Z" }
+      {
+        enrollmentCode,
+        expiresAt: "2030-01-01T00:15:00.000Z",
+        credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+      }
     );
 
     const encoded = command.slice("planweave agent-host enroll ".length);
@@ -87,13 +98,15 @@ describe("main-owned Host setup handoff", () => {
           profileId: "legacy",
           request: {
             expiresAt: "2030-01-01T00:15:00.000Z",
-            credentialExpiresAt: "2030-01-02T00:00:00.000Z"
+            credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
           }
         },
         {
           enrollmentCode: `pw_enroll_${"A".repeat(43)}`,
           workspaceId: "workspace-a",
-          expiresAt: "2030-01-01T00:15:00.000Z"
+          expiresAt: "2030-01-01T00:15:00.000Z",
+          credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         }
       )
     ).toThrow("operator_deployment_endpoint_required");

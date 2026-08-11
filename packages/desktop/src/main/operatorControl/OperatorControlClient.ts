@@ -2,6 +2,8 @@ import {
   operatorEnrollmentGrantRequestSchema,
   operatorEnrollmentGrantResponseSchema,
   operatorHostPageSchema,
+  operatorHostRenewalRequestSchema,
+  operatorHostRenewalResponseSchema,
   operatorHostRevokeResponseSchema,
   operatorPageQuerySchema,
   operatorTokenSchema,
@@ -160,6 +162,16 @@ export class OperatorControlClient {
       `/api/v1/hosts/${encodeURIComponent(id)}/revoke`,
       operatorHostRevokeResponseSchema,
       { body: {} }
+    );
+  }
+
+  async requestHostCredentialRenewal(hostId: string): Promise<OperatorHostView> {
+    const id = opaqueIdentifierSchema.parse(hostId);
+    return this.json(
+      "POST",
+      `/api/v1/hosts/${encodeURIComponent(id)}/credential-renewal`,
+      operatorHostRenewalResponseSchema,
+      { body: operatorHostRenewalRequestSchema.parse({}) }
     );
   }
 
