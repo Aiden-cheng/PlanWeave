@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -40,6 +39,24 @@ async function waitForNumericFile(path: string, label: string): Promise<number> 
     await sleep(25);
   }
   throw new Error(`Timed out waiting for WSL ${label} marker: ${path}`);
+}
+
+async function waitForNumericFileWhileRunning(
+  path: string,
+  label: string,
+  running: Promise<unknown>
+): Promise<number> {
+  return Promise.race([
+    waitForNumericFile(path, label),
+    running.then(
+      () => {
+        throw new Error(`WSL process exited before writing the ${label} marker.`);
+      },
+      (error: unknown) => {
+        throw error;
+      }
+    )
+  ]);
 }
 
 async function waitForFile(path: string, label: string): Promise<void> {
@@ -220,7 +237,7 @@ describe("executor environment", () => {
         skip(reason);
       }
 
-      const runDir = await mkdtemp(join(tmpdir(), "planweave-wsl-lifecycle-"));
+      const runDir = await mkdtemp(join(process.cwd(), ".planweave-wsl-lifecycle-"));
       const parentPidPath = join(runDir, "parent.pid");
       const childPidPath = join(runDir, "child.pid");
       const parentReadyPath = join(runDir, "parent.ready");
@@ -246,7 +263,7 @@ describe("executor environment", () => {
           signal: abort.signal
         });
 
-        parentPid = await waitForNumericFile(parentPidPath, "parent pid");
+        parentPid = await waitForNumericFileWhileRunning(parentPidPath, "parent pid", running);
         childPid = await waitForNumericFile(childPidPath, "child pid");
         await waitForFile(parentReadyPath, "parent readiness");
         await assertWslProcessGroup({
