@@ -64,6 +64,7 @@
         "agentShellEnvironment.test.ts",
         "agentTools.test.ts",
         "appMenu.test.ts",
+        "appShutdown.test.ts",
         "appSettingsLazyRoute.test.tsx",
         "appSidebarSeparators.test.tsx",
         "appViewHistory.test.tsx",

@@ -30,6 +30,7 @@ import { createWindow } from "./window.js";
 import { runPackagedStartupSmoke } from "./smoke.js";
 import { startSingleInstanceLifecycle } from "./singleInstanceLifecycle.js";
 import { runDesktopAgentHostServiceMode } from "./desktopAgentHostServiceMode.js";
+import { createDesktopShutdownController } from "./appShutdown.js";
 
 const isDev = process.env.PLANWEAVE_DESKTOP_DEV_SERVER_URL !== undefined;
 const isSmoke = process.env.PLANWEAVE_DESKTOP_SMOKE === "1";
@@ -145,33 +146,25 @@ function startDesktopApplication(): void {
         }
       });
 
-      let mainCleanupComplete = false;
-      app.on("before-quit", (event) => {
-        if (mainCleanupComplete) {
-          return;
-        }
-        event.preventDefault();
-        void Promise.allSettled([
-          stopMcpTunnelProcesses(),
-          shutdownLocalCollaborationCoordinator(),
-          shutdownCollaborationService(),
-          shutdownOperatorControlService(),
-          shutdownDesktopAutoRuns("PlanWeave Desktop is quitting.")
-        ])
-          .then((results) => {
-            for (const result of results) {
-              if (result.status === "rejected") {
-                console.error(
-                  result.reason instanceof Error ? result.reason.message : String(result.reason)
-                );
-              }
-            }
-          })
-          .finally(() => {
-            mainCleanupComplete = true;
-            app.quit();
-          });
+      const shutdownController = createDesktopShutdownController({
+        closeRendererWindows: () => {
+          for (const window of BrowserWindow.getAllWindows()) {
+            if (!window.isDestroyed()) window.destroy();
+          }
+        },
+        cleanupTasks: [
+          stopMcpTunnelProcesses,
+          shutdownLocalCollaborationCoordinator,
+          shutdownCollaborationService,
+          shutdownOperatorControlService,
+          () => shutdownDesktopAutoRuns("PlanWeave Desktop is quitting.")
+        ],
+        reportError: (error) => {
+          console.error(error instanceof Error ? error.message : String(error));
+        },
+        requestQuit: () => app.quit()
       });
+      app.on("before-quit", (event) => shutdownController.handleBeforeQuit(event));
 
       app.on("window-all-closed", () => {
         if (process.platform !== "darwin") {
