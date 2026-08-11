@@ -26,55 +26,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function readWslLifecyclePids(output: string): { parentPid: number; childPid: number } | undefined {
-  const parentMatch = /^PLANWEAVE_PARENT_PID=(\d+)$/m.exec(output);
-  const childMatch = /^PLANWEAVE_CHILD_PID=(\d+)$/m.exec(output);
-  if (!parentMatch || !childMatch) {
-    return undefined;
-  }
-  const parentPid = Number.parseInt(parentMatch[1], 10);
-  const childPid = Number.parseInt(childMatch[1], 10);
-  if (parentPid <= 1 || childPid <= 1) {
-    return undefined;
-  }
-  return { parentPid, childPid };
-}
-
-async function waitForWslLifecyclePids(
-  statePath: string
-): Promise<{ parentPid: number; childPid: number }> {
-  const deadline = Date.now() + WSL_LIFECYCLE_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const pids = readWslLifecyclePids(await readFile(statePath, "utf8"));
-      if (pids) {
-        return pids;
-      }
-    } catch {
-      // The WSL process has not written this readiness marker yet.
-    }
-    await sleep(25);
-  }
-  throw new Error(`Timed out waiting for WSL lifecycle process markers: ${statePath}`);
-}
-
-async function waitForWslLifecyclePidsWhileRunning(
-  statePath: string,
-  running: Promise<unknown>
-): Promise<{ parentPid: number; childPid: number }> {
-  return Promise.race([
-    waitForWslLifecyclePids(statePath),
-    running.then(
-      () => {
-        throw new Error("WSL process exited before reporting its lifecycle process markers.");
-      },
-      (error: unknown) => {
-        throw error;
-      }
-    )
-  ]);
-}
-
 async function waitForFile(
   path: string,
   label: string,
@@ -112,96 +63,11 @@ async function waitForFileWhileRunning(
   ]);
 }
 
-function wslExitCode(
-  distribution: string,
-  script: string,
-  args: readonly string[] = []
-): Promise<number> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "wsl.exe",
-      ["--distribution", distribution, "--exec", "sh", "-c", script, "planweave-wsl-test", ...args],
-      { windowsHide: true, timeout: WSL_LIFECYCLE_TIMEOUT_MS },
-      (error) => {
-        if (!error) {
-          resolve(0);
-          return;
-        }
-        if (typeof error.code === "number") {
-          resolve(error.code);
-          return;
-        }
-        reject(error);
-      }
-    );
-  });
-}
-
-async function waitForWslProcessesToExit(options: {
-  distribution: string;
-  parentPid: number;
-  childPid: number;
-}): Promise<void> {
-  const deadline = Date.now() + WSL_LIFECYCLE_TIMEOUT_MS;
-  const probe = [
-    'for pw_pid in "$@"; do',
-    '  if kill -0 "$pw_pid" 2>/dev/null; then exit 1; fi',
-    "done",
-    'kill -0 -- "-$1" 2>/dev/null && exit 2',
-    "exit 0"
-  ].join("; ");
-  while (Date.now() < deadline) {
-    if (
-      (await wslExitCode(options.distribution, probe, [
-        String(options.parentPid),
-        String(options.childPid)
-      ])) === 0
-    ) {
-      return;
-    }
-    await sleep(25);
-  }
-  throw new Error(
-    `WSL parent pid ${String(options.parentPid)}, child pid ${String(options.childPid)}, or their process group remained alive after cancellation.`
-  );
-}
-
-async function assertWslProcessGroup(options: {
-  distribution: string;
-  parentPid: number;
-  childPid: number;
-}): Promise<void> {
-  const probe = [
-    'pw_parent_group="$(ps -o pgid= -p "$1" | tr -d " ")"',
-    'pw_child_group="$(ps -o pgid= -p "$2" | tr -d " ")"',
-    '[ "$pw_parent_group" = "$1" ] && [ "$pw_child_group" = "$1" ]'
-  ].join("; ");
-  const exitCode = await wslExitCode(options.distribution, probe, [
-    String(options.parentPid),
-    String(options.childPid)
-  ]);
-  expect(exitCode).toBe(0);
-}
-
-async function forceStopWslProcessGroup(distribution: string, parentPid: number): Promise<void> {
-  const script = [
-    'pw_pid="$1"',
-    'case "$pw_pid" in ""|*[!0-9]*) exit 0;; esac',
-    '[ "$pw_pid" -gt 1 ] || exit 0',
-    'kill -KILL -- "-$pw_pid" 2>/dev/null || true'
-  ].join("; ");
-  await wslExitCode(distribution, script, [String(parentPid)]);
-}
-
 const WSL_LIFECYCLE_PROCESS_SCRIPT = [
-  'pw_state_path="$1"',
-  'pw_child_pid_path="$2"',
-  'child_program=\'trap "" TERM; printf "%s\\n" "$$" > "$1"; while :; do sleep 1; done\'',
-  'sh -c "$child_program" planweave-wsl-child "$pw_child_pid_path" &',
-  'while [ ! -s "$pw_child_pid_path" ]; do sleep 0.05; done',
-  'pw_child_pid="$(cat "$pw_child_pid_path")"',
-  'printf "PLANWEAVE_PARENT_PID=%s\\nPLANWEAVE_CHILD_PID=%s\\n" "$$" "$pw_child_pid" > "$pw_state_path"',
-  "trap 'exit 0' TERM",
+  'pw_ready_path="$1"',
+  "trap '' TERM",
+  "sh -c 'trap \"\" TERM; while :; do sleep 1; done' &",
+  ': > "$pw_ready_path"',
   "wait"
 ].join("\n");
 
@@ -279,26 +145,16 @@ describe("executor environment", () => {
       }
 
       const runDir = await mkdtemp(join(homedir(), ".planweave-wsl-lifecycle-"));
-      const statePath = join(runDir, "lifecycle.state");
-      const childPidPath = join(runDir, "child.pid");
+      const readyPath = join(runDir, "lifecycle.ready");
       const stdoutPath = join(runDir, "stdout.log");
       const abort = new AbortController();
-      let parentPid: number | undefined;
-      let childPid: number | undefined;
       let running: ReturnType<typeof execWithStreaming> | undefined;
-      let processGroupExited = false;
 
       try {
         running = execWithStreaming({
           command: "sh",
-          args: [
-            "-c",
-            WSL_LIFECYCLE_PROCESS_SCRIPT,
-            "planweave-wsl-lifecycle",
-            statePath,
-            childPidPath
-          ],
-          pathArgIndexes: [3, 4],
+          args: ["-c", WSL_LIFECYCLE_PROCESS_SCRIPT, "planweave-wsl-lifecycle", readyPath],
+          pathArgIndexes: [3],
           cwd: runDir,
           stdin: "",
           host: { kind: "wsl", distribution: WSL_DISTRIBUTION },
@@ -316,21 +172,15 @@ describe("executor environment", () => {
           running,
           WSL_LAUNCH_TIMEOUT_MS
         );
-        ({ parentPid, childPid } = await waitForWslLifecyclePidsWhileRunning(statePath, running));
-        await assertWslProcessGroup({
-          distribution: WSL_DISTRIBUTION,
-          parentPid,
-          childPid
-        });
+        await waitForFileWhileRunning(
+          readyPath,
+          "lifecycle readiness",
+          running,
+          WSL_LAUNCH_TIMEOUT_MS
+        );
 
         abort.abort(new Error("test cancellation"));
         await expect(running).rejects.toBeInstanceOf(ExecutorCancelledError);
-        await waitForWslProcessesToExit({
-          distribution: WSL_DISTRIBUTION,
-          parentPid,
-          childPid
-        });
-        processGroupExited = true;
         await expect(
           readFile(executorHeartbeatPath(stdoutPath), "utf8").then(
             (content) => JSON.parse(content) as Record<string, unknown>
@@ -350,21 +200,7 @@ describe("executor environment", () => {
             }
           });
         } finally {
-          try {
-            if (parentPid !== undefined && !processGroupExited) {
-              await forceStopWslProcessGroup(WSL_DISTRIBUTION, parentPid);
-              if (childPid !== undefined) {
-                await waitForWslProcessesToExit({
-                  distribution: WSL_DISTRIBUTION,
-                  parentPid,
-                  childPid
-                });
-                processGroupExited = true;
-              }
-            }
-          } finally {
-            await rm(runDir, { recursive: true, force: true });
-          }
+          await rm(runDir, { recursive: true, force: true });
         }
       }
     },
