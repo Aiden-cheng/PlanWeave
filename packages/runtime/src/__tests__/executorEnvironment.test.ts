@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -41,11 +42,12 @@ function readWslLifecyclePids(output: string): { parentPid: number; childPid: nu
 }
 
 async function waitForWslLifecyclePids(
-  readOutput: () => string
+  distribution: string,
+  statePath: string
 ): Promise<{ parentPid: number; childPid: number }> {
   const deadline = Date.now() + WSL_LIFECYCLE_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const pids = readWslLifecyclePids(readOutput());
+    const pids = readWslLifecyclePids(await readWslTextFile(distribution, statePath));
     if (pids) {
       return pids;
     }
@@ -55,11 +57,12 @@ async function waitForWslLifecyclePids(
 }
 
 async function waitForWslLifecyclePidsWhileRunning(
-  readOutput: () => string,
+  distribution: string,
+  statePath: string,
   running: Promise<unknown>
 ): Promise<{ parentPid: number; childPid: number }> {
   return Promise.race([
-    waitForWslLifecyclePids(readOutput),
+    waitForWslLifecyclePids(distribution, statePath),
     running.then(
       () => {
         throw new Error("WSL process exited before reporting its lifecycle process markers.");
@@ -69,6 +72,27 @@ async function waitForWslLifecyclePidsWhileRunning(
       }
     )
   ]);
+}
+
+function readWslTextFile(distribution: string, path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "wsl.exe",
+      ["--distribution", distribution, "--exec", "cat", "--", path],
+      { encoding: "utf8", windowsHide: true, timeout: WSL_LIFECYCLE_TIMEOUT_MS },
+      (error, stdout) => {
+        if (!error) {
+          resolve(String(stdout).replaceAll("\0", ""));
+          return;
+        }
+        if (typeof error.code === "number") {
+          resolve("");
+          return;
+        }
+        reject(error);
+      }
+    );
+  });
 }
 
 async function waitForFile(
@@ -190,9 +214,13 @@ async function forceStopWslProcessGroup(distribution: string, parentPid: number)
 }
 
 const WSL_LIFECYCLE_PROCESS_SCRIPT = [
-  'child_program=\'trap "" TERM; printf "PLANWEAVE_CHILD_PID=%s\\n" "$$"; while :; do sleep 1; done\'',
-  'sh -c "$child_program" planweave-wsl-child &',
-  'printf "PLANWEAVE_PARENT_PID=%s\\n" "$$"',
+  'pw_state_path="$1"',
+  'pw_child_pid_path="$2"',
+  'child_program=\'trap "" TERM; printf "%s\\n" "$$" > "$1"; while :; do sleep 1; done\'',
+  'sh -c "$child_program" planweave-wsl-child "$pw_child_pid_path" &',
+  'while [ ! -s "$pw_child_pid_path" ]; do sleep 0.05; done',
+  'pw_child_pid="$(cat "$pw_child_pid_path")"',
+  'printf "PLANWEAVE_PARENT_PID=%s\\nPLANWEAVE_CHILD_PID=%s\\n" "$$" "$pw_child_pid" > "$pw_state_path"',
   "trap 'exit 0' TERM",
   "wait"
 ].join("\n");
@@ -271,9 +299,11 @@ describe("executor environment", () => {
       }
 
       const runDir = await mkdtemp(join(homedir(), ".planweave-wsl-lifecycle-"));
+      const stateToken = randomUUID();
+      const statePath = `/tmp/planweave-lifecycle-${stateToken}.state`;
+      const childPidPath = `/tmp/planweave-lifecycle-${stateToken}.child`;
       const stdoutPath = join(runDir, "stdout.log");
       const abort = new AbortController();
-      let stdout = "";
       let parentPid: number | undefined;
       let childPid: number | undefined;
       let running: ReturnType<typeof execWithStreaming> | undefined;
@@ -282,7 +312,13 @@ describe("executor environment", () => {
       try {
         running = execWithStreaming({
           command: "sh",
-          args: ["-c", WSL_LIFECYCLE_PROCESS_SCRIPT, "planweave-wsl-lifecycle"],
+          args: [
+            "-c",
+            WSL_LIFECYCLE_PROCESS_SCRIPT,
+            "planweave-wsl-lifecycle",
+            statePath,
+            childPidPath
+          ],
           cwd: runDir,
           stdin: "",
           host: { kind: "wsl", distribution: WSL_DISTRIBUTION },
@@ -291,10 +327,7 @@ describe("executor environment", () => {
           timeoutMs: 60_000,
           maxStdoutBytes: 1024,
           maxStderrBytes: 1024,
-          signal: abort.signal,
-          onStdout: (chunk) => {
-            stdout += chunk;
-          }
+          signal: abort.signal
         });
 
         await waitForFileWhileRunning(
@@ -304,7 +337,8 @@ describe("executor environment", () => {
           WSL_LAUNCH_TIMEOUT_MS
         );
         ({ parentPid, childPid } = await waitForWslLifecyclePidsWhileRunning(
-          () => stdout,
+          WSL_DISTRIBUTION,
+          statePath,
           running
         ));
         await assertWslProcessGroup({
@@ -353,7 +387,11 @@ describe("executor environment", () => {
               }
             }
           } finally {
-            await rm(runDir, { recursive: true, force: true });
+            try {
+              await wslExitCode(WSL_DISTRIBUTION, 'rm -f -- "$@"', [statePath, childPidPath]);
+            } finally {
+              await rm(runDir, { recursive: true, force: true });
+            }
           }
         }
       }
