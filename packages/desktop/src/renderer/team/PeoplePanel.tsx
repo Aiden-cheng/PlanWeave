@@ -10,6 +10,7 @@ import type {
 } from "../collaboration/peopleViewModels";
 import type { CollaborationInvitationHandoffView } from "../../shared/collaboration.js";
 import { CollaborationDiagnosticsDetails } from "./CollaborationDiagnosticsDetails";
+import { MemberLoginDevices } from "./MemberLoginDevices";
 import { OwnDisplayNameControl } from "./OwnDisplayNameControl";
 
 export type PeoplePanelProps = {
@@ -111,6 +112,9 @@ export function PeoplePanel({
   const [showOwnerDetails, setShowOwnerDetails] = useState(revealInvitationManagement);
   const [showConnectionSettings, setShowConnectionSettings] = useState(false);
   const [expandedAccessPrincipalId, setExpandedAccessPrincipalId] = useState<string | null>(null);
+  const [expandedDevicePrincipalIds, setExpandedDevicePrincipalIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const [selectedInvitationIds, setSelectedInvitationIds] = useState<Set<string>>(new Set());
@@ -324,8 +328,6 @@ export function PeoplePanel({
         : presence.sessionPhase === "error"
           ? t("peopleWorkspaceError")
           : t("peopleWorkspaceDisconnected");
-  const activeDeviceCount = devices.filter((device) => !device.isRevoked).length;
-
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="people-panel" data-mode={mode}>
       <div
@@ -355,9 +357,6 @@ export function PeoplePanel({
                 }`}
               />
               {workspaceStatusText}
-            </span>
-            <span className="rounded-full border border-border/70 px-2 py-0.5">
-              {t("peopleMemberDevices")} ({activeDeviceCount})
             </span>
           </div>
         </div>
@@ -485,6 +484,12 @@ export function PeoplePanel({
                   const promote = member.actions.find((action) => action.action === "promote");
                   const demote = member.actions.find((action) => action.action === "demote");
                   const remove = member.actions.find((action) => action.action === "remove");
+                  const memberDevices = devices.filter(
+                    (device) =>
+                      device.humanPrincipalId === member.humanPrincipalId && !device.isRevoked
+                  );
+                  const canManageDevices = presence.currentUserIsOwner || member.isCurrentUser;
+                  const memberDevicesPanelId = `people-member-devices-${member.humanPrincipalId}`;
                   return (
                     <li
                       key={member.membershipId}
@@ -508,8 +513,41 @@ export function PeoplePanel({
                               {member.displayName}
                             </div>
                           )}
-                          <div className="mt-0.5 text-xs text-muted-foreground">
-                            {member.role === "owner" ? t("peopleRoleOwner") : t("peopleRoleMember")}
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                            <span>
+                              {member.role === "owner"
+                                ? t("peopleRoleOwner")
+                                : t("peopleRoleMember")}
+                            </span>
+                            {canManageDevices ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-1.5 text-[11px] text-muted-foreground"
+                                data-testid="people-member-devices-toggle"
+                                aria-expanded={expandedDevicePrincipalIds.has(
+                                  member.humanPrincipalId
+                                )}
+                                aria-controls={memberDevicesPanelId}
+                                onClick={() =>
+                                  setExpandedDevicePrincipalIds((current) => {
+                                    const next = new Set(current);
+                                    if (next.has(member.humanPrincipalId)) {
+                                      next.delete(member.humanPrincipalId);
+                                    } else {
+                                      next.add(member.humanPrincipalId);
+                                    }
+                                    return next;
+                                  })
+                                }
+                              >
+                                {t("peopleLoginDevices").replace(
+                                  "{count}",
+                                  String(memberDevices.length)
+                                )}
+                              </Button>
+                            ) : null}
                           </div>
                         </div>
                         {presence.currentUserIsOwner ? (
@@ -603,6 +641,17 @@ export function PeoplePanel({
                           {renderMemberAccess(member)}
                         </div>
                       ) : null}
+                      {expandedDevicePrincipalIds.has(member.humanPrincipalId) &&
+                      canManageDevices ? (
+                        <MemberLoginDevices
+                          id={memberDevicesPanelId}
+                          devices={memberDevices}
+                          loading={detailsLoading}
+                          actionBusy={actionBusy}
+                          t={t}
+                          onSignOut={onRevokeDevice}
+                        />
+                      ) : null}
                     </li>
                   );
                 })}
@@ -630,10 +679,15 @@ export function PeoplePanel({
               <span aria-hidden="true">{showOwnerDetails ? "−" : "+"}</span>
             </Button>
             {showOwnerDetails ? (
-              <div className="grid min-w-0 gap-8 border-t border-border/70 py-4 xl:grid-cols-2 xl:gap-0">
-                <div className="min-w-0 xl:pr-8" data-testid="people-invitations-list">
-                  <div className="flex min-h-11 flex-col gap-2 border-b border-border/60 px-1 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="text-xs font-semibold">{t("peopleInvitations")}</div>
+              <div className="min-w-0 border-t border-border/70 py-4">
+                <div className="min-w-0" data-testid="people-invitations-list">
+                  <div
+                    className={
+                      openInvitationIds.length > 0
+                        ? "flex flex-wrap items-center justify-end gap-2 px-1 py-2.5"
+                        : "hidden"
+                    }
+                  >
                     {openInvitationIds.length > 0 ? (
                       <div className="flex flex-wrap items-center gap-2 text-[11px]">
                         <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
@@ -805,95 +859,6 @@ export function PeoplePanel({
                               ) : null}
                             </div>
                             {renderInlineInvitationSecret(invitation.invitationId)}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-
-                <div
-                  className="min-w-0 border-t border-border/60 pt-5 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0"
-                  data-testid="people-devices-list"
-                >
-                  <div className="min-h-11 border-b border-border/60 px-1 py-2.5 text-xs font-semibold">
-                    {t("peopleDevices")}
-                  </div>
-                  {detailsLoading ? (
-                    <div className="px-1 py-4 text-xs text-muted-foreground">
-                      {t("peopleLoading")}
-                    </div>
-                  ) : devices.length === 0 ? (
-                    <div className="px-1 py-4 text-xs text-muted-foreground">
-                      {t("peopleEmptyDevices")}
-                    </div>
-                  ) : (
-                    <ul className="divide-y divide-border/60">
-                      {devices.map((device, index) => {
-                        const memberName = members.find(
-                          (member) => member.humanPrincipalId === device.humanPrincipalId
-                        )?.displayName;
-                        const displayName =
-                          device.label !== device.deviceCredentialId
-                            ? device.label
-                            : t("peopleUnnamedDevice").replace("{number}", String(index + 1));
-                        return (
-                          <li
-                            key={device.deviceCredentialId}
-                            className="flex min-w-0 items-start gap-3 px-1 py-3 text-xs"
-                            data-testid="people-device-row"
-                            data-revoked={device.isRevoked ? "true" : "false"}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                <span className="truncate text-sm font-semibold text-text-strong">
-                                  {displayName}
-                                </span>
-                                {memberName ? (
-                                  <span className="text-[11px] text-muted-foreground">
-                                    {t("peopleDeviceOwner").replace("{name}", memberName)}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">
-                                {t("peopleDeviceCreated").replace(
-                                  "{time}",
-                                  formatTimestamp(device.createdAt)
-                                )}
-                                <span aria-hidden="true"> · </span>
-                                {t("peopleDeviceLastSeen")}:{" "}
-                                {device.lastSeenAt
-                                  ? formatTimestamp(device.lastSeenAt)
-                                  : t("peopleHostFieldUnavailable")}
-                                <span aria-hidden="true"> · </span>
-                                <span className="font-mono" title={device.deviceCredentialId}>
-                                  {t("peopleDeviceCredentialId").replace(
-                                    "{id}",
-                                    shortIdentifier(device.deviceCredentialId)
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                            {!device.isRevoked ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 shrink-0 px-2 text-[11px] text-destructive"
-                                data-testid="people-device-revoke"
-                                disabled={actionBusy}
-                                onClick={() => {
-                                  if (!confirmDestructive(t("peopleRevokeDeviceConfirm"))) return;
-                                  void onRevokeDevice(device.deviceCredentialId);
-                                }}
-                              >
-                                {t("peopleRevoke")}
-                              </Button>
-                            ) : (
-                              <span className="shrink-0 text-[11px] text-muted-foreground">
-                                {t("peopleDeviceRevoked")}
-                              </span>
-                            )}
                           </li>
                         );
                       })}

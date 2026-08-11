@@ -424,11 +424,11 @@ describe("collaboration render / subscription audit", () => {
     rerender({ detailsOpen: true });
     await waitFor(() => {
       expect(listInvitations).toHaveBeenCalledWith({ cursor: 0, limit: 100, openOnly: true });
-      expect(listDevices).toHaveBeenCalled();
+      expect(listDevices).toHaveBeenCalledWith({ cursor: 0, limit: 50, scope: "project" });
     });
   });
 
-  it("does not request owner-only invitation/device details for an ordinary member", async () => {
+  it("loads only the current member devices for an ordinary member", async () => {
     const { api, listInvitations, listDevices } = createAuditApi();
     trackedApis.push(api);
 
@@ -443,12 +443,11 @@ describe("collaboration render / subscription audit", () => {
       })
     );
 
-    await act(async () => {
-      await Promise.resolve();
+    await waitFor(() => {
+      expect(listDevices).toHaveBeenCalledWith({ cursor: 0, limit: 50, scope: "own" });
     });
 
     expect(listInvitations).not.toHaveBeenCalled();
-    expect(listDevices).not.toHaveBeenCalled();
   });
 
   it("does not reload invitation/device details for read-model phase transitions", async () => {

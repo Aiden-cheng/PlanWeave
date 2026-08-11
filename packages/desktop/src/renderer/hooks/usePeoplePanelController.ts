@@ -39,7 +39,7 @@ export type UsePeoplePanelControllerArgs = {
   members: readonly HumanMembershipView[];
   hosts: readonly CollaborationHostProjection[];
   syncPhase: CollaborationSyncPhase;
-  /** When true, load invitations/devices (on-demand detailed panel). */
+  /** When true, load owner invitations and the devices visible to the current member. */
   detailsOpen: boolean;
   /** Renderer-owned localization for typed boundary errors. */
   formatError?: (error: unknown) => string;
@@ -85,7 +85,7 @@ export function usePeoplePanelController(
     useState<CollaborationInvitationHandoffView | null>(null);
   const detailsGenerationRef = useRef(0);
   const detailsRequestRef = useRef<Promise<void> | null>(null);
-  const detailsRequestProfileRef = useRef<string | null>(null);
+  const detailsRequestKeyRef = useRef<string | null>(null);
   const sessionConnected = isCollaborationSessionConnected(args.status);
   const activeProfileId = args.status?.activeProfileId ?? null;
   const formatError = args.formatError ?? collaborationErrorMessage;
@@ -137,29 +137,33 @@ export function usePeoplePanelController(
   const deviceRows = useMemo(() => buildPeopleDeviceRows(devices), [devices]);
 
   const refreshDetails = useCallback((): Promise<void> => {
-    if (!api || !sessionConnected || !activeProfileId || !currentUserIsOwner) {
+    if (!api || !sessionConnected || !activeProfileId) {
       detailsGenerationRef.current += 1;
       detailsRequestRef.current = null;
-      detailsRequestProfileRef.current = null;
+      detailsRequestKeyRef.current = null;
       setInvitations([]);
       setDevices([]);
       setDetailsLoading(false);
       setDetailsError(null);
       return Promise.resolve();
     }
-    if (detailsRequestRef.current && detailsRequestProfileRef.current === activeProfileId) {
+    const deviceScope = currentUserIsOwner ? "project" : "own";
+    const requestKey = `${activeProfileId}:${deviceScope}`;
+    if (detailsRequestRef.current && detailsRequestKeyRef.current === requestKey) {
       return detailsRequestRef.current;
     }
     const generation = detailsGenerationRef.current + 1;
     detailsGenerationRef.current = generation;
-    detailsRequestProfileRef.current = activeProfileId;
+    detailsRequestKeyRef.current = requestKey;
     setDetailsLoading(true);
     setDetailsError(null);
     const request = (async () => {
       try {
         const [invitationPage, devicePage] = await Promise.all([
-          api.listCollaborationInvitations({ cursor: 0, limit: 100, openOnly: true }),
-          api.listCollaborationDevices({ cursor: 0, limit: 50, scope: "project" })
+          currentUserIsOwner
+            ? api.listCollaborationInvitations({ cursor: 0, limit: 100, openOnly: true })
+            : Promise.resolve({ items: [], nextCursor: null }),
+          api.listCollaborationDevices({ cursor: 0, limit: 50, scope: deviceScope })
         ]);
         if (detailsGenerationRef.current !== generation) {
           return;
@@ -185,7 +189,7 @@ export function usePeoplePanelController(
     void request.finally(() => {
       if (detailsRequestRef.current === request) {
         detailsRequestRef.current = null;
-        detailsRequestProfileRef.current = null;
+        detailsRequestKeyRef.current = null;
       }
     });
     return request;
@@ -330,8 +334,14 @@ export function usePeoplePanelController(
         { refreshDetails: false }
       ),
     revokeDevice: async (deviceCredentialId) =>
-      runAction(async () => {
-        await api!.revokeCollaborationDevice({ deviceCredentialId });
-      })
+      runAction(
+        async () => {
+          await api!.revokeCollaborationDevice({ deviceCredentialId });
+          setDevices((current) =>
+            current.filter((device) => device.deviceCredentialId !== deviceCredentialId)
+          );
+        },
+        { refreshDetails: false }
+      )
   };
 }

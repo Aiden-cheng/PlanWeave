@@ -156,7 +156,22 @@ describe("PeoplePanel", () => {
     expect(screen.getByTestId("people-workspace-summary")).toHaveTextContent(
       "Connected to Workspace"
     );
-    expect(screen.getByText("Member devices (1)")).toBeVisible();
+    expect(screen.getAllByTestId("people-member-devices-toggle")).toHaveLength(2);
+    expect(screen.getByText("Login devices (1)")).toBeVisible();
+    expect(screen.getByText("Login devices (0)")).toBeVisible();
+    await userEvent.click(screen.getAllByTestId("people-member-devices-toggle")[0]!);
+    expect(screen.getByTestId("people-member-devices")).toBeVisible();
+    expect(screen.getByTestId("people-device-row")).toHaveTextContent("Desktop");
+    await userEvent.click(screen.getAllByTestId("people-member-devices-toggle")[1]!);
+    expect(screen.getAllByTestId("people-member-devices")).toHaveLength(2);
+    expect(screen.getAllByTestId("people-member-devices-toggle")[0]).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    expect(screen.getAllByTestId("people-member-devices-toggle")[1]).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
     expect(screen.getAllByTestId("people-member-access-toggle")).toHaveLength(1);
     await userEvent.click(screen.getByTestId("people-member-access-toggle"));
     expect(screen.getByTestId("member-access-slot")).toHaveTextContent("Member access");
@@ -180,9 +195,6 @@ describe("PeoplePanel", () => {
 
     await userEvent.click(screen.getByTestId("people-member-promote"));
     expect(onPromote).toHaveBeenCalledWith("human-2");
-
-    expect(screen.getByTestId("people-devices-list")).toBeVisible();
-    expect(screen.getByTestId("people-devices-list")).not.toHaveClass("rounded-lg", "border");
 
     await userEvent.click(screen.getByTestId("people-invitation-view"));
     expect(onViewInvitation).toHaveBeenCalledWith("inv-1");
@@ -247,7 +259,7 @@ describe("PeoplePanel", () => {
 
     await userEvent.click(screen.getByTestId("people-invitation-revoke"));
     expect(onRevokeInvitation).toHaveBeenCalledWith("inv-1");
-    await userEvent.click(screen.getByTestId("people-device-revoke"));
+    await userEvent.click(screen.getByTestId("people-device-sign-out"));
     expect(onRevokeDevice).toHaveBeenCalledWith("device-1");
   });
 
@@ -586,13 +598,13 @@ describe("PeoplePanel", () => {
     );
 
     fireEvent.click(screen.getByTestId("people-owner-toggle"));
+    fireEvent.click(screen.getAllByTestId("people-member-devices-toggle")[0]!);
 
     expect(screen.getByTestId("people-invitation-row")).toHaveTextContent("Waiting for a member");
     expect(screen.getByTestId("people-invitation-row")).toHaveTextContent(
       "Invite ID 24e269e7…fb1c"
     );
     expect(screen.getByTestId("people-device-row")).toHaveTextContent("Unnamed device 1");
-    expect(screen.getByTestId("people-device-row")).toHaveTextContent("Member: Owner");
     expect(screen.getByTestId("people-device-row")).toHaveTextContent("Device ID 369c6c7c…4eac");
     expect(screen.queryByText(invitationId)).not.toBeInTheDocument();
     expect(screen.queryByText(deviceId)).not.toBeInTheDocument();
@@ -693,8 +705,9 @@ describe("PeoplePanel", () => {
     );
   });
 
-  it("lets a regular member edit only their own display name", async () => {
+  it("lets a regular member edit their name and sign out only their own devices", async () => {
     const onUpdateOwnDisplayName = vi.fn().mockResolvedValue(true);
+    const onRevokeDevice = vi.fn().mockResolvedValue(true);
     render(
       <PeoplePanel
         mode="ready"
@@ -704,7 +717,7 @@ describe("PeoplePanel", () => {
           { ...members[1]!, isCurrentUser: true }
         ]}
         invitations={[]}
-        devices={[]}
+        devices={[{ ...devices[0]!, humanPrincipalId: "human-2" }]}
         detailsLoading={false}
         detailsError={null}
         actionError={null}
@@ -720,13 +733,19 @@ describe("PeoplePanel", () => {
         onPromoteMember={vi.fn()}
         onDemoteMember={vi.fn()}
         onRemoveMember={vi.fn()}
-        onRevokeDevice={vi.fn()}
+        onRevokeDevice={onRevokeDevice}
         onRefreshDetails={vi.fn()}
       />
     );
 
     expect(screen.queryByTestId("people-owner-section")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("people-edit-own-name")).toHaveLength(1);
+    expect(screen.getAllByTestId("people-member-devices-toggle")).toHaveLength(1);
+    await userEvent.click(screen.getByTestId("people-member-devices-toggle"));
+    expect(screen.getByTestId("people-device-row")).toHaveTextContent("Desktop");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await userEvent.click(screen.getByTestId("people-device-sign-out"));
+    expect(onRevokeDevice).toHaveBeenCalledWith("device-1");
 
     await userEvent.click(screen.getByTestId("people-edit-own-name"));
     const input = screen.getByTestId("people-own-name-input");
