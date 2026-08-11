@@ -1,17 +1,12 @@
 {
   "integrationShards": {
-    "cli": [
-      "packages/cli/src/__tests__"
-    ],
+    "cli": ["packages/cli/src/__tests__"],
     "core": [
       "packages/desktop/src/__tests__",
       "packages/mcp/src/__tests__",
       "packages/runtime/src/__tests__"
     ],
-    "distributed": [
-      "packages/server/src/__tests__",
-      "packages/agent-host/src/__tests__"
-    ]
+    "distributed": ["packages/server/src/__tests__", "packages/agent-host/src/__tests__"]
   },
   "groups": [
     {
@@ -136,6 +131,7 @@
         "executorOptionViewModel.test.ts",
         "executorPreflightAuthenticationUi.test.tsx",
         "executorPreflightUi.test.tsx",
+        "executorPreflightWslUi.test.tsx",
         "fileSyncPopover.test.tsx",
         "floatingAutoRunControl.test.tsx",
         "formatAgentEndpointFleetCatalogError.test.ts",
@@ -307,18 +303,12 @@
         "smokeProcessGate.test.ts",
         "tailscaleProxyTwoDesktopE2E.test.ts"
       ],
-      "platform": [
-        "agentToolsWindows.test.ts",
-        "runtimeStateWatch.test.ts"
-      ],
+      "platform": ["agentToolsWindows.test.ts", "runtimeStateWatch.test.ts"],
       "performance": []
     },
     {
       "root": "packages/desktop/src/renderer/collaboration",
-      "unit": [
-        "agentEndpointViewModel.test.ts",
-        "remoteTaskEndpointRun.test.ts"
-      ],
+      "unit": ["agentEndpointViewModel.test.ts", "remoteTaskEndpointRun.test.ts"],
       "integration": [],
       "platform": [],
       "performance": []
@@ -587,9 +577,7 @@
         "managedProcessTree.test.ts",
         "stateConcurrency.test.ts"
       ],
-      "performance": [
-        "blockRunIndexPerformance.test.ts"
-      ]
+      "performance": ["blockRunIndexPerformance.test.ts"]
     },
     {
       "root": "packages/agent-host-protocol/src/__tests__",
