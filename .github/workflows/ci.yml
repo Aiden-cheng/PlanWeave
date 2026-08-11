@@ -342,14 +342,11 @@ jobs:
           if ($installed.ExitCode -ne 0) { throw "Failed to list installed WSL distributions: $(Get-WslFailureSummary $installed)" }
 
           if (-not (($installed.Output -split "\r?\n" | ForEach-Object { $_.Trim() }) -contains "Ubuntu")) {
-            $installUbuntu = Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch", "--web-download") -OutputEncoding $managementEncoding
+            $installUbuntu = Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--version", "1", "--no-launch", "--web-download") -OutputEncoding $managementEncoding
             if ($installUbuntu.ExitCode -ne 0) {
               throw "Failed to install the Ubuntu WSL distribution: $(Get-WslFailureSummary $installUbuntu)"
             }
           }
-
-          $setUbuntuVersion = Invoke-WslCommand -Arguments @("--set-version", "Ubuntu", "1") -OutputEncoding $managementEncoding
-          if ($setUbuntuVersion.ExitCode -ne 0) { throw "Failed to set Ubuntu to WSL version 1: $(Get-WslFailureSummary $setUbuntuVersion)" }
 
           $verbose = Invoke-WslCommand -Arguments @("--list", "--verbose") -OutputEncoding $managementEncoding
           if ($verbose.ExitCode -ne 0) { throw "Failed to inspect the Ubuntu WSL version: $(Get-WslFailureSummary $verbose)" }

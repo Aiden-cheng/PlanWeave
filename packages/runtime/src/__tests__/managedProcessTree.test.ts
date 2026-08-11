@@ -733,7 +733,9 @@ setTimeout(() => process.exit(17), 50);
 
     await waitUntil(async () => {
       try {
-        return (await readFile(grandchildPidPath, "utf8")).trim().length > 0;
+        const grandchildPid = (await readFile(grandchildPidPath, "utf8")).trim();
+        const heartbeat = await readFile(heartbeatPath);
+        return grandchildPid.length > 0 && heartbeat.byteLength > 0;
       } catch {
         return false;
       }

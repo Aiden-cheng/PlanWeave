@@ -599,11 +599,9 @@ process.exit(2);
       'Invoke-WslCommand -Arguments @("--set-default-version", "1") -OutputEncoding $managementEncoding'
     );
     expect(workflow).toContain(
-      'Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--no-launch", "--web-download") -OutputEncoding $managementEncoding'
+      'Invoke-WslCommand -Arguments @("--install", "--distribution", "Ubuntu", "--version", "1", "--no-launch", "--web-download") -OutputEncoding $managementEncoding'
     );
-    expect(workflow).toContain(
-      'Invoke-WslCommand -Arguments @("--set-version", "Ubuntu", "1") -OutputEncoding $managementEncoding'
-    );
+    expect(workflow).not.toContain('Invoke-WslCommand -Arguments @("--set-version"');
     expect(workflow).toContain(
       'Invoke-WslCommand -Arguments @("--list", "--verbose") -OutputEncoding $managementEncoding'
     );
