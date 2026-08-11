@@ -1,4 +1,7 @@
-import { capabilitiesSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
+import {
+  capabilitiesSchema,
+  opaqueIdentifierSchema
+} from "@planweave-ai/agent-host-protocol/browser";
 import { z } from "zod";
 import { deploymentEndpointSchema, type DeploymentEndpoint } from "./connection.js";
 export {

@@ -38,6 +38,12 @@ import {
   serverEventSchema,
   serverToHostCommandSchema
 } from "../index.js";
+import {
+  DEFAULT_HOST_CREDENTIAL_LIFETIME_DAYS,
+  deploymentEndpointSchema,
+  hostCredentialPolicySchema,
+  isPrivateDeploymentHostname
+} from "../browser.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const require = createRequire(import.meta.url);
@@ -166,12 +172,34 @@ describe("public package exports", () => {
       type: string;
       dependencies: Record<string, string>;
       devDependencies?: Record<string, string>;
+      exports: Record<string, { types: string; import: string }>;
     };
 
     expect(packageJson.name).toBe("@planweave-ai/agent-host-protocol");
     expect(packageJson.type).toBe("module");
     expect(Object.keys(packageJson.dependencies)).toEqual(["zod"]);
     expect(packageJson.devDependencies ?? {}).toEqual({});
+    expect(packageJson.exports["./browser"]).toEqual({
+      types: "./dist/browser.d.ts",
+      import: "./dist/browser.js"
+    });
+  });
+
+  it("exposes browser-safe credential and deployment contracts", () => {
+    expect(DEFAULT_HOST_CREDENTIAL_LIFETIME_DAYS).toBe(180);
+    expect(hostCredentialPolicySchema.parse({ lifetimeDays: 180, renewal: "automatic" })).toEqual({
+      lifetimeDays: 180,
+      renewal: "automatic"
+    });
+    expect(isPrivateDeploymentHostname("192.168.1.10")).toBe(true);
+    expect(
+      deploymentEndpointSchema.parse({
+        topology: "private_https",
+        serverOrigin: "https://192.168.1.10:7443",
+        allowedClientOrigins: ["https://192.168.1.20:7443"],
+        tlsTrust: "system_ca"
+      })
+    ).toMatchObject({ topology: "private_https" });
   });
 
   it("lets a minimal Agent Host consumer parse the same primitives as Server", () => {

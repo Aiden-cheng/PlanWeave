@@ -4,7 +4,7 @@ import {
   HOST_CREDENTIAL_LIFETIME_DAY_OPTIONS,
   hostCredentialLifetimeDaysSchema,
   type HostCredentialLifetimeDays
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 import type {
   OperatorHostBootstrapHandoffView,
   OperatorProfileView

@@ -4,7 +4,7 @@ import {
   interruptionReasonSchema,
   normalizedFailureSchema,
   opaqueIdentifierSchema
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 import { z } from "zod";
 import { remoteExecutionControlPlaneSchema } from "./remoteExecutionControlPlane.js";
 

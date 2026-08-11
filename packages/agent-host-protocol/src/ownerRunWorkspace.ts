@@ -1,27 +1,8 @@
 import { isAbsolute, relative } from "node:path";
 import { z } from "zod";
+import { ownerPackageLocatorSchema, type OwnerPackageLocator } from "./ownerPackageLocator.js";
 
-const relativePackagePathSchema = z
-  .string()
-  .min(1)
-  .max(512)
-  .refine(
-    (value) =>
-      !isAbsolute(value) &&
-      !value.includes("\\") &&
-      value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
-    "relativePackagePath must be a safe relative path"
-  );
-
-/** Minimal Owner Fleet package locator — host-relative path under configured workspaceRoot. */
-export const ownerPackageLocatorSchema = z
-  .object({
-    strategy: z.literal("host_relative_package"),
-    relativePackagePath: relativePackagePathSchema
-  })
-  .strict();
-
-export type OwnerPackageLocator = z.infer<typeof ownerPackageLocatorSchema>;
+export { ownerPackageLocatorSchema, type OwnerPackageLocator } from "./ownerPackageLocator.js";
 
 export const resolvedHostWorkspaceSchema = z
   .object({

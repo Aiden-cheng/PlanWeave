@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_HOST_CREDENTIAL_LIFETIME_DAYS,
-  type HostCredentialLifetimeDays,
-  type OperatorHostPage,
-  type OperatorHostView
-} from "@planweave-ai/agent-host-protocol";
+  type HostCredentialLifetimeDays
+} from "@planweave-ai/agent-host-protocol/browser";
+import type {
+  OperatorHostPage,
+  OperatorHostView
+} from "@planweave-ai/agent-host-protocol/operator-control";
 import {
   OperatorControlError,
   type OperatorHostBootstrapHandoffView,

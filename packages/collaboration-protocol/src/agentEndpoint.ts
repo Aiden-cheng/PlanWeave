@@ -2,7 +2,7 @@ import {
   capabilitiesSchema,
   hostAcpProfileObservationSchema,
   opaqueIdentifierSchema
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 import { z } from "zod";
 
 export const agentEndpointUnavailableReasonSchema = z.enum([

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { capabilitiesSchema } from "./capabilities.js";
-import { hostCapacitySchema } from "./agentHostProtocol.js";
+import { hostCapacitySchema } from "./hostReadiness.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
 import { agentHostProtocolVersionSchema } from "./version.js";
 import { hostCredentialTokenSchema, hostEnrollmentCodeSchema } from "./agentHostCredentials.js";

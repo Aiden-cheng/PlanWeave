@@ -1,4 +1,4 @@
-import type { OperatorHostView } from "@planweave-ai/agent-host-protocol";
+import type { OperatorHostView } from "@planweave-ai/agent-host-protocol/operator-control";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";

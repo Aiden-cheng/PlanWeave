@@ -1,11 +1,8 @@
 import { z } from "zod";
 import { normalizedAcpEventBatchSchema } from "./acpEvents.js";
 import { capabilitiesSchema } from "./capabilities.js";
-import {
-  executionEnvelopeDigestSchema,
-  executionEnvelopeSchema,
-  hashExecutionEnvelope
-} from "./executionEnvelope.js";
+import { executionEnvelopeDigestSchema, executionEnvelopeSchema } from "./executionEnvelope.js";
+import { hashExecutionEnvelope } from "./executionEnvelopeHash.js";
 import { executionAttemptIdSchema, dispatchIdSchema } from "./executionIdentity.js";
 import { opaqueIdentifierSchema } from "./identifiers.js";
 import { interactionRequestSchema, interactionSettlementSchema } from "./interactions.js";
@@ -24,43 +21,11 @@ import {
   mailboxSequenceSchema
 } from "./mailboxIdentity.js";
 import { agentHostProtocolVersionSchema } from "./version.js";
+import { hostCapacitySchema, hostReadinessObservationSchema } from "./hostReadiness.js";
 
 export const PROTOCOL_ERROR_MESSAGE_MAX_LENGTH = 4_096 as const;
 export const CANCEL_REASON_MAX_LENGTH = 4_096 as const;
 export const ACTIVE_LEASE_MAX_COUNT = 128 as const;
-export const hostCapacitySchema = z.number().int().min(1).max(128);
-
-/** Redacted target-machine result of resolving one configured workspace mapping. */
-export const hostWorkspaceMappingObservationSchema = z
-  .object({
-    workspaceId: opaqueIdentifierSchema,
-    status: z.enum(["ready", "missing", "invalid"])
-  })
-  .strict();
-
-/** Redacted target-machine result of resolving one configured ACP profile. */
-export const hostAcpProfileObservationSchema = z
-  .object({
-    profileId: opaqueIdentifierSchema,
-    agentId: opaqueIdentifierSchema,
-    displayName: z.string().trim().min(1).max(128),
-    status: z.enum(["ready", "missing", "invalid"]),
-    capabilities: capabilitiesSchema
-  })
-  .strict();
-
-/**
- * Host-local readiness facts. Paths, commands, arguments, and environment are
- * intentionally excluded: Server combines these observations with its own
- * liveness and revocation facts before exposing an operator view.
- */
-export const hostReadinessObservationSchema = z
-  .object({
-    workspaceMappings: z.array(hostWorkspaceMappingObservationSchema).max(128),
-    acpProfiles: z.array(hostAcpProfileObservationSchema).max(128)
-  })
-  .strict();
-
 const versionedSchema = z.object({ protocolVersion: agentHostProtocolVersionSchema }).strict();
 const durableHostEventSchema = versionedSchema.extend({ messageId: mailboxMessageIdSchema });
 
@@ -234,12 +199,9 @@ export const serverEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type HostHello = z.infer<typeof hostHelloSchema>;
-export type HostAcpProfileObservation = z.infer<typeof hostAcpProfileObservationSchema>;
-export type HostReadinessObservation = z.infer<typeof hostReadinessObservationSchema>;
 export type ServerToHostCommand = z.infer<typeof serverToHostCommandSchema>;
 export type MailboxCommand = z.infer<typeof mailboxCommandSchema>;
 export type HostToServerEvent = z.infer<typeof hostToServerEventSchema>;
 export type ObservationEvent = z.infer<typeof observationEventSchema>;
 export type HostEvent = z.infer<typeof hostEventSchema>;
 export type ServerEvent = z.infer<typeof serverEventSchema>;
-export type HostWorkspaceMappingObservation = z.infer<typeof hostWorkspaceMappingObservationSchema>;

@@ -1,5 +1,5 @@
 import { parseBlockRef } from "./compileTaskGraph.js";
-import { capabilitiesSchema } from "@planweave-ai/agent-host-protocol";
+import { capabilitiesSchema } from "@planweave-ai/agent-host-protocol/browser";
 import {
   buildPlanPackageManifestChangeMutation,
   writePromptSideEffects,

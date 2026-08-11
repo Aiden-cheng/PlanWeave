@@ -63,10 +63,8 @@ export {
   executionEnvelopeDigestPrefix,
   executionEnvelopeDigestSchema,
   executionEnvelopeSchema,
-  hashExecutionEnvelope,
   isExecutionEnvelopeDigest,
   outputContractSchema,
-  parseAndHashExecutionEnvelope,
   parseExecutionEnvelope,
   requestedAcpSessionConfigSchema,
   traceCorrelationSchema,
@@ -80,6 +78,10 @@ export {
   type RequestedAcpSessionConfig,
   type TraceCorrelation
 } from "./executionEnvelope.js";
+export {
+  hashExecutionEnvelope,
+  parseAndHashExecutionEnvelope
+} from "./executionEnvelopeHash.js";
 export {
   exampleExecutionEnvelopeDigest,
   exampleExecutionEnvelopeInput
@@ -176,14 +178,10 @@ export {
   cancelExecutionCommandSchema,
   executeBlockCommandSchema,
   hostEventAcknowledgementSchema,
-  hostAcpProfileObservationSchema,
-  hostCapacitySchema,
   hostEventSchema,
   hostHelloSchema,
-  hostReadinessObservationSchema,
   hostToServerEventSchema,
   hostWelcomeSchema,
-  hostWorkspaceMappingObservationSchema,
   leaseRenewalRequestSchema,
   leaseRenewedSchema,
   mailboxAcknowledgementSchema,
@@ -195,16 +193,22 @@ export {
   serverEventSchema,
   serverToHostCommandSchema,
   type HostEvent,
-  type HostAcpProfileObservation,
   type HostHello,
-  type HostReadinessObservation,
   type HostToServerEvent,
-  type HostWorkspaceMappingObservation,
   type MailboxCommand,
   type ObservationEvent,
   type ServerEvent,
   type ServerToHostCommand
 } from "./agentHostProtocol.js";
+export {
+  hostAcpProfileObservationSchema,
+  hostCapacitySchema,
+  hostReadinessObservationSchema,
+  hostWorkspaceMappingObservationSchema,
+  type HostAcpProfileObservation,
+  type HostReadinessObservation,
+  type HostWorkspaceMappingObservation
+} from "./hostReadiness.js";
 export {
   hostCredentialTokenSchema,
   hostEnrollmentCodeSchema

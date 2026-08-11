@@ -5,7 +5,7 @@ import {
   dependencyResultSummarySchema,
   type DependencyResultSummary,
   type DispatchInputArtifact
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 import { readVerifiedArtifactReference } from "../autoRun/artifactReferenceContract.js";
 import { parseBlockRef } from "../graph/compileTaskGraph.js";
 import { sha256Hex, stableJson } from "../plangraph/hash.js";

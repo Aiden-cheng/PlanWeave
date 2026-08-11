@@ -1,5 +1,5 @@
 import type { ExecutorProfile } from "./executor.js";
-import type { Capabilities } from "@planweave-ai/agent-host-protocol";
+import type { Capabilities } from "@planweave-ai/agent-host-protocol/browser";
 
 export const supportedManifestVersion = "plan-package/v1" as const;
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { NormalizedFailure } from "@planweave-ai/agent-host-protocol";
+import type { NormalizedFailure } from "@planweave-ai/agent-host-protocol/browser";
 import { materializeArtifactBytes } from "../autoRun/artifactReferenceContract.js";
 import { AcpEventStore } from "../autoRun/acpEventStore.js";
 import { upsertBlockRunInIndex } from "../autoRun/blockRunIndex.js";

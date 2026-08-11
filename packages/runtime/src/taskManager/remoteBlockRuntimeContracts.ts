@@ -8,7 +8,7 @@ import {
   normalizedAcpEventSchema,
   opaqueIdentifierSchema,
   OUTPUT_MAX_ARTIFACT_BYTES
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 import { z } from "zod";
 import { redactRunnerEventText } from "../autoRun/runnerEventRedaction.js";
 import {

@@ -1,4 +1,4 @@
-import type { NormalizedAcpEvent } from "@planweave-ai/agent-host-protocol";
+import type { NormalizedAcpEvent } from "@planweave-ai/agent-host-protocol/browser";
 import {
   normalizedOutputBody,
   normalizedRedactedContent,

@@ -10,7 +10,7 @@ import {
   hostCredentialPolicySchema,
   deploymentEndpointSchema,
   isPrivateDeploymentHostname
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 import type { RemoteAgentEndpointList } from "@planweave-ai/collaboration-protocol/agent-endpoint";
 import { z } from "zod";
 import {

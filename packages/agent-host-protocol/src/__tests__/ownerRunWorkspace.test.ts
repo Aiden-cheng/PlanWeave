@@ -4,6 +4,7 @@ import {
   ownerPackageLocatorForRun,
   resolveOwnerRunWorkspace
 } from "../ownerRunWorkspace.js";
+import { ownerPackageLocatorSchema } from "../ownerPackageLocator.js";
 
 describe("ownerRunWorkspace", () => {
   it("D1: resolves host_relative_package under workspace root", () => {
@@ -27,5 +28,16 @@ describe("ownerRunWorkspace", () => {
         locator: ownerPackageLocatorForRun({ projectId: "p", canvasId: "c" })
       })
     ).toThrow(OwnerRunWorkspaceResolverError);
+  });
+
+  it("rejects absolute package paths on POSIX and Windows", () => {
+    for (const relativePackagePath of ["/srv/package", "C:/package", "C:\\package"]) {
+      expect(() =>
+        ownerPackageLocatorSchema.parse({
+          strategy: "host_relative_package",
+          relativePackagePath
+        })
+      ).toThrow();
+    }
   });
 });

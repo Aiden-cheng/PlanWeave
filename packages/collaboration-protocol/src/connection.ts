@@ -5,7 +5,7 @@ import {
   isLoopbackDeploymentHostname,
   isPrivateDeploymentHostname,
   type DeploymentEndpoint
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 export {
   deploymentEndpointSchema,
   deploymentTlsTrustSchema,
@@ -13,7 +13,7 @@ export {
   type DeploymentEndpoint,
   type DeploymentTlsTrust,
   type DeploymentTopology
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/browser";
 import {
   COLLABORATION_JSON_BODY_MAX_BYTES,
   COLLABORATION_REQUEST_TIMEOUT_MS,

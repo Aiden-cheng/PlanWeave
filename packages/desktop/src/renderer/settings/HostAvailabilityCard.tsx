@@ -1,7 +1,7 @@
 import type {
   OperatorHostAvailabilityReason,
   OperatorHostView
-} from "@planweave-ai/agent-host-protocol";
+} from "@planweave-ai/agent-host-protocol/operator-control";
 import { RefreshCwIcon, RotateCwIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { capabilitiesSchema } from "@planweave-ai/agent-host-protocol";
+import { capabilitiesSchema } from "@planweave-ai/agent-host-protocol/browser";
 import {
   desktopLayoutFileSchema,
   desktopLayoutNodeSchema

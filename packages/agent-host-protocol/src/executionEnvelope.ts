@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { artifactMediaTypeSchema } from "./artifactMediaType.js";
 import { artifactRefSchema } from "./artifacts.js";
@@ -21,7 +20,7 @@ import {
   SESSION_CONFIG_OPTION_MAX_COUNT,
   SOURCE_IDENTITY_MAX_LENGTH
 } from "./limits.js";
-import { ownerPackageLocatorSchema } from "./ownerRunWorkspace.js";
+import { ownerPackageLocatorSchema } from "./ownerPackageLocator.js";
 import { agentHostProtocolVersionSchema } from "./version.js";
 
 /** Digest algorithm used for Execution Envelope content addressing. */
@@ -214,29 +213,6 @@ export function parseExecutionEnvelope(input: unknown): ExecutionEnvelope {
  */
 export function canonicalizeExecutionEnvelope(envelope: ExecutionEnvelope): string {
   return canonicalizeJson(envelope);
-}
-
-/**
- * Content-address an Execution Envelope: `envelope:sha256:<hex>`.
- * Hash is over the canonical JSON of the schema-normalized envelope.
- */
-export function hashExecutionEnvelope(envelope: ExecutionEnvelope): ExecutionEnvelopeDigest {
-  const canonical = canonicalizeExecutionEnvelope(envelope);
-  const digest = createHash(executionEnvelopeDigestAlgorithm)
-    .update(canonical, "utf8")
-    .digest("hex");
-  return executionEnvelopeDigestSchema.parse(`${executionEnvelopeDigestPrefix}${digest}`);
-}
-
-/**
- * Parse then content-address. Producers and consumers share this path so digests match.
- */
-export function parseAndHashExecutionEnvelope(input: unknown): {
-  envelope: ExecutionEnvelope;
-  digest: ExecutionEnvelopeDigest;
-} {
-  const envelope = parseExecutionEnvelope(input);
-  return { envelope, digest: hashExecutionEnvelope(envelope) };
 }
 
 /**

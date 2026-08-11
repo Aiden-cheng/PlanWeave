@@ -1,4 +1,4 @@
-import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
+import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol/browser";
 import { z } from "zod";
 import {
   WORK_ASSIGNMENT_BATCH_MAX,

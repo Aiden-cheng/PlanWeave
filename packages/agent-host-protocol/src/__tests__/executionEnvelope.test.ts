@@ -4,11 +4,10 @@ import { canonicalizeJson } from "../canonicalJson.js";
 import {
   executionEnvelopeDigestPrefix,
   executionEnvelopeSchema,
-  hashExecutionEnvelope,
   isExecutionEnvelopeDigest,
-  parseAndHashExecutionEnvelope,
   parseExecutionEnvelope
 } from "../executionEnvelope.js";
+import { hashExecutionEnvelope, parseAndHashExecutionEnvelope } from "../executionEnvelopeHash.js";
 import {
   exampleExecutionEnvelopeDigest,
   exampleExecutionEnvelopeInput

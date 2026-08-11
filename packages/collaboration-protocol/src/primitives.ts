@@ -1,4 +1,4 @@
-import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol";
+import { blockRefSchema, opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol/browser";
 import { z } from "zod";
 import {
   HUMAN_ASSIGN_REASON_MAX_LENGTH,
