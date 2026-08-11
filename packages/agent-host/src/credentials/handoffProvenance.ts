@@ -183,6 +183,14 @@ export function consumePortableHandoffProvenance(
   });
 }
 
+export function rotatePortableHandoffProvenance(
+  provenance: ActivePortableHandoffProvenance,
+  credential: CredentialBinding,
+  rotatedAt: Date
+): ActivePortableHandoffProvenance {
+  return consumePortableHandoffProvenance(pendingFields(provenance), credential, rotatedAt);
+}
+
 export function verifyActivePortableHandoffProvenance(
   credential: CredentialBinding & { provenance?: ActivePortableHandoffProvenance },
   config: AgentHostConfig

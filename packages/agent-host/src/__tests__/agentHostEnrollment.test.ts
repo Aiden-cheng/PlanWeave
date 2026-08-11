@@ -10,6 +10,7 @@ import {
   AgentHostEnrollmentService,
   type AgentHostEnrollmentExchange
 } from "../enrollment/enrollmentService.js";
+import type { HostEnrollmentRequest } from "@planweave-ai/agent-host-protocol";
 import {
   HttpAgentHostEnrollmentExchange,
   resolveHostEnrollmentEndpoint
@@ -70,7 +71,8 @@ describe("Agent Host enrollment and protected credentials", () => {
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-001",
         workspaceId: "workspace-001",
-        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }))
     };
     const active = await new AgentHostEnrollmentService(config, store, exchange).enroll(
@@ -81,6 +83,36 @@ describe("Agent Host enrollment and protected credentials", () => {
     expect((await store.read())?.pending).toBeUndefined();
     expect((await stat(join(config.dataDirectory, "..", "credentials"))).mode & 0o777).toBe(0o700);
     expect((await stat(store.path)).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps one installation UUID while replacing the prior Host credential generation", async () => {
+    const { config, store } = await setup();
+    const requests: HostEnrollmentRequest[] = [];
+    const exchange: AgentHostEnrollmentExchange = {
+      exchange: async (request) => {
+        requests.push(request);
+        return {
+          type: "host.enrollment.completed",
+          protocolVersion: 1,
+          enrollmentAttemptId: request.enrollmentAttemptId,
+          hostId: requests.length === 1 ? "host-generation-one" : "host-generation-two",
+          credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
+        };
+      }
+    };
+    const service = new AgentHostEnrollmentService(config, store, exchange);
+    await service.enroll(secret("pw_enroll_"));
+    await service.enroll(secret("pw_enroll_"), { replaceExisting: true });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.installationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
+    expect(requests[1]?.installationId).toBe(requests[0]?.installationId);
+    expect(requests[0]?.supersedesHostId).toBeUndefined();
+    expect(requests[1]?.supersedesHostId).toBe("host-generation-one");
+    expect((await stat(join(config.dataDirectory, "installation.json"))).mode & 0o777).toBe(0o600);
   });
 
   it("retains pending state after interruption and resumes the exact attempt/token", async () => {
@@ -102,7 +134,8 @@ describe("Agent Host enrollment and protected credentials", () => {
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-resumed",
         workspaceId: "workspace-001",
-        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       }))
     };
     await new AgentHostEnrollmentService(config, store, resumed).resume();
@@ -126,7 +159,8 @@ describe("Agent Host enrollment and protected credentials", () => {
           enrollmentAttemptId: "another-attempt",
           hostId: "host-mismatch",
           workspaceId: "workspace-001",
-          credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+          credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
         })
       );
     });
@@ -188,7 +222,8 @@ describe("Agent Host enrollment and protected credentials", () => {
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-original",
         workspaceId: "workspace-001",
-        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString()
+        credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     };
     const service = new AgentHostEnrollmentService(config, store, successful);

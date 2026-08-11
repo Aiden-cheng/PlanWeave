@@ -1,4 +1,5 @@
 import {
+  hostCredentialPolicySchema,
   hostCredentialTokenSchema,
   hostEnrollmentCodeSchema,
   opaqueIdentifierSchema
@@ -22,7 +23,9 @@ export const pendingHostEnrollmentSchema = z.discriminatedUnion("kind", [
       ...pendingBase,
       kind: z.literal("host_enrollment_code"),
       enrollmentCode: hostEnrollmentCodeSchema,
-      provenance: pendingPortableHandoffProvenanceSchema.optional()
+      provenance: pendingPortableHandoffProvenanceSchema.optional(),
+      expectedCredentialExpiresAt: z.string().datetime().optional(),
+      expectedCredentialPolicy: hostCredentialPolicySchema.optional()
     })
     .strict(),
   z
@@ -42,8 +45,17 @@ export const activeHostCredentialSchema = z
     credentialToken: hostCredentialTokenSchema,
     issuedAt: z.string().datetime(),
     expiresAt: z.string().datetime(),
+    credentialPolicy: hostCredentialPolicySchema.optional(),
     revokedAt: z.string().datetime().optional(),
     provenance: activePortableHandoffProvenanceSchema.optional()
+  })
+  .strict();
+
+export const pendingHostCredentialRotationSchema = z
+  .object({
+    rotationId: opaqueIdentifierSchema,
+    credentialToken: hostCredentialTokenSchema,
+    createdAt: z.string().datetime()
   })
   .strict();
 
@@ -51,17 +63,23 @@ export const hostCredentialDocumentSchema = z
   .object({
     version: z.literal("agent-host-credentials/v1"),
     active: activeHostCredentialSchema.optional(),
-    pending: pendingHostEnrollmentSchema.optional()
+    pending: pendingHostEnrollmentSchema.optional(),
+    rotation: pendingHostCredentialRotationSchema.optional()
   })
   .strict()
   .refine(
     (value) => value.active !== undefined || value.pending !== undefined,
     "Credential document must contain active or pending state."
+  )
+  .refine(
+    (value) => value.rotation === undefined || value.active?.credentialPolicy !== undefined,
+    "Credential rotation requires one renewable active credential."
   );
 
 export type PendingHostEnrollment = z.infer<typeof pendingHostEnrollmentSchema>;
 export type ActiveHostCredential = z.infer<typeof activeHostCredentialSchema>;
 export type HostCredentialDocument = z.infer<typeof hostCredentialDocumentSchema>;
+export type PendingHostCredentialRotation = z.infer<typeof pendingHostCredentialRotationSchema>;
 
 /** Stable per-host instance key for background services and durable identity when workspace scope is absent. */
 export function credentialInstanceId(

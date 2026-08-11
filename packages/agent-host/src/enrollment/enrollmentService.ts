@@ -18,6 +18,7 @@ import {
   portableHandoffPendingWorkspaceId
 } from "../credentials/handoffProvenance.js";
 import type { HttpAgentHostSetupCodeRedeem } from "./httpSetupCodeRedeem.js";
+import { ensureHostInstallationIdentity } from "../state/hostInstallationIdentity.js";
 
 export interface AgentHostEnrollmentExchange {
   exchange(request: HostEnrollmentRequest, signal?: AbortSignal): Promise<HostEnrollmentCompleted>;
@@ -74,7 +75,9 @@ export class AgentHostEnrollmentService {
       enrollmentCode: handoff.enrollmentCode,
       credentialToken: `pw_host_${randomBytes(32).toString("base64url")}`,
       createdAt: acceptedAt.toISOString(),
-      provenance
+      provenance,
+      expectedCredentialExpiresAt: handoff.credentialExpiresAt,
+      expectedCredentialPolicy: handoff.credentialPolicy
     };
     if (
       (portableHandoffPendingWorkspaceId(provenance, this.config) ?? null) !==
@@ -110,6 +113,15 @@ export class AgentHostEnrollmentService {
     pending: Extract<PendingHostEnrollment, { kind: "host_enrollment_code" }>,
     signal?: AbortSignal
   ): Promise<ActiveHostCredential> {
+    const document = await this.credentials.read();
+    if (
+      !document?.pending ||
+      document.pending.kind !== "host_enrollment_code" ||
+      document.pending.enrollmentAttemptId !== pending.enrollmentAttemptId
+    ) {
+      throw new Error("agent_host_enrollment_not_pending");
+    }
+    const installationId = await ensureHostInstallationIdentity(this.config.dataDirectory);
     const portableWorkspaceId = pending.provenance
       ? portableHandoffPendingWorkspaceId(pending.provenance, this.config)
       : undefined;
@@ -129,6 +141,8 @@ export class AgentHostEnrollmentService {
           protocolVersion: 1,
           enrollmentCode: pending.enrollmentCode,
           enrollmentAttemptId: pending.enrollmentAttemptId,
+          installationId,
+          ...(document.active ? { supersedesHostId: document.active.hostId } : {}),
           credentialToken: pending.credentialToken,
           displayName: this.config.host.displayName,
           capabilities: this.config.host.capabilities,

@@ -44,7 +44,7 @@ function encodedHandoff(
   const serverOrigin = input.serverOrigin ?? "http://192.168.1.8:4317";
   return serializeAgentHostSetupHandoff(
     agentHostSetupHandoffSchema.parse({
-      version: "agent-host-setup/v1",
+      version: "agent-host-setup/v2",
       endpoint: {
         topology: serverOrigin.includes("127.0.0.1") ? "loopback_http" : "lan_http",
         serverOrigin,
@@ -54,18 +54,18 @@ function encodedHandoff(
       workspaceId: input.workspaceId ?? "workspace-1",
       enrollmentCode: input.enrollmentCode ?? `pw_enroll_${"a".repeat(43)}`,
       expiresAt: "2030-01-01T00:00:00.000Z",
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
       display: { workspaceName: "Studio", serverName: "Private server" }
     })
   );
 }
 
-function encodedFleetHandoff(
-  input: { enrollmentCode?: string; serverOrigin?: string } = {}
-) {
+function encodedFleetHandoff(input: { enrollmentCode?: string; serverOrigin?: string } = {}) {
   const serverOrigin = input.serverOrigin ?? "http://192.168.1.8:4317";
   return serializeAgentHostSetupHandoff(
     agentHostSetupHandoffSchema.parse({
-      version: "agent-host-setup/v1",
+      version: "agent-host-setup/v2",
       endpoint: {
         topology: serverOrigin.includes("127.0.0.1") ? "loopback_http" : "lan_http",
         serverOrigin,
@@ -74,6 +74,8 @@ function encodedFleetHandoff(
       },
       enrollmentCode: input.enrollmentCode ?? `pw_enroll_${"a".repeat(43)}`,
       expiresAt: "2030-01-01T00:00:00.000Z",
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
       display: { workspaceName: "Owner fleet", serverName: "Private server" }
     })
   );
@@ -108,9 +110,10 @@ describe("portable Agent Host setup", () => {
   it("derives fleet instance paths without workspace binding", async () => {
     const home = await mkdtemp(join(tmpdir(), "planweave-portable-fleet-"));
     directories.push(home);
-    const handoff = (
-      await import("@planweave-ai/agent-host-protocol")
-    ).parseAgentHostSetupHandoff(encodedFleetHandoff(), new Date("2029-01-01"));
+    const handoff = (await import("@planweave-ai/agent-host-protocol")).parseAgentHostSetupHandoff(
+      encodedFleetHandoff(),
+      new Date("2029-01-01")
+    );
     const instanceKey = handoffInstanceKey(handoff);
     expect(instanceKey.startsWith("fleet-")).toBe(true);
     const paths = resolveAgentHostDefaultPaths(instanceKey, home);
@@ -291,7 +294,8 @@ describe("portable Agent Host setup", () => {
             enrollmentAttemptId: parsed.enrollmentAttemptId,
             hostId: "host-portable-operator",
             workspaceId: "workspace-portable-operator",
-            credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+            credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+            credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
           })
         );
       });
@@ -434,7 +438,8 @@ describe("portable Agent Host setup", () => {
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-existing-active",
         workspaceId,
-        credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+        credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     }).enroll(`pw_enroll_${"c".repeat(43)}`);
 
@@ -489,7 +494,8 @@ describe("portable Agent Host setup", () => {
             enrollmentAttemptId: parsed.enrollmentAttemptId,
             hostId: enrollments === 1 ? "host-recover-original" : "host-recover-replacement",
             workspaceId: "workspace-portable-recover",
-            credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+            credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+            credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
           })
         );
       });
@@ -639,7 +645,8 @@ describe("portable Agent Host setup", () => {
             enrollmentAttemptId: parsed.enrollmentAttemptId,
             hostId: "host-pending-restart",
             workspaceId,
-            credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+            credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+            credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
           })
         );
       });
@@ -698,7 +705,8 @@ describe("portable Agent Host setup", () => {
         enrollmentAttemptId: request.enrollmentAttemptId,
         hostId: "host-replacement",
         workspaceId,
-        credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+        credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+        credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
       })
     }).enroll(`pw_enroll_${"h".repeat(43)}`);
     await expect(

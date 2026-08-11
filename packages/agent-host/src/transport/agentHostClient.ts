@@ -9,6 +9,7 @@ import {
   type ServerEvent
 } from "../protocol.js";
 import { HttpArtifactClient } from "../artifacts/httpArtifactTransfer.js";
+import type { HostCredentialRenewalPort } from "../credentials/credentialRenewal.js";
 import {
   AgentHostExecutionError,
   AgentHostSessionLoadError,
@@ -39,6 +40,7 @@ export type AgentHostClientOptions = {
   /** Legacy collaboration workspace scope; omitted for server-scoped fleet enrollment. */
   workspaceId?: string;
   token: string;
+  credentialRenewal?: HostCredentialRenewalPort;
   capabilities: readonly string[];
   capacity: number;
   readiness: HostReadinessObservation;
@@ -99,7 +101,8 @@ function executionFailure(error: unknown, aborted: boolean) {
 export class AgentHostClient implements HostTransport {
   private readonly baseUrl: URL;
   private readonly capabilities: string[];
-  private readonly artifacts: HttpArtifactClient;
+  private artifacts: HttpArtifactClient;
+  private token: string;
   private readonly active = new Map<number, ActiveExecution>();
   private readonly runs = new Set<Promise<void>>();
   private socket?: WebSocket;
@@ -117,6 +120,7 @@ export class AgentHostClient implements HostTransport {
   private welcomed = false;
   private stopped = true;
   private serverClockOffsetMs = 0;
+  private credentialRenewalInFlight?: Promise<void>;
 
   constructor(private readonly options: AgentHostClientOptions) {
     this.baseUrl = new URL(options.serverUrl);
@@ -134,12 +138,17 @@ export class AgentHostClient implements HostTransport {
     this.limits = parseHostTransportLimits(options.limits);
     this.reconnect = parseReconnectBackoffOptions(options.reconnect);
     this.capabilities = parseAgentHostCapabilities(options.capabilities);
-    this.artifacts = new HttpArtifactClient({
+    this.token = options.token;
+    this.artifacts = this.createArtifactClient(this.token);
+  }
+
+  private createArtifactClient(token: string): HttpArtifactClient {
+    return new HttpArtifactClient({
       baseUrl: this.baseUrl,
-      hostId: options.hostId,
-      workspaceId: options.workspaceId,
-      token: options.token,
-      request: options.request
+      hostId: this.options.hostId,
+      workspaceId: this.options.workspaceId,
+      token,
+      request: this.options.request
     });
   }
 
@@ -196,7 +205,7 @@ export class AgentHostClient implements HostTransport {
       url.searchParams.set("workspaceId", this.options.workspaceId);
     }
     const socket = new WebSocket(url, {
-      headers: { Authorization: `Bearer ${this.options.token}` },
+      headers: { Authorization: `Bearer ${this.token}` },
       maxPayload: this.limits.maxPayloadBytes,
       ca: this.options.ca
     });
@@ -286,6 +295,7 @@ export class AgentHostClient implements HostTransport {
         this.serverClockOffsetMs = Date.parse(event.serverTime) - this.clock.now().getTime();
         this.abandonExpiredExecutions();
         this.startHeartbeat(event.heartbeatIntervalMs);
+        this.checkCredentialRenewal();
         this.flushEvents();
         this.pump();
         return;
@@ -342,6 +352,7 @@ export class AgentHostClient implements HostTransport {
       this.abandonExpiredExecutions();
       this.options.state.queueHeartbeat(this.options.state.activeLeases(), this.options.readiness);
       this.flushEvents();
+      this.checkCredentialRenewal();
       this.heartbeatTimer = this.clock.setTimeout(send, intervalMs);
     };
     this.heartbeatTimer = this.clock.setTimeout(send, 0);
@@ -494,6 +505,32 @@ export class AgentHostClient implements HostTransport {
       reason: "reason" in status ? status.reason : undefined
     });
     for (const listener of this.listeners) listener(status);
+  }
+
+  private checkCredentialRenewal(): void {
+    if (!this.options.credentialRenewal || this.credentialRenewalInFlight) return;
+    const operation = this.options.credentialRenewal
+      .poll()
+      .then((credential) => {
+        if (!credential || this.stopped) return;
+        this.token = credential.credentialToken;
+        this.artifacts = this.createArtifactClient(this.token);
+        this.socket?.close(1000, "credential rotated");
+      })
+      .catch((error: unknown) => {
+        this.options.logger?.log({
+          level: "warn",
+          event: "host_credential_renewal_failed",
+          state: this.currentStatus.state,
+          reason: error instanceof Error ? error.message.slice(0, 256) : "credential_renewal_failed"
+        });
+      })
+      .finally(() => {
+        if (this.credentialRenewalInFlight === operation) {
+          this.credentialRenewalInFlight = undefined;
+        }
+      });
+    this.credentialRenewalInFlight = operation;
   }
 
   private async waitBounded(operation: Promise<void>): Promise<void> {

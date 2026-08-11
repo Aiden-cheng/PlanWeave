@@ -1,15 +1,22 @@
 import { randomBytes } from "node:crypto";
 import { lstat, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { HostEnrollmentCompleted } from "@planweave-ai/agent-host-protocol";
+import type {
+  HostCredentialRotationResponse,
+  HostEnrollmentCompleted
+} from "@planweave-ai/agent-host-protocol";
 import type { SetupCodeRedeemHostResponse } from "@planweave-ai/collaboration-protocol/setup";
 import {
   hostCredentialDocumentSchema,
   type ActiveHostCredential,
   type HostCredentialDocument,
+  type PendingHostCredentialRotation,
   type PendingHostEnrollment
 } from "./credentialContract.js";
-import { consumePortableHandoffProvenance } from "./handoffProvenance.js";
+import {
+  consumePortableHandoffProvenance,
+  rotatePortableHandoffProvenance
+} from "./handoffProvenance.js";
 import {
   createPrivateStorageSecurity,
   type PrivateStorageSecurityPort
@@ -112,12 +119,26 @@ export class FileHostCredentialStore {
     if (Date.parse(response.credentialExpiresAt) <= now.getTime()) {
       throw new Error("agent_host_enrollment_response_expired");
     }
+    if (
+      current.pending.expectedCredentialExpiresAt !== undefined &&
+      current.pending.expectedCredentialExpiresAt !== response.credentialExpiresAt
+    ) {
+      throw new Error("agent_host_enrollment_response_mismatch");
+    }
+    if (
+      current.pending.expectedCredentialPolicy !== undefined &&
+      JSON.stringify(current.pending.expectedCredentialPolicy) !==
+        JSON.stringify(response.credentialPolicy)
+    ) {
+      throw new Error("agent_host_enrollment_response_mismatch");
+    }
     const active: ActiveHostCredential = {
       hostId: response.hostId,
       workspaceId: response.workspaceId,
       credentialToken: current.pending.credentialToken,
       issuedAt: now.toISOString(),
       expiresAt: response.credentialExpiresAt,
+      credentialPolicy: response.credentialPolicy,
       ...(current.pending.provenance
         ? {
             provenance: consumePortableHandoffProvenance(
@@ -172,13 +193,74 @@ export class FileHostCredentialStore {
     return active;
   }
 
+  async beginRotation(rotation: PendingHostCredentialRotation): Promise<void> {
+    const current = await this.read();
+    if (!current?.active?.credentialPolicy || current.active.revokedAt) {
+      throw new Error("agent_host_credential_renewal_not_configured");
+    }
+    if (current.rotation) {
+      if (
+        current.rotation.rotationId !== rotation.rotationId ||
+        current.rotation.credentialToken !== rotation.credentialToken
+      ) {
+        throw new Error("agent_host_credential_rotation_conflict");
+      }
+      return;
+    }
+    await this.write({ ...current, rotation });
+  }
+
+  async commitRotation(
+    response: HostCredentialRotationResponse,
+    now = new Date()
+  ): Promise<ActiveHostCredential> {
+    const current = await this.read();
+    if (
+      !current?.active?.credentialPolicy ||
+      !current.rotation ||
+      current.active.hostId !== response.hostId ||
+      current.rotation.rotationId !== response.rotationId
+    ) {
+      throw new Error("agent_host_credential_rotation_response_mismatch");
+    }
+    if (Date.parse(response.credentialExpiresAt) <= now.getTime()) {
+      throw new Error("agent_host_credential_rotation_response_expired");
+    }
+    const nextCredential: ActiveHostCredential = {
+      hostId: current.active.hostId,
+      workspaceId: current.active.workspaceId,
+      credentialToken: current.rotation.credentialToken,
+      issuedAt: now.toISOString(),
+      expiresAt: response.credentialExpiresAt,
+      credentialPolicy: current.active.credentialPolicy,
+      ...(current.active.provenance
+        ? {
+            provenance: rotatePortableHandoffProvenance(
+              current.active.provenance,
+              {
+                hostId: current.active.hostId,
+                workspaceId: current.active.workspaceId,
+                credentialToken: current.rotation.credentialToken,
+                issuedAt: now.toISOString(),
+                expiresAt: response.credentialExpiresAt
+              },
+              now
+            )
+          }
+        : {})
+    };
+    await this.write({ version: "agent-host-credentials/v1", active: nextCredential });
+    return nextCredential;
+  }
+
   async markRevoked(revokedAt = new Date()): Promise<void> {
     const current = await this.read();
     if (!current?.active) throw new Error("agent_host_credential_unavailable");
     await this.write({
       version: "agent-host-credentials/v1",
       active: { ...current.active, revokedAt: revokedAt.toISOString() },
-      pending: current.pending
+      pending: current.pending,
+      rotation: current.rotation
     });
   }
 

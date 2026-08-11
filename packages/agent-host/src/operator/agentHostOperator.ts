@@ -9,6 +9,7 @@ import {
   type AgentHostComposition
 } from "../composition/agentHostComposition.js";
 import { FileHostCredentialStore } from "../credentials/fileCredentialStore.js";
+import { AgentHostCredentialRenewal } from "../credentials/credentialRenewal.js";
 import { credentialInstanceId } from "../credentials/credentialContract.js";
 import {
   pendingProvenanceMatchesHandoff,
@@ -606,8 +607,9 @@ export class AgentHostOperator {
     const config = await loadAgentHostConfig(configPath);
     await realpath(config.workspaceRoot);
     await mkdir(config.dataDirectory, { recursive: true, mode: 0o700 });
-    await credentialStore(config).read();
-    const credential = await credentialStore(config).requireUsable();
+    const credentials = credentialStore(config);
+    await credentials.read();
+    const credential = await credentials.requireUsable();
     const readiness = await observeHostReadiness(
       config,
       process.env,
@@ -650,6 +652,15 @@ export class AgentHostOperator {
         hostId: credential.hostId,
         workspaceId: credential.workspaceId,
         token: credential.credentialToken,
+        ...(credential.credentialPolicy
+          ? {
+              credentialRenewal: new AgentHostCredentialRenewal(
+                transportOrigin(config.coordinator.url),
+                credentials,
+                { request: trust.request }
+              )
+            }
+          : {}),
         capabilities: config.host.capabilities,
         capacity: config.host.capacity,
         readiness,

@@ -42,7 +42,7 @@ async function setup(): Promise<{
   const directory = await mkdtemp(join(tmpdir(), "planweave-handoff-provenance-"));
   directories.push(directory);
   const handoff = agentHostSetupHandoffSchema.parse({
-    version: "agent-host-setup/v1",
+    version: "agent-host-setup/v2",
     endpoint: {
       topology: "lan_http",
       serverOrigin: "http://192.168.1.8:4317",
@@ -52,6 +52,8 @@ async function setup(): Promise<{
     workspaceId: "workspace-portable",
     enrollmentCode: secret("pw_enroll_"),
     expiresAt: "2030-01-01T00:00:00.000Z",
+    credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+    credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
     display: { workspaceName: "Studio", serverName: "Private server" }
   });
   const config = parseAgentHostConfig({
@@ -84,7 +86,7 @@ async function setupFleet(): Promise<{
   const directory = await mkdtemp(join(tmpdir(), "planweave-handoff-fleet-"));
   directories.push(directory);
   const handoff = agentHostSetupHandoffSchema.parse({
-    version: "agent-host-setup/v1",
+    version: "agent-host-setup/v2",
     endpoint: {
       topology: "lan_http",
       serverOrigin: "http://192.168.1.8:4317",
@@ -93,6 +95,8 @@ async function setupFleet(): Promise<{
     },
     enrollmentCode: secret("pw_enroll_"),
     expiresAt: "2030-01-01T00:00:00.000Z",
+    credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+    credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
     display: { workspaceName: "Owner fleet", serverName: "Private server" }
   });
   const config = parseAgentHostConfig({
@@ -127,7 +131,8 @@ function successfulExchange(
       enrollmentAttemptId: request.enrollmentAttemptId,
       hostId,
       workspaceId,
-      credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     })
   };
 }
@@ -139,15 +144,16 @@ function successfulFleetExchange(hostId = "host-fleet"): AgentHostEnrollmentExch
       protocolVersion: 1,
       enrollmentAttemptId: request.enrollmentAttemptId,
       hostId,
-      credentialExpiresAt: "2030-01-01T00:00:00.000Z"
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" }
     })
   };
 }
 
 describe("Agent Host portable handoff enrollment provenance", () => {
-  it("locks the persisted v1 canonical digest vectors", () => {
+  it("locks the persisted v2 canonical digest vectors", () => {
     const handoff = agentHostSetupHandoffSchema.parse({
-      version: "agent-host-setup/v1",
+      version: "agent-host-setup/v2",
       endpoint: {
         topology: "lan_http",
         serverOrigin: "http://192.168.1.8:4317",
@@ -157,6 +163,8 @@ describe("Agent Host portable handoff enrollment provenance", () => {
       workspaceId: "workspace-portable",
       enrollmentCode: `pw_enroll_${"a".repeat(43)}`,
       expiresAt: "2030-01-01T00:00:00.000Z",
+      credentialExpiresAt: "2030-06-30T00:00:00.000Z",
+      credentialPolicy: { lifetimeDays: 180, renewal: "automatic" },
       display: { workspaceName: "Studio", serverName: "Private server" }
     });
     const pending = createPendingPortableHandoffProvenance(
@@ -164,10 +172,10 @@ describe("Agent Host portable handoff enrollment provenance", () => {
       new Date("2029-01-01T00:00:00.000Z")
     );
     expect(pending.handoffDigest).toBe(
-      "64011fff3720ebafe2ed0f924ef957a14282c450e23066270e55d75be6d98dd0"
+      "0afa289e3966cd9d1f733863b4a0af1d9142d8bf2ae10da0a25c2d4785d30b8c"
     );
     expect(pending.endpointWorkspaceBindingDigest).toBe(
-      "738f003836ffb3276dab462a2006f9eac576b09ee1cfafb16acbe1cf8adaa36a"
+      "004c9a2a466c46d5d815332767f3d2b893ab04e22185b5303ba85dd7ec9ef03f"
     );
     const active = consumePortableHandoffProvenance(
       pending,
@@ -181,7 +189,7 @@ describe("Agent Host portable handoff enrollment provenance", () => {
       new Date("2029-01-01T00:00:01.000Z")
     );
     expect(active.credentialBindingDigest).toBe(
-      "6c2d4e08bb412e07e082f2c5ab9913a2337a3534f8aeee98f1b6230e04884e22"
+      "ce0b443060b4740ee269019a15e1bfaacabc4db52b3bde0ab05bdb7fa5102bd3"
     );
   });
 
