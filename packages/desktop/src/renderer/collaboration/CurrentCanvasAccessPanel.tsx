@@ -3,6 +3,7 @@ import type {
   CurrentCanvasAccessView
 } from "@planweave-ai/collaboration-protocol/access/control";
 import { LockKeyholeIcon, UsersRoundIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
 import type { CurrentCanvasVisibilityScope } from "../hooks/useCurrentCanvasAccess";
@@ -12,6 +13,7 @@ export type CurrentCanvasAccessPanelProps = {
   loading: boolean;
   error: string | null;
   busy: boolean;
+  scopeSelector?: ReactNode;
   t: ReturnType<typeof createTranslator>;
   onRefresh: () => Promise<void>;
   onUpdateVisibility: (
@@ -96,7 +98,7 @@ function CapabilityState({
 }) {
   return (
     <li
-      className="flex min-w-0 items-start gap-2.5 border-b border-border/50 px-1 py-2.5 text-xs last:border-b-0"
+      className="flex min-w-0 items-start gap-2.5 px-1 py-2.5 text-xs"
       data-testid="canvas-access-capability"
     >
       <span
@@ -145,9 +147,7 @@ function CanvasVisibilitySelector({
   return (
     <div className="py-1" data-testid="canvas-access-canvas-visibility">
       <div className="mb-3">
-        <div className="text-sm font-semibold text-text-strong">
-          {t("accessCurrentCanvasVisibility")}
-        </div>
+        <div className="text-sm font-semibold text-text-strong">{t("accessCanvasVisibility")}</div>
         <div className="mt-1 text-xs leading-5 text-muted-foreground">
           {t("accessCanvasVisibilityHint")}
         </div>
@@ -155,7 +155,7 @@ function CanvasVisibilitySelector({
       <div
         className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         role="radiogroup"
-        aria-label={t("accessCurrentCanvasVisibility")}
+        aria-label={t("accessCanvasVisibility")}
       >
         {choices.map((choice) => {
           const selected = visibility === choice.value;
@@ -202,41 +202,13 @@ export function CurrentCanvasAccessPanel({
   loading,
   error,
   busy,
+  scopeSelector,
   t,
   onRefresh,
   onUpdateVisibility
 }: CurrentCanvasAccessPanelProps) {
-  if (!view && !loading && !error) return null;
-  if (!view) {
-    return (
-      <section
-        className="border-t border-border/70 py-7"
-        data-testid="canvas-access-panel"
-        aria-labelledby="canvas-access-title"
-      >
-        <div className="px-1 pb-5">
-          <h2
-            id="canvas-access-title"
-            className="text-base font-semibold tracking-tight text-text-strong"
-          >
-            {t("accessTitle")}
-          </h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-            {t("accessDescription")}
-          </p>
-        </div>
-        <div
-          className="border-t border-border/60 px-1 py-5 text-sm text-muted-foreground"
-          role="status"
-        >
-          {loading ? t("accessLoading") : (error ?? t("accessUnavailable"))}
-        </div>
-      </section>
-    );
-  }
-
-  const { project, canvas } = view;
-  const canvasDisabledReason = canvas.disabledReason ?? "capability_denied";
+  if (!scopeSelector && !view && !loading && !error) return null;
+  const canvasDisabledReason = view?.canvas.disabledReason ?? "capability_denied";
   return (
     <section
       className="min-w-0 border-t border-border/70 py-7"
@@ -251,12 +223,7 @@ export function CurrentCanvasAccessPanel({
           >
             {t("accessTitle")}
           </h2>
-          <div className="mt-0.5 text-xs text-muted-foreground" data-testid="canvas-access-role">
-            {t("accessEffectiveRole")}: {t("accessProjectScope")}{" "}
-            {roleLabel(project.effectiveRole, t)} · {t("accessCanvasScope")}{" "}
-            {roleLabel(canvas.effectiveRole, t)}
-          </div>
-          <p className="mt-1 max-w-3xl text-[11px] leading-4 text-muted-foreground">
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
             {t("accessDescription")}
           </p>
         </div>
@@ -275,7 +242,9 @@ export function CurrentCanvasAccessPanel({
         </div>
       </div>
 
-      {error ? (
+      {scopeSelector}
+
+      {view && error ? (
         <div
           className="mx-1 mb-4 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-xs text-destructive"
           role="alert"
@@ -284,56 +253,71 @@ export function CurrentCanvasAccessPanel({
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-8 border-t border-border/60 px-1 py-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] xl:gap-0">
-        <div
-          className="flex min-w-0 flex-col gap-3"
-          data-testid="canvas-access-visibility-controls"
-        >
-          <CanvasVisibilitySelector
-            visibility={view.canvasVisibility}
-            allowed={canvas.capabilities.visibility}
-            reason={canvasDisabledReason}
-            busy={busy}
-            t={t}
-            onUpdate={onUpdateVisibility}
-          />
-        </div>
-
-        <div className="min-w-0 border-t border-border/60 pt-5 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0">
-          <div className="border-b border-border/60 px-1 pb-3 text-xs font-semibold text-text-strong">
-            {t("accessCapabilities")}
+      {!view ? (
+        loading || error ? (
+          <div className="px-1 py-3 text-sm text-muted-foreground" role="status">
+            {loading ? t("accessLoading") : error ? errorLabel(error, t) : t("accessUnavailable")}
           </div>
-          <ul
-            className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1"
-            aria-label={t("accessCapabilities")}
-          >
-            <CapabilityState
-              label={t("accessCapabilityWrite")}
-              enabled={canvas.capabilities.persistent_canvas_command}
-              reason={canvasDisabledReason}
-              t={t}
-            />
-            <CapabilityState
-              label={t("accessCapabilityAssignment")}
-              enabled={canvas.capabilities.assignment}
-              reason={canvasDisabledReason}
-              t={t}
-            />
-            <CapabilityState
-              label={t("accessCapabilityComment")}
-              enabled={canvas.capabilities.comment}
-              reason={canvasDisabledReason}
-              t={t}
-            />
-            <CapabilityState
-              label={t("accessCapabilityAdministration")}
-              enabled={canvas.capabilities.administration}
-              reason={canvasDisabledReason}
-              t={t}
-            />
-          </ul>
-        </div>
-      </div>
+        ) : null
+      ) : (
+        <>
+          <div className="px-1 pb-4 text-xs text-muted-foreground" data-testid="canvas-access-role">
+            {t("accessEffectiveRole")}: {t("accessProjectScope")}{" "}
+            {roleLabel(view.project.effectiveRole, t)} · {t("accessCanvasScope")}{" "}
+            {roleLabel(view.canvas.effectiveRole, t)}
+          </div>
+          <div className="grid min-w-0 gap-8 px-1 pb-5 pt-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] xl:gap-0">
+            <div
+              className="flex min-w-0 flex-col gap-3"
+              data-testid="canvas-access-visibility-controls"
+            >
+              <CanvasVisibilitySelector
+                visibility={view.canvasVisibility}
+                allowed={view.canvas.capabilities.visibility}
+                reason={canvasDisabledReason}
+                busy={busy}
+                t={t}
+                onUpdate={onUpdateVisibility}
+              />
+            </div>
+
+            <div className="min-w-0 pt-5 xl:border-l xl:border-border/60 xl:pl-8 xl:pt-0">
+              <div className="px-1 pb-2 text-xs font-semibold text-text-strong">
+                {t("accessCapabilities")}
+              </div>
+              <ul
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1"
+                aria-label={t("accessCapabilities")}
+              >
+                <CapabilityState
+                  label={t("accessCapabilityWrite")}
+                  enabled={view.canvas.capabilities.persistent_canvas_command}
+                  reason={canvasDisabledReason}
+                  t={t}
+                />
+                <CapabilityState
+                  label={t("accessCapabilityAssignment")}
+                  enabled={view.canvas.capabilities.assignment}
+                  reason={canvasDisabledReason}
+                  t={t}
+                />
+                <CapabilityState
+                  label={t("accessCapabilityComment")}
+                  enabled={view.canvas.capabilities.comment}
+                  reason={canvasDisabledReason}
+                  t={t}
+                />
+                <CapabilityState
+                  label={t("accessCapabilityAdministration")}
+                  enabled={view.canvas.capabilities.administration}
+                  reason={canvasDisabledReason}
+                  t={t}
+                />
+              </ul>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }

@@ -1375,6 +1375,9 @@ export const enCatalog = {
   peopleWorkspaceRoleUnknown: "Role unknown",
   peopleWorkspaceMembershipInactive: "membership inactive",
   accessTitle: "Canvas access",
+  accessScopeLabel: "Project and canvas",
+  accessScopeEmpty: "No accessible canvases",
+  accessScopeLoading: "Loading projects and canvases…",
   accessLoading: "Loading canvas access…",
   accessUnavailable: "Canvas access is unavailable until this Workspace is connected.",
   accessEffectiveRole: "Effective role",
@@ -1384,11 +1387,10 @@ export const enCatalog = {
   accessRoleNone: "No access",
   accessProjectVisibility: "Project visibility",
   accessCanvasVisibility: "Canvas visibility",
-  accessCurrentCanvasVisibility: "Current canvas visibility",
   accessCanvasVisibilityHint:
-    "This canvas can override the project default. Keep it private, or open it to existing Workspace members.",
+    "Keep the selected canvas private, or open it to existing Workspace members.",
   accessDescription:
-    "Controls who can view or edit the selected canvas. Project visibility is the default; canvas visibility can override it.",
+    "Manage visibility, member permissions, and capabilities for the selected canvas.",
   accessVisibilityPrivate: "Private",
   accessVisibilityPrivateHint: "Only owners and explicitly granted members can access it",
   accessVisibilityShared: "Shared",

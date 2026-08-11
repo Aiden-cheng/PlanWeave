@@ -1290,6 +1290,9 @@ export const zhCnCatalog = {
   peopleWorkspaceRoleUnknown: "角色未知",
   peopleWorkspaceMembershipInactive: "成员关系未激活",
   accessTitle: "画布访问权限",
+  accessScopeLabel: "项目与画布",
+  accessScopeEmpty: "没有可访问的画布",
+  accessScopeLoading: "正在加载项目与画布…",
   accessLoading: "正在加载画布访问权限…",
   accessUnavailable: "连接此 Workspace 后才能读取画布访问权限。",
   accessEffectiveRole: "有效角色",
@@ -1299,11 +1302,8 @@ export const zhCnCatalog = {
   accessRoleNone: "无访问权限",
   accessProjectVisibility: "项目可见性",
   accessCanvasVisibility: "画布可见性",
-  accessCurrentCanvasVisibility: "当前画布可见性",
-  accessCanvasVisibilityHint:
-    "当前画布可以覆盖项目默认规则：保持私有，或向已加入 Workspace 的成员开放。",
-  accessDescription:
-    "控制谁能查看或编辑当前选中的画布。项目可见性是默认规则，画布可见性可以单独覆盖。",
+  accessCanvasVisibilityHint: "将所选画布保持私有，或向已加入 Workspace 的成员开放。",
+  accessDescription: "管理所选画布的可见性、成员权限与可用能力。",
   accessVisibilityPrivate: "私有",
   accessVisibilityPrivateHint: "仅所有者和被单独授权的成员可访问",
   accessVisibilityShared: "共享",

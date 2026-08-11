@@ -80,6 +80,7 @@ describe("CurrentCanvasAccessPanel", () => {
         loading={false}
         error={null}
         busy={false}
+        scopeSelector={<div data-testid="scope-selector-slot">Project / Canvas</div>}
         t={t}
         onRefresh={vi.fn()}
         onUpdateVisibility={onUpdateVisibility}
@@ -89,9 +90,10 @@ describe("CurrentCanvasAccessPanel", () => {
     expect(screen.getByTestId("canvas-access-role")).toHaveTextContent(
       "Effective role: project Owner · canvas Owner"
     );
-    expect(
-      screen.getByRole("radiogroup", { name: "Current canvas visibility" })
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-access-panel")).toContainElement(
+      screen.getByTestId("scope-selector-slot")
+    );
+    expect(screen.getByRole("radiogroup", { name: "Canvas visibility" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /Private/ })).not.toBeChecked();
     expect(screen.getByRole("radio", { name: /Shared/ })).toBeChecked();
     expect(screen.getAllByTestId("canvas-access-capability")).toHaveLength(4);
@@ -104,6 +106,7 @@ describe("CurrentCanvasAccessPanel", () => {
     );
     for (const capability of screen.getAllByTestId("canvas-access-capability")) {
       expect(capability).not.toHaveClass("rounded-lg", "border");
+      expect(capability).not.toHaveClass("border-b");
     }
     expect(screen.queryByTestId("canvas-access-people")).not.toBeInTheDocument();
     expect(screen.queryByTestId("canvas-access-project-private")).not.toBeInTheDocument();

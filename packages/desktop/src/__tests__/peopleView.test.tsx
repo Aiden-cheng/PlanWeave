@@ -309,7 +309,6 @@ describe("PeopleView", () => {
     render(
       <PeopleView
         api={api}
-        canvasId="canvas-1"
         t={createTranslator("en")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
@@ -458,7 +457,6 @@ describe("PeopleView", () => {
     render(
       <PeopleView
         api={api}
-        canvasId="canvas-1"
         t={createTranslator("en")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
@@ -573,7 +571,6 @@ describe("PeopleView", () => {
     render(
       <PeopleView
         api={api}
-        canvasId="canvas-1"
         t={createTranslator("zh-CN")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
@@ -771,7 +768,6 @@ describe("PeopleView", () => {
     render(
       <PeopleView
         api={api}
-        canvasId="canvas-1"
         t={createTranslator("en")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}
@@ -791,7 +787,6 @@ describe("PeopleView", () => {
     render(
       <PeopleView
         api={null}
-        canvasId="canvas-1"
         t={createTranslator("en")}
         collaborationScopeLayout={scopeLayout}
         onCollaborationScopeLayoutChange={onScopeLayoutChange}

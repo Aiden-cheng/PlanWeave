@@ -21,8 +21,8 @@ import {
 } from "../collaboration/CurrentCanvasAccessPanel";
 import { LocalCollaborationServerPanel } from "../collaboration/LocalCollaborationServerPanel";
 import { ContentAuthorityPanel } from "../collaboration/ContentAuthorityPanel";
+import { WorkspaceAccessScopeSelector } from "../collaboration/WorkspaceAccessScopeSelector";
 import { DeploymentConnectionCard } from "../settings/DeploymentConnectionCard";
-import { useCurrentCanvasAccess } from "../hooks/useCurrentCanvasAccess";
 import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 import {
   collaborationConnectionErrorMessage,
@@ -31,6 +31,7 @@ import {
 } from "../collaboration/formatCollaborationError";
 import type { DesktopUiSettings } from "../types";
 import type { DesktopServerExposureView } from "../../shared/deploymentExposure";
+import { useWorkspaceAccessScope } from "../hooks/useWorkspaceAccessScope";
 
 export type PeopleViewProps = {
   t: ReturnType<typeof createTranslator>;
@@ -39,7 +40,6 @@ export type PeopleViewProps = {
   api?: PlanWeaveCollaborationApi | null;
   /** Optional clipboard writer; defaults to navigator.clipboard. */
   copyText?: (text: string) => Promise<void>;
-  canvasId?: string | null;
   onContentReplicaReady?: (result: CollaborationContentBootstrapResult) => Promise<void>;
   onMembershipOutcome?: (outcome: { ok: boolean; message: string }) => void;
   collaborationScopeLayout: DesktopUiSettings["layout"]["collaborationScope"];
@@ -68,13 +68,12 @@ export function formatPeoplePanelError(
   return collaborationErrorMessage(error);
 }
 
-/** Workspace member administration with current-canvas access controls. */
+/** Workspace-wide member, device, and shared-content administration. */
 export function PeopleView({
   t,
   diagnosticsEnabled = false,
   api: apiProp,
   copyText = defaultCopyText,
-  canvasId = null,
   onContentReplicaReady,
   onMembershipOutcome,
   collaborationScopeLayout,
@@ -126,6 +125,11 @@ export function PeopleView({
   }, [status]);
 
   const sessionConnected = isCollaborationSessionConnected(status);
+  const workspaceAccessScope = useWorkspaceAccessScope({
+    api,
+    connectionKey: activeProfile?.profileId ?? null,
+    status
+  });
 
   useEffect(() => {
     if (sessionConnected) setReconnectError(null);
@@ -163,7 +167,6 @@ export function PeopleView({
     },
     [localHostingOpen, refreshCollaborationStatus]
   );
-  const currentCanvasAccess = useCurrentCanvasAccess({ api, canvasId, status });
   const formatPanelError = useCallback((error: unknown) => formatPeoplePanelError(t, error), [t]);
 
   // Subscribe only: the project shell owns the shared hub's active project/canvas binding.
@@ -186,9 +189,14 @@ export function PeopleView({
   const diagnosticReport = useMemo(
     () =>
       diagnosticsEnabled && status
-        ? buildCollaborationDiagnosticReport(status, undefined, snapshot, currentCanvasAccess.view)
+        ? buildCollaborationDiagnosticReport(
+            status,
+            undefined,
+            snapshot,
+            workspaceAccessScope.access.view
+          )
         : null,
-    [currentCanvasAccess.view, diagnosticsEnabled, snapshot, status]
+    [diagnosticsEnabled, snapshot, status, workspaceAccessScope.access.view]
   );
 
   const handleManageInvitations = useCallback(() => {
@@ -408,41 +416,57 @@ export function PeopleView({
                     reportMembership(ok, membershipResult(ok));
                     return ok;
                   }}
-                  onRefreshDetails={handleRefreshDetails}
                   renderMemberAccess={(member) => {
-                    if (currentCanvasAccess.loading && !currentCanvasAccess.view) {
+                    if (workspaceAccessScope.access.loading && !workspaceAccessScope.access.view) {
                       return <p className="text-xs text-muted-foreground">{t("accessLoading")}</p>;
                     }
-                    const person = currentCanvasAccess.view?.people.find(
+                    const person = workspaceAccessScope.access.view?.people.find(
                       (candidate) => candidate.humanPrincipalId === member.humanPrincipalId
                     );
-                    if (!currentCanvasAccess.view || !person) {
+                    if (!workspaceAccessScope.access.view || !person) {
                       return (
                         <p className="text-xs text-muted-foreground">
-                          {currentCanvasAccess.error ?? t("accessMemberUnavailable")}
+                          {workspaceAccessScope.access.error ?? t("accessMemberUnavailable")}
                         </p>
                       );
                     }
                     return (
                       <CurrentCanvasMemberAccess
-                        view={currentCanvasAccess.view}
+                        view={workspaceAccessScope.access.view}
                         person={person}
-                        busy={currentCanvasAccess.busy}
+                        busy={workspaceAccessScope.access.busy}
                         t={t}
-                        onGrant={currentCanvasAccess.grant}
-                        onRevoke={currentCanvasAccess.revoke}
+                        onGrant={workspaceAccessScope.access.grant}
+                        onRevoke={workspaceAccessScope.access.revoke}
                       />
                     );
                   }}
+                  onRefreshDetails={handleRefreshDetails}
                 />
                 <CurrentCanvasAccessPanel
-                  view={currentCanvasAccess.view}
-                  loading={currentCanvasAccess.loading}
-                  error={currentCanvasAccess.error}
-                  busy={currentCanvasAccess.busy}
+                  view={workspaceAccessScope.access.view}
+                  loading={workspaceAccessScope.access.loading}
+                  error={workspaceAccessScope.access.error}
+                  busy={workspaceAccessScope.access.busy || workspaceAccessScope.loading}
+                  scopeSelector={
+                    <WorkspaceAccessScopeSelector
+                      options={workspaceAccessScope.options}
+                      selectedKey={workspaceAccessScope.selectedKey}
+                      loading={workspaceAccessScope.loading}
+                      error={workspaceAccessScope.error}
+                      busy={workspaceAccessScope.access.busy}
+                      t={t}
+                      onSelect={workspaceAccessScope.select}
+                    />
+                  }
                   t={t}
-                  onRefresh={currentCanvasAccess.refresh}
-                  onUpdateVisibility={currentCanvasAccess.updateVisibility}
+                  onRefresh={async () => {
+                    await Promise.all([
+                      workspaceAccessScope.refreshOptions(),
+                      workspaceAccessScope.access.refresh()
+                    ]);
+                  }}
+                  onUpdateVisibility={workspaceAccessScope.access.updateVisibility}
                 />
               </>
             ) : (

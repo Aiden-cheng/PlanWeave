@@ -303,7 +303,6 @@ function PeopleRoute({
     <PeopleView
       t={shell.t}
       diagnosticsEnabled={shell.developerMode}
-      canvasId={shell.selectedCanvasId}
       onContentReplicaReady={(result) =>
         shell.refreshProjects({ selectProjectId: result.localProjectId })
       }
