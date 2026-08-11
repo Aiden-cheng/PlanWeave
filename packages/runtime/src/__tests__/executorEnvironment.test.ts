@@ -26,33 +26,43 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForNumericFile(path: string, label: string): Promise<number> {
+function readWslLifecyclePids(output: string): { parentPid: number; childPid: number } | undefined {
+  const parentMatch = /^PLANWEAVE_PARENT_PID=(\d+)$/m.exec(output);
+  const childMatch = /^PLANWEAVE_CHILD_PID=(\d+)$/m.exec(output);
+  if (!parentMatch || !childMatch) {
+    return undefined;
+  }
+  const parentPid = Number.parseInt(parentMatch[1], 10);
+  const childPid = Number.parseInt(childMatch[1], 10);
+  if (parentPid <= 1 || childPid <= 1) {
+    return undefined;
+  }
+  return { parentPid, childPid };
+}
+
+async function waitForWslLifecyclePids(
+  readOutput: () => string
+): Promise<{ parentPid: number; childPid: number }> {
   const deadline = Date.now() + WSL_LIFECYCLE_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    try {
-      const value = (await readFile(path, "utf8")).trim();
-      const pid = Number.parseInt(value, 10);
-      if (String(pid) === value && pid > 1) {
-        return pid;
-      }
-    } catch {
-      // The WSL process has not written this readiness marker yet.
+    const pids = readWslLifecyclePids(readOutput());
+    if (pids) {
+      return pids;
     }
     await sleep(25);
   }
-  throw new Error(`Timed out waiting for WSL ${label} marker: ${path}`);
+  throw new Error("Timed out waiting for WSL lifecycle process markers on stdout.");
 }
 
-async function waitForNumericFileWhileRunning(
-  path: string,
-  label: string,
+async function waitForWslLifecyclePidsWhileRunning(
+  readOutput: () => string,
   running: Promise<unknown>
-): Promise<number> {
+): Promise<{ parentPid: number; childPid: number }> {
   return Promise.race([
-    waitForNumericFile(path, label),
+    waitForWslLifecyclePids(readOutput),
     running.then(
       () => {
-        throw new Error(`WSL process exited before writing the ${label} marker.`);
+        throw new Error("WSL process exited before reporting its lifecycle process markers.");
       },
       (error: unknown) => {
         throw error;
@@ -180,15 +190,9 @@ async function forceStopWslProcessGroup(distribution: string, parentPid: number)
 }
 
 const WSL_LIFECYCLE_PROCESS_SCRIPT = [
-  'pw_parent_pid_path="$1"',
-  'pw_child_pid_path="$2"',
-  'pw_child_ready_path="$3"',
-  'pw_parent_ready_path="$4"',
-  'child_program=\'trap "" TERM; printf "%s\\n" "$$" > "$1"; : > "$2"; while :; do sleep 1; done\'',
-  'sh -c "$child_program" planweave-wsl-child "$pw_child_pid_path" "$pw_child_ready_path" &',
-  'printf "%s\\n" "$$" > "$pw_parent_pid_path"',
-  'while [ ! -f "$pw_child_ready_path" ]; do :; done',
-  ': > "$pw_parent_ready_path"',
+  'child_program=\'trap "" TERM; printf "PLANWEAVE_CHILD_PID=%s\\n" "$$"; while :; do sleep 1; done\'',
+  'sh -c "$child_program" planweave-wsl-child &',
+  'printf "PLANWEAVE_PARENT_PID=%s\\n" "$$"',
   "trap 'exit 0' TERM",
   "wait"
 ].join("; ");
@@ -267,12 +271,9 @@ describe("executor environment", () => {
       }
 
       const runDir = await mkdtemp(join(homedir(), ".planweave-wsl-lifecycle-"));
-      const parentPidPath = join(runDir, "parent.pid");
-      const childPidPath = join(runDir, "child.pid");
-      const childReadyPath = join(runDir, "child.ready");
-      const parentReadyPath = join(runDir, "parent.ready");
       const stdoutPath = join(runDir, "stdout.log");
       const abort = new AbortController();
+      let stdout = "";
       let parentPid: number | undefined;
       let childPid: number | undefined;
       let running: ReturnType<typeof execWithStreaming> | undefined;
@@ -281,16 +282,7 @@ describe("executor environment", () => {
       try {
         running = execWithStreaming({
           command: "sh",
-          args: [
-            "-c",
-            WSL_LIFECYCLE_PROCESS_SCRIPT,
-            "planweave-wsl-lifecycle",
-            parentPidPath,
-            childPidPath,
-            childReadyPath,
-            parentReadyPath
-          ],
-          pathArgIndexes: [3, 4, 5, 6],
+          args: ["-c", WSL_LIFECYCLE_PROCESS_SCRIPT, "planweave-wsl-lifecycle"],
           cwd: runDir,
           stdin: "",
           host: { kind: "wsl", distribution: WSL_DISTRIBUTION },
@@ -299,7 +291,10 @@ describe("executor environment", () => {
           timeoutMs: 60_000,
           maxStdoutBytes: 1024,
           maxStderrBytes: 1024,
-          signal: abort.signal
+          signal: abort.signal,
+          onStdout: (chunk) => {
+            stdout += chunk;
+          }
         });
 
         await waitForFileWhileRunning(
@@ -308,9 +303,10 @@ describe("executor environment", () => {
           running,
           WSL_LAUNCH_TIMEOUT_MS
         );
-        parentPid = await waitForNumericFileWhileRunning(parentPidPath, "parent pid", running);
-        childPid = await waitForNumericFile(childPidPath, "child pid");
-        await waitForFile(parentReadyPath, "parent readiness");
+        ({ parentPid, childPid } = await waitForWslLifecyclePidsWhileRunning(
+          () => stdout,
+          running
+        ));
         await assertWslProcessGroup({
           distribution: WSL_DISTRIBUTION,
           parentPid,
