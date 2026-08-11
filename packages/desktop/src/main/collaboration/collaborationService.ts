@@ -868,6 +868,10 @@ export class CollaborationService {
     return this.identityOperations.updateOwnDisplayName(input);
   }
 
+  async migrateLegacyLocalOwnerDisplayName(input: unknown): Promise<boolean> {
+    return this.identityOperations.migrateLegacyLocalOwnerDisplayName(input);
+  }
+
   registry(): CollaborationRegistryService {
     return this.registryService;
   }

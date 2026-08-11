@@ -1,6 +1,7 @@
 import type { CollaborationConnectionProfile } from "@planweave-ai/collaboration-protocol/connection";
 import type { LoopbackProjectRegistrationView } from "@planweave-ai/collaboration-protocol/loopback";
 import type { LocalCollaborationRegistrationInput } from "../../shared/localCollaborationScopes.js";
+import { defaultLocalOwnerDisplayName } from "./localCollaborationIdentityDefaults.js";
 
 type LocalCollaborationProfile = CollaborationConnectionProfile;
 
@@ -38,6 +39,7 @@ type LocalCollaborationSelectionServicePort = {
     principal: { humanPrincipalId: string };
   }>;
   connectSession(input: unknown): Promise<unknown>;
+  migrateLegacyLocalOwnerDisplayName(input: unknown): Promise<boolean>;
   clearActiveProfile(): Promise<unknown>;
 };
 
@@ -100,6 +102,7 @@ async function activateLocalCollaborationProfile({
   await service.setActiveProfile({ profileId: profile.profileId });
 
   let humanPrincipalId = await service.activeHumanPrincipalId(profile.profileId);
+  const persistedPrincipal = humanPrincipalId !== null;
   let authenticatedWorkspaceId: string | null = null;
   if (!humanPrincipalId) {
     const handoff = await service.bootstrapOwner({
@@ -120,6 +123,9 @@ async function activateLocalCollaborationProfile({
     membershipRole: "owner"
   });
   await service.connectSession({ profileId: profile.profileId });
+  if (persistedPrincipal) {
+    await service.migrateLegacyLocalOwnerDisplayName({ humanPrincipalId });
+  }
   return registration;
 }
 
@@ -184,7 +190,7 @@ export function createLocalCollaborationActivationCommand({
             return await activateLocalCollaborationSelection({
               coordinator,
               service,
-              ownerDisplayName: registrationInput.ownerDisplayName ?? "Local owner"
+              ownerDisplayName: registrationInput.ownerDisplayName ?? defaultLocalOwnerDisplayName
             });
           }
 
@@ -213,7 +219,7 @@ export function createLocalCollaborationActivationCommand({
             service,
             registerProject: (actor) =>
               coordinator.registerLocalProfile(profileToRestore.profileId, actor),
-            ownerDisplayName: registrationInput.ownerDisplayName ?? "Local owner"
+            ownerDisplayName: registrationInput.ownerDisplayName ?? defaultLocalOwnerDisplayName
           });
         } catch (error) {
           if (!transitionStarted) throw error;

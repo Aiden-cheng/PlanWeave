@@ -58,6 +58,7 @@ describe("activateLocalCollaborationSelection", () => {
       clearActiveProfile: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       connectSession: vi.fn(async () => undefined),
+      migrateLegacyLocalOwnerDisplayName: vi.fn(async () => false),
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
       adoptWorkspaceAuthority: vi.fn(async () => undefined),
@@ -127,6 +128,7 @@ describe("activateLocalCollaborationSelection", () => {
       clearActiveProfile: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       connectSession: vi.fn(async () => undefined),
+      migrateLegacyLocalOwnerDisplayName: vi.fn(async () => false),
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
       adoptWorkspaceAuthority: vi.fn(async () => undefined),
@@ -308,6 +310,7 @@ describe("activateLocalCollaborationSelection", () => {
       clearActiveProfile: vi.fn(async () => undefined),
       setActiveProfile: vi.fn(async () => undefined),
       connectSession: vi.fn(async () => undefined),
+      migrateLegacyLocalOwnerDisplayName: vi.fn(async () => false),
       upsertProfile: vi.fn(async () => undefined),
       migrateLocalProfileCredential: vi.fn(async () => undefined),
       adoptWorkspaceAuthority: vi.fn(async () => undefined),
@@ -378,6 +381,10 @@ describe("activateLocalCollaborationSelection", () => {
       connectSession: vi.fn(async () => {
         calls.push("connect");
       }),
+      migrateLegacyLocalOwnerDisplayName: vi.fn(async () => {
+        calls.push("migrate-owner-name");
+        return false;
+      }),
       clearActiveProfile: vi.fn(async () => undefined),
       getStatus: vi.fn(async () => ({
         activeProfileId: profile.profileId,
@@ -393,7 +400,7 @@ describe("activateLocalCollaborationSelection", () => {
       canvasId: "canvas-1"
     });
 
-    expect(calls).toEqual(["select", "upsert", "register", "connect"]);
+    expect(calls).toEqual(["select", "upsert", "register", "connect", "migrate-owner-name"]);
     expect(coordinator.setCurrentSelection).toHaveBeenCalledOnce();
   });
 
@@ -428,6 +435,10 @@ describe("activateLocalCollaborationSelection", () => {
       connectSession: vi.fn(async () => {
         calls.push("connect");
       }),
+      migrateLegacyLocalOwnerDisplayName: vi.fn(async () => {
+        calls.push("migrate-owner-name");
+        return false;
+      }),
       clearActiveProfile: vi.fn(async () => undefined)
     };
 
@@ -438,7 +449,7 @@ describe("activateLocalCollaborationSelection", () => {
     });
 
     expect(registration).toEqual(expect.objectContaining({ projectId: "project-1" }));
-    expect(calls).toEqual(["register", "connect"]);
+    expect(calls).toEqual(["register", "connect", "migrate-owner-name"]);
     expect(coordinator.registerCurrentProject).toHaveBeenCalledWith({
       kind: "human",
       id: "human-owner"
@@ -653,6 +664,10 @@ describe("activateLocalCollaborationSelection", () => {
       connectSession: vi.fn(async () => {
         calls.push(`connect:${selectedCanvasId}`);
       }),
+      migrateLegacyLocalOwnerDisplayName: vi.fn(async () => {
+        calls.push(`migrate-owner-name:${selectedCanvasId}`);
+        return false;
+      }),
       clearActiveProfile: vi.fn(async () => undefined),
       getStatus: vi.fn(async () => ({
         activeProfileId: profile.profileId,
@@ -679,9 +694,11 @@ describe("activateLocalCollaborationSelection", () => {
       "select:canvas-first",
       "register:canvas-first",
       "connect:canvas-first",
+      "migrate-owner-name:canvas-first",
       "select:canvas-second",
       "register:canvas-second",
-      "connect:canvas-second"
+      "connect:canvas-second",
+      "migrate-owner-name:canvas-second"
     ]);
   });
 });

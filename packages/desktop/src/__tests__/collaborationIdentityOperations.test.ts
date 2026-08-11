@@ -93,4 +93,72 @@ describe("CollaborationIdentityOperations", () => {
     expect(publishStatus).toHaveBeenCalledOnce();
     client.dispose();
   });
+
+  it("migrates only the former localized local-owner default through the rename operation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "planweave-identity-migration-"));
+    directories.push(directory);
+    const operations = new CollaborationIdentityOperations({
+      invitationVault: new CollaborationInvitationVault({
+        path: join(directory, "invitations.json"),
+        safeStorage: {
+          isEncryptionAvailable: () => false,
+          encryptString: (value) => Buffer.from(value),
+          decryptString: (value) => value.toString("utf8")
+        }
+      }),
+      profiles: new CollaborationProfileStore({
+        profilesPath: join(directory, "profiles.json")
+      }),
+      getClientProfileId: () => null,
+      publishStatus: vi.fn().mockResolvedValue(undefined),
+      withActiveClient: async () => {
+        throw new Error("network access must be replaced by operation spies");
+      }
+    });
+    const listMembers = vi.spyOn(operations, "listMembers").mockResolvedValue({
+      items: [
+        {
+          membershipId: "membership-owner",
+          projectId: "project-1",
+          humanPrincipalId: "human-owner",
+          displayName: "本机所有者",
+          role: "owner",
+          createdAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
+        }
+      ],
+      nextCursor: null
+    });
+    const updateOwnDisplayName = vi.spyOn(operations, "updateOwnDisplayName").mockResolvedValue({
+      humanPrincipalId: "human-owner",
+      displayName: "Local owner",
+      createdAt: "2030-01-01T00:00:00.000Z"
+    });
+
+    await expect(
+      operations.migrateLegacyLocalOwnerDisplayName({ humanPrincipalId: "human-owner" })
+    ).resolves.toBe(true);
+    expect(updateOwnDisplayName).toHaveBeenCalledWith({ displayName: "Local owner" });
+
+    listMembers.mockResolvedValueOnce({
+      items: [
+        {
+          membershipId: "membership-owner",
+          projectId: "project-1",
+          humanPrincipalId: "human-owner",
+          displayName: "自定义名称",
+          role: "owner",
+          createdAt: "2030-01-01T00:00:00.000Z",
+          updatedAt: "2030-01-01T00:00:00.000Z"
+        }
+      ],
+      nextCursor: null
+    });
+    updateOwnDisplayName.mockClear();
+
+    await expect(
+      operations.migrateLegacyLocalOwnerDisplayName({ humanPrincipalId: "human-owner" })
+    ).resolves.toBe(false);
+    expect(updateOwnDisplayName).not.toHaveBeenCalled();
+  });
 });

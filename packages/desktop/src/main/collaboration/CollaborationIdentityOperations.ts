@@ -20,6 +20,10 @@ import {
 import type { CollaborationClient } from "./CollaborationClient.js";
 import type { CollaborationInvitationVault } from "./collaborationInvitationVault.js";
 import type { CollaborationProfileStore } from "./collaborationProfileStore.js";
+import {
+  defaultLocalOwnerDisplayName,
+  legacyLocalizedLocalOwnerDisplayName
+} from "./localCollaborationIdentityDefaults.js";
 
 type CollaborationIdentityOperationsDependencies = {
   invitationVault: CollaborationInvitationVault;
@@ -59,6 +63,27 @@ export class CollaborationIdentityOperations {
     });
     await this.dependencies.publishStatus();
     return principal;
+  }
+
+  async migrateLegacyLocalOwnerDisplayName(input: unknown): Promise<boolean> {
+    const { humanPrincipalId } = collaborationHumanPrincipalIdInputSchema.parse(input);
+    let cursor = 0;
+
+    for (;;) {
+      const page = await this.listMembers({ cursor, limit: 100 });
+      const currentMember = page.items.find(
+        (member) => member.humanPrincipalId === humanPrincipalId
+      );
+      if (currentMember) {
+        if (currentMember.displayName !== legacyLocalizedLocalOwnerDisplayName) return false;
+        await this.updateOwnDisplayName({ displayName: defaultLocalOwnerDisplayName });
+        return true;
+      }
+      if (page.nextCursor === null) {
+        throw new Error(`Active collaboration principal is not a member: ${humanPrincipalId}`);
+      }
+      cursor = page.nextCursor;
+    }
   }
 
   async listDevices(input: unknown = {}): Promise<HumanDevicePage> {
