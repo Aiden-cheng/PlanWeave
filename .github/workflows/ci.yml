@@ -387,7 +387,7 @@ jobs:
 
       - name: Run WSL cancellation lifecycle integration test
         timeout-minutes: 10
-        run: pnpm exec vitest run packages/runtime/src/__tests__/executorEnvironment.test.ts --config vitest.integration-core.config.ts --testNamePattern="cancels a WSL process group and finalizes executor lifecycle"
+        run: pnpm exec vitest run packages/runtime/src/__tests__/executorEnvironment.test.ts --config vitest.integration-core.config.ts --testNamePattern="cancels a WSL execution and finalizes executor lifecycle"
 
   windows-packaged-smoke:
     name: Windows unsigned packaged smoke

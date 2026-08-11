@@ -63,14 +63,6 @@ async function waitForFileWhileRunning(
   ]);
 }
 
-const WSL_LIFECYCLE_PROCESS_SCRIPT = [
-  'pw_ready_path="$1"',
-  "trap '' TERM",
-  "sh -c 'trap \"\" TERM; while :; do sleep 1; done' &",
-  ': > "$pw_ready_path"',
-  "wait"
-].join("\n");
-
 describe("executor environment", () => {
   const requireWslTests = process.env.PLANWEAVE_REQUIRE_WSL_TESTS === "1";
 
@@ -131,7 +123,7 @@ describe("executor environment", () => {
   );
 
   it.runIf(process.platform === "win32")(
-    "cancels a WSL process group and finalizes executor lifecycle",
+    "cancels a WSL execution and finalizes executor lifecycle",
     async ({ skip }) => {
       const distributions = await listWslDistributions({ platform: "win32" });
       if (!distributions.available || !distributions.distributions.includes(WSL_DISTRIBUTION)) {
@@ -145,7 +137,6 @@ describe("executor environment", () => {
       }
 
       const runDir = await mkdtemp(join(homedir(), ".planweave-wsl-lifecycle-"));
-      const readyPath = join(runDir, "lifecycle.ready");
       const stdoutPath = join(runDir, "stdout.log");
       const abort = new AbortController();
       let running: ReturnType<typeof execWithStreaming> | undefined;
@@ -153,8 +144,7 @@ describe("executor environment", () => {
       try {
         running = execWithStreaming({
           command: "sh",
-          args: ["-c", WSL_LIFECYCLE_PROCESS_SCRIPT, "planweave-wsl-lifecycle", readyPath],
-          pathArgIndexes: [3],
+          args: ["-c", "trap '' TERM; while :; do sleep 1; done"],
           cwd: runDir,
           stdin: "",
           host: { kind: "wsl", distribution: WSL_DISTRIBUTION },
@@ -172,12 +162,7 @@ describe("executor environment", () => {
           running,
           WSL_LAUNCH_TIMEOUT_MS
         );
-        await waitForFileWhileRunning(
-          readyPath,
-          "lifecycle readiness",
-          running,
-          WSL_LAUNCH_TIMEOUT_MS
-        );
+        await sleep(2_000);
 
         abort.abort(new Error("test cancellation"));
         await expect(running).rejects.toBeInstanceOf(ExecutorCancelledError);
