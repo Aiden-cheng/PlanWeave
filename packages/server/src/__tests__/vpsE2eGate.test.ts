@@ -99,6 +99,17 @@ describe("VPS e2e gate and redaction (unit)", () => {
     expect(redacted).toMatch(/REDACTED/);
   });
 
+  it("redacts PEM blocks without backtracking across repeated begin markers", () => {
+    const repeated = "-----BEGIN  -----".repeat(10_000);
+    const malformedPrefix = "-----BEGIN lowercase label\n";
+    const certificate =
+      "-----BEGIN CERTIFICATE-----\nMIIB\n-----END lowercase label-----\n-----END CERTIFICATE-----";
+    const redacted = redactSensitiveText(`${repeated}\n${malformedPrefix}${certificate}`);
+    expect(redacted).toContain(repeated);
+    expect(redacted).not.toContain("MIIB");
+    expect(redacted).toContain("[REDACTED:PEM]");
+  });
+
   it("validates remote config schema without embedding secrets", () => {
     const parsed = remoteVpsE2eConfigSchema.parse({
       version: "planweave.vps-e2e-config/v1",
