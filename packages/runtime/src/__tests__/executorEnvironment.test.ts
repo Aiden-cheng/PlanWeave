@@ -19,6 +19,7 @@ import { createTestWorkspace } from "./promptTestHelpers.js";
 import { manifestTestBuilder } from "./manifestTestBuilder.js";
 
 const WSL_DISTRIBUTION = "Ubuntu";
+const WSL_LAUNCH_TIMEOUT_MS = 30_000;
 const WSL_LIFECYCLE_TIMEOUT_MS = 10_000;
 
 function sleep(ms: number): Promise<void> {
@@ -60,8 +61,12 @@ async function waitForNumericFileWhileRunning(
   ]);
 }
 
-async function waitForFile(path: string, label: string): Promise<void> {
-  const deadline = Date.now() + WSL_LIFECYCLE_TIMEOUT_MS;
+async function waitForFile(
+  path: string,
+  label: string,
+  timeoutMs = WSL_LIFECYCLE_TIMEOUT_MS
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       await stat(path);
@@ -72,6 +77,25 @@ async function waitForFile(path: string, label: string): Promise<void> {
     await sleep(25);
   }
   throw new Error(`Timed out waiting for WSL ${label} marker: ${path}`);
+}
+
+async function waitForFileWhileRunning(
+  path: string,
+  label: string,
+  running: Promise<unknown>,
+  timeoutMs: number
+): Promise<void> {
+  return Promise.race([
+    waitForFile(path, label, timeoutMs),
+    running.then(
+      () => {
+        throw new Error(`WSL process exited before writing the ${label} marker.`);
+      },
+      (error: unknown) => {
+        throw error;
+      }
+    )
+  ]);
 }
 
 function wslExitCode(
@@ -278,6 +302,12 @@ describe("executor environment", () => {
           signal: abort.signal
         });
 
+        await waitForFileWhileRunning(
+          executorHeartbeatPath(stdoutPath),
+          "executor launch",
+          running,
+          WSL_LAUNCH_TIMEOUT_MS
+        );
         parentPid = await waitForNumericFileWhileRunning(parentPidPath, "parent pid", running);
         childPid = await waitForNumericFile(childPidPath, "child pid");
         await waitForFile(parentReadyPath, "parent readiness");
