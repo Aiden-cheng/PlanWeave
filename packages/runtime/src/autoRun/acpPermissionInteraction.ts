@@ -170,12 +170,17 @@ export function createPersistentAcpPermissionHandler(context: PermissionInteract
           );
         },
         expire: async (reason) => {
+          const recordedAt = new Date();
+          const operationDeadline = context.deadline();
           await store.settleOwnerResult({
             version: "planweave.runner-interaction-owner-result/v1",
             identity: request.identity,
             outcome: "expired",
-            reason: "terminal_cleanup",
-            recordedAt: new Date().toISOString(),
+            reason:
+              operationDeadline !== null && recordedAt.getTime() >= operationDeadline.getTime()
+                ? "deadline"
+                : "terminal_cleanup",
+            recordedAt: recordedAt.toISOString(),
             message: redactRunnerEventText(reason).text
           });
         }
