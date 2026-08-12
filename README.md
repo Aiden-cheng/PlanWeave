@@ -64,6 +64,13 @@ Or install it with Homebrew:
 brew install GaosCode/tap/planweave
 ```
 
+For self-hosted collaboration or a standalone Agent Host, optionally install:
+
+```bash
+npm install -g @planweave-ai/server
+npm install -g @planweave-ai/agent-host
+```
+
 Then run:
 
 ```bash

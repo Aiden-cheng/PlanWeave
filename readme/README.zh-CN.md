@@ -64,6 +64,13 @@ npm install -g @planweave-ai/cli
 brew install GaosCode/tap/planweave
 ```
 
+如需自托管协作服务或独立部署 Agent Host，可选安装：
+
+```bash
+npm install -g @planweave-ai/server
+npm install -g @planweave-ai/agent-host
+```
+
 然后运行：
 
 ```bash
