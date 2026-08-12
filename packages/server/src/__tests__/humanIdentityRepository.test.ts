@@ -398,6 +398,27 @@ describe("human identity repository", () => {
     ).toThrowError(HumanIdentityError);
   });
 
+  it("supports repeated read-only authorization probes without rewriting last-used metadata", async () => {
+    const { database, repo } = await openMigrated();
+    const owner = repo.bootstrapOwner(localAdminProof());
+    const lastUsed = () =>
+      database
+        .prepare("SELECT last_used_at FROM human_device_credentials WHERE device_credential_id=?")
+        .get(owner.device.deviceCredentialId)?.last_used_at;
+    expect(lastUsed()).toBeNull();
+
+    expect(
+      repo.authenticateDevice(owner.deviceToken!, "project-a", { recordLastUsed: false })
+    ).toBeDefined();
+    expect(
+      repo.authenticateDevice(owner.deviceToken!, "project-a", { recordLastUsed: false })
+    ).toBeDefined();
+    expect(lastUsed()).toBeNull();
+
+    expect(repo.authenticateDevice(owner.deviceToken!, "project-a")).toBeDefined();
+    expect(lastUsed()).not.toBeNull();
+  });
+
   it("recovers the target project when another project still has a usable device", async () => {
     const { repo, database } = await openMigrated();
     const principalId = "shared-owner";

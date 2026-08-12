@@ -88,6 +88,7 @@ import {
   containsCleanupError,
   drainCompositionTransports
 } from "./distributedCompositionLifecycle.js";
+import { AuthorizationChangeSignal } from "./authorizationChangeSignal.js";
 
 export type DistributedServerCompositionOptions = {
   httpServer: HttpServer;
@@ -364,6 +365,7 @@ export async function createDistributedServerComposition(
     const initializedActivityProjection = activityProjection;
     const initializedHumanObserverJournal = humanObserverJournal;
     const { coordination, server } = lifecycle;
+    const authorizationChanges = new AuthorizationChangeSignal();
     const schemaVersion = server.readiness().schemaVersion;
     readiness.transition("reconciling", schemaVersion);
     const enrollments = new HostEnrollmentService(server.database, clock, (hostId) =>
@@ -393,7 +395,9 @@ export async function createDistributedServerComposition(
       }
     });
     const workspaceIdentity = new WorkspaceIdentityRepository(server.database);
-    projectAccess = new ProjectAccessRepository(server.database, clock);
+    projectAccess = new ProjectAccessRepository(server.database, clock, (change) =>
+      authorizationChanges.publish(change)
+    );
     for (const workspaceId of new Set(
       ownerRuntimeRegistry.expansions.map((scope) => scope.workspaceId)
     )) {
@@ -642,7 +646,8 @@ export async function createDistributedServerComposition(
           { kind: "invitation" },
           invitation.consumedAt ?? invitation.revokedAt ?? invitation.createdAt
         );
-      }
+      },
+      onAuthorizationChangeAfterCommit: (change) => authorizationChanges.publish(change)
     });
     humanIdentityForInteractions = humanIdentity;
     const humanMembership = new HumanMembershipService({
@@ -827,6 +832,7 @@ export async function createDistributedServerComposition(
       workspaceIdentity,
       projectAccess: initializedProjectAccess,
       projectAuthority: runtimeRegistry,
+      authorizationChanges,
       maxPayloadBytes: config.limits.maxWebSocketPayloadBytes,
       shutdownTimeoutMs: config.limits.shutdownTimeoutMs,
       transportAdmission,

@@ -23,6 +23,7 @@ import {
 } from "./schemas.js";
 import { WorkspaceIdentityRepository } from "./workspaceRepository.js";
 import { assertNoPendingSnapshotRestore } from "../authorizationFence.js";
+import type { AuthorizationChangeScope } from "../authorizationChangeSignal.js";
 
 export { HumanIdentityError } from "./errors.js";
 
@@ -75,6 +76,7 @@ export type InvitationTransition = {
 export type HumanIdentityRepositoryOptions = {
   onMembershipTransitionInTransaction?: (transition: MembershipTransition) => void;
   onInvitationTransitionInTransaction?: (transition: InvitationTransition) => void;
+  onAuthorizationChangeAfterCommit?: (change: AuthorizationChangeScope) => void;
 };
 
 /**
@@ -294,7 +296,8 @@ export class HumanIdentityRepository {
    */
   authenticateDevice(
     deviceToken: string,
-    projectId?: string
+    projectId?: string,
+    options: { recordLastUsed?: boolean } = {}
   ): AuthenticatedHumanDevice | undefined {
     const device = this.devices.findDeviceByToken(deviceToken);
     if (!device) return undefined;
@@ -350,8 +353,11 @@ export class HumanIdentityRepository {
       }
     }
 
-    const refreshed = this.devices.recordLastUsed(device.deviceCredentialId);
-    return { principal, device: refreshed, membership };
+    const authenticatedDevice =
+      options.recordLastUsed === false
+        ? device
+        : this.devices.recordLastUsed(device.deviceCredentialId);
+    return { principal, device: authenticatedDevice, membership };
   }
 
   revokeDevice(
@@ -359,7 +365,7 @@ export class HumanIdentityRepository {
     projectId: string,
     ownerHumanPrincipalId?: string
   ): HumanDeviceCredentialMetadata {
-    return inWriteTransaction(this.database, () => {
+    const revoked = inWriteTransaction(this.database, () => {
       const revoked = this.devices.revokeDevice(
         deviceCredentialId,
         projectId,
@@ -369,6 +375,15 @@ export class HumanIdentityRepository {
       this.syncWorkspaceProject(workspaceId, projectId);
       return revoked;
     });
+    const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(projectId);
+    if (!workspaceId) throw new Error("workspace_not_found");
+    this.options.onAuthorizationChangeAfterCommit?.({
+      workspaceId,
+      projectId,
+      humanPrincipalId: revoked.humanPrincipalId,
+      deviceSessionId: revoked.deviceCredentialId
+    });
+    return revoked;
   }
 
   /**
@@ -377,7 +392,7 @@ export class HumanIdentityRepository {
    * Other projects' memberships and devices are untouched.
    */
   removeMember(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
-    return inWriteTransaction(this.database, () => {
+    const membership = inWriteTransaction(this.database, () => {
       this.assertNoPendingProjectRestore(projectId);
       const removed = this.memberships.removeMember(projectId, targetHumanPrincipalId);
       this.devices.revokeProjectDevicesForPrincipal(
@@ -396,12 +411,20 @@ export class HumanIdentityRepository {
       });
       return removed.membership;
     });
+    const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(projectId);
+    if (!workspaceId) throw new Error("workspace_not_found");
+    this.options.onAuthorizationChangeAfterCommit?.({
+      workspaceId,
+      projectId,
+      humanPrincipalId: membership.humanPrincipalId
+    });
+    return membership;
   }
 
   promoteToOwner(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
-    return inWriteTransaction(this.database, () => {
+    const before = this.getActiveMembership(projectId, targetHumanPrincipalId);
+    const membership = inWriteTransaction(this.database, () => {
       this.assertNoPendingProjectRestore(projectId);
-      const before = this.memberships.getActiveMembership(projectId, targetHumanPrincipalId);
       const membership = this.memberships.promoteToOwner(projectId, targetHumanPrincipalId);
       if (before && membership.revision !== before.revision) {
         const principal = this.getPrincipal(membership.humanPrincipalId);
@@ -416,10 +439,20 @@ export class HumanIdentityRepository {
       this.syncWorkspaceProject(workspaceId, projectId);
       return membership;
     });
+    if (before && membership.revision !== before.revision) {
+      const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(projectId);
+      if (!workspaceId) throw new Error("workspace_not_found");
+      this.options.onAuthorizationChangeAfterCommit?.({
+        workspaceId,
+        projectId,
+        humanPrincipalId: membership.humanPrincipalId
+      });
+    }
+    return membership;
   }
 
   demoteOwner(projectId: string, targetHumanPrincipalId: string): ProjectMembership {
-    return inWriteTransaction(this.database, () => {
+    const membership = inWriteTransaction(this.database, () => {
       this.assertNoPendingProjectRestore(projectId);
       const membership = this.memberships.demoteOwner(projectId, targetHumanPrincipalId);
       const principal = this.getPrincipal(membership.humanPrincipalId);
@@ -433,6 +466,14 @@ export class HumanIdentityRepository {
       });
       return membership;
     });
+    const workspaceId = this.workspaceIdentity.workspaceForLegacyProject(projectId);
+    if (!workspaceId) throw new Error("workspace_not_found");
+    this.options.onAuthorizationChangeAfterCommit?.({
+      workspaceId,
+      projectId,
+      humanPrincipalId: membership.humanPrincipalId
+    });
+    return membership;
   }
 
   private bootstrapOwnerLocked(

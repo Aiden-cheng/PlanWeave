@@ -10,6 +10,7 @@ import {
   authenticateCollaborationForScope,
   hasAuthenticatedCollaborationDevice,
   humanTransportAllowed,
+  type AuthenticatedCollaborationScope,
   type HumanIdentityRepository,
   type HumanProjectAuthority
 } from "./identity/index.js";
@@ -24,6 +25,7 @@ import {
 } from "./humanObserverJournal.js";
 import type { ProjectAccessRepository } from "./projectAccessRepository.js";
 import type { WebSocketUpgradeRouter } from "./webSocketUpgradeRouter.js";
+import type { AuthorizationChangeSignal } from "./authorizationChangeSignal.js";
 
 export type HumanObserverWebSocketOptions = {
   upgradeRouter: WebSocketUpgradeRouter;
@@ -32,13 +34,17 @@ export type HumanObserverWebSocketOptions = {
   workspaceIdentity: WorkspaceIdentityRepository;
   projectAccess: ProjectAccessRepository;
   projectAuthority: HumanProjectAuthority;
+  authorizationChanges: AuthorizationChangeSignal;
   maxPayloadBytes: number;
   shutdownTimeoutMs: number;
   transportAdmission: TransportAdmissionPolicy;
   allowedClientOrigins?: readonly string[];
   clock?: () => Date;
   deliveryLimits?: HumanObserverDeliveryLimits;
+  authorizationSafetyCheckIntervalMs?: number;
 };
+
+export const HUMAN_OBSERVER_AUTHORIZATION_SAFETY_INTERVAL_MS = 30_000;
 
 export type HumanObserverDeliveryLimits = {
   replay: HumanObserverReplayLimits;
@@ -129,6 +135,14 @@ function deliveryLimits(
   return limits;
 }
 
+function authorizationSafetyCheckInterval(value: number | undefined): number {
+  const interval = value ?? HUMAN_OBSERVER_AUTHORIZATION_SAFETY_INTERVAL_MS;
+  if (!Number.isSafeInteger(interval) || interval < 1) {
+    throw new Error("human_observer_authorization_safety_interval_invalid");
+  }
+  return interval;
+}
+
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -189,14 +203,23 @@ export function attachHumanObserverWebSocketServer(
   const sessions = new Map<WebSocket, () => void>();
   const clock = options.clock ?? (() => new Date());
   const limits = deliveryLimits(options.deliveryLimits);
+  const authorizationSafetyIntervalMs = authorizationSafetyCheckInterval(
+    options.authorizationSafetyCheckIntervalMs
+  );
 
-  const authenticateScope = (authorization: string | string[] | undefined, projectId: string) => {
+  const authenticateScope = (
+    authorization: string | string[] | undefined,
+    projectId: string,
+    recordLastUsed: boolean
+  ) => {
     const authenticated = authenticateCollaborationForScope(
       options.repository,
       options.workspaceIdentity,
       options.projectAuthority,
       authorization,
-      projectId
+      projectId,
+      undefined,
+      { recordLastUsed }
     );
     if (!authenticated) return undefined;
     try {
@@ -215,10 +238,13 @@ export function attachHumanObserverWebSocketServer(
   const handleConnection = (
     socket: WebSocket,
     scope: HumanObserverScope,
-    authorization: string | string[] | undefined
+    authorization: string | string[] | undefined,
+    authenticated: AuthenticatedCollaborationScope
   ) => {
     let authorizationExpired = false;
-    let unsubscribe = () => {};
+    let unsubscribeJournal = () => {};
+    let unsubscribeAuthorization = () => {};
+    let authorizationSafetyTimer: ReturnType<typeof setTimeout> | undefined;
     let phase: "awaiting_hello" | "replaying" | "live" | "catchup" | "stopping" | "closed" =
       "awaiting_hello";
     let replayHeadCursor = 0;
@@ -226,13 +252,17 @@ export function attachHumanObserverWebSocketServer(
     let draining = false;
     const pending: SerializedMessage[] = [];
     const stillAuthorized = () =>
-      authenticateScope(authorization, scope.projectId)?.workspaceId === scope.workspaceId;
+      authenticateScope(authorization, scope.projectId, false)?.workspaceId === scope.workspaceId;
     const stopApplicationSending = (nextPhase: "catchup" | "stopping"): boolean => {
       if (phase === "closed" || phase === "stopping") return false;
       if (phase === "catchup" && nextPhase === "catchup") return false;
       phase = nextPhase;
-      unsubscribe();
-      unsubscribe = () => {};
+      if (authorizationSafetyTimer) clearTimeout(authorizationSafetyTimer);
+      authorizationSafetyTimer = undefined;
+      unsubscribeJournal();
+      unsubscribeJournal = () => {};
+      unsubscribeAuthorization();
+      unsubscribeAuthorization = () => {};
       pending.length = 0;
       pendingBytes = 0;
       return true;
@@ -240,6 +270,15 @@ export function attachHumanObserverWebSocketServer(
     const closeApplicationSocket = (code: number, reason: string) => {
       if (!stopApplicationSending("stopping")) return;
       socket.close(code, reason);
+    };
+    const validateAuthorization = (): boolean => {
+      try {
+        if (stillAuthorized()) return true;
+        expireAuthorization();
+      } catch {
+        closeApplicationSocket(1011, "observer authorization error");
+      }
+      return false;
     };
     sessions.set(socket, () => {
       stopApplicationSending("stopping");
@@ -275,6 +314,7 @@ export function attachHumanObserverWebSocketServer(
       try {
         let sentInBatch = 0;
         while (phase === "live" && pending.length > 0) {
+          if (!validateAuthorization()) break;
           const next = pending.shift();
           if (!next) break;
           pendingBytes -= next.bytes;
@@ -327,9 +367,23 @@ export function attachHumanObserverWebSocketServer(
       }
       socket.close(4001, "auth expired");
     };
-    const authTimer = setInterval(() => {
-      if (!stillAuthorized()) expireAuthorization();
-    }, 250);
+    const scheduleAuthorizationSafetyCheck = () => {
+      authorizationSafetyTimer = setTimeout(() => {
+        authorizationSafetyTimer = undefined;
+        if (validateAuthorization()) scheduleAuthorizationSafetyCheck();
+      }, authorizationSafetyIntervalMs);
+    };
+    const actor = authenticated.actor;
+    const humanPrincipalId = actor.humanPrincipalId;
+    const deviceSessionId =
+      "deviceSessionId" in actor ? actor.deviceSessionId : actor.deviceCredentialId;
+    unsubscribeAuthorization = options.authorizationChanges.subscribe(
+      { ...scope, humanPrincipalId, deviceSessionId },
+      () => {
+        validateAuthorization();
+      }
+    );
+    scheduleAuthorizationSafetyCheck();
     const helloTimer = setTimeout(
       () => closeApplicationSocket(4002, "observer hello required"),
       limits.helloTimeoutMs
@@ -338,11 +392,8 @@ export function attachHumanObserverWebSocketServer(
     const initialize = async (lastCursor: number) => {
       if (phase !== "awaiting_hello") return;
       phase = "replaying";
-      unsubscribe = options.journal.subscribe(scope, (event) => {
-        if (!stillAuthorized()) {
-          expireAuthorization();
-          return;
-        }
+      unsubscribeJournal = options.journal.subscribe(scope, (event) => {
+        if (!validateAuthorization()) return;
         enqueue(event);
       });
       const replay = options.journal.replay(scope, lastCursor, limits.replay);
@@ -392,10 +443,7 @@ export function attachHumanObserverWebSocketServer(
       if (phase === "stopping" || phase === "closed") return;
       try {
         if (isBinary) throw new Error("human_observer_binary_message");
-        if (!stillAuthorized()) {
-          expireAuthorization();
-          return;
-        }
+        if (!validateAuthorization()) return;
         const message = humanObserverClientMessageSchema.parse(JSON.parse(data.toString()));
         if (phase === "awaiting_hello") {
           if (message.type !== "human.observer.hello" || message.projectId !== scope.projectId) {
@@ -422,8 +470,9 @@ export function attachHumanObserverWebSocketServer(
     socket.on("close", () => {
       phase = "closed";
       clearTimeout(helloTimer);
-      clearInterval(authTimer);
-      unsubscribe();
+      if (authorizationSafetyTimer) clearTimeout(authorizationSafetyTimer);
+      unsubscribeJournal();
+      unsubscribeAuthorization();
       pending.length = 0;
       pendingBytes = 0;
       sessions.delete(socket);
@@ -446,7 +495,7 @@ export function attachHumanObserverWebSocketServer(
         reject(socket, 403, "Forbidden");
         return;
       }
-      const authenticated = authenticateScope(request.headers.authorization, projectId);
+      const authenticated = authenticateScope(request.headers.authorization, projectId, true);
       if (!authenticated) {
         const credentialActor = authenticateCollaborationForProject(
           options.repository,
@@ -468,7 +517,8 @@ export function attachHumanObserverWebSocketServer(
         handleConnection(
           webSocket,
           { workspaceId: authenticated.workspaceId, projectId },
-          request.headers.authorization
+          request.headers.authorization,
+          authenticated
         )
       );
     }

@@ -97,12 +97,13 @@ export function parseHumanDeviceBearer(
 export function authenticateHumanForProject(
   repository: HumanIdentityRepository,
   authorization: string | string[] | undefined,
-  projectId: string
+  projectId: string,
+  options: { recordLastUsed?: boolean } = {}
 ): HumanAuthContext | undefined {
   const token = parseHumanDeviceBearer(authorization);
   if (!token) return undefined;
 
-  const authenticated = repository.authenticateDevice(token, projectId);
+  const authenticated = repository.authenticateDevice(token, projectId, options);
   if (!authenticated?.membership) return undefined;
 
   return humanAuthContextSchema.parse({
@@ -125,7 +126,8 @@ export function authenticateCollaborationForProject(
   repository: HumanIdentityRepository,
   workspaceIdentity: WorkspaceIdentityRepository,
   authorization: string | string[] | undefined,
-  projectId: string
+  projectId: string,
+  options: { recordLastUsed?: boolean } = {}
 ): CollaborationAuthContext | undefined {
   const token = parseHumanDeviceBearer(authorization);
   if (!token) return undefined;
@@ -140,7 +142,7 @@ export function authenticateCollaborationForProject(
       projectId
     };
   }
-  return authenticateHumanForProject(repository, authorization, projectId);
+  return authenticateHumanForProject(repository, authorization, projectId, options);
 }
 
 export function hasAuthenticatedCollaborationDevice(
@@ -163,13 +165,15 @@ export function authenticateCollaborationForScope(
   projectAuthority: HumanProjectAuthority,
   authorization: string | string[] | undefined,
   projectId: string,
-  canvasId?: string
+  canvasId?: string,
+  options: { recordLastUsed?: boolean } = {}
 ): AuthenticatedCollaborationScope | undefined {
   const actor = authenticateCollaborationForProject(
     repository,
     workspaceIdentity,
     authorization,
-    projectId
+    projectId,
+    options
   );
   if (!actor) return undefined;
   const workspaceCandidate =

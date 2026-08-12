@@ -15,9 +15,7 @@ import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js"
 import { HumanObserverJournal } from "../humanObserverJournal.js";
 import {
   attachHumanObserverWebSocketServer,
-  type HumanObserverDeliveryLimits,
-  type HumanObserverWebSocketSendPort,
-  sendHumanObserverWebSocketFrame
+  type HumanObserverDeliveryLimits
 } from "../humanObserverWs.js";
 import { applyMigrations } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
@@ -29,12 +27,22 @@ import {
   createDistributedServerComposition,
   type DistributedServerComposition
 } from "../serverComposition.js";
+import { AuthorizationChangeSignal } from "../authorizationChangeSignal.js";
 
 const directories: string[] = [];
 const servers: HttpServer[] = [];
 const compositions: DistributedServerComposition[] = [];
 const databases: SqliteDatabase[] = [];
 const observerServers: Array<{ close(): Promise<void> }> = [];
+const standardDeliveryLimits: HumanObserverDeliveryLimits = {
+  replay: { maxEvents: 10, maxBytes: 100_000 },
+  replayBatchEvents: 1,
+  maxBufferedBytes: 16_384,
+  maxPendingBytes: 16_384,
+  controlFrameReserveBytes: 1_024,
+  sendTimeoutMs: 1_000,
+  helloTimeoutMs: 10_000
+};
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -268,7 +276,10 @@ function sendHello(socket: WebSocket, projectId: string, lastCursor: number): vo
   );
 }
 
-async function setupDirectObserver(deliveryLimits: HumanObserverDeliveryLimits) {
+async function setupDirectObserver(
+  deliveryLimits: HumanObserverDeliveryLimits,
+  authorizationSafetyCheckIntervalMs = 25
+) {
   const database = await openServerDatabase(":memory:", 5_000);
   databases.push(database);
   applyMigrations(database);
@@ -277,12 +288,27 @@ async function setupDirectObserver(deliveryLimits: HumanObserverDeliveryLimits) 
   const workspaceIdentity = new WorkspaceIdentityRepository(database);
   workspaceIdentity.ensureConfiguredWorkspace(workspaceId);
   const device = seedWorkspaceObserverDevice({ database, workspaceId, suffix: "c" });
-  const projectAccess = new ProjectAccessRepository(database);
+  const authorizationChanges = new AuthorizationChangeSignal();
+  const projectAccess = new ProjectAccessRepository(database, undefined, (change) =>
+    authorizationChanges.publish(change)
+  );
+  const ownerHumanPrincipalId = seedWorkspaceObserverPrincipal({
+    database,
+    workspaceId,
+    suffix: "direct-owner"
+  });
   projectAccess.registerProjectInternal({
     workspaceId,
     projectId,
     projectRoot: `/tmp/${workspaceId}/${projectId}`,
-    ownerHumanPrincipalId: device.principalId
+    ownerHumanPrincipalId
+  });
+  const grant = projectAccess.grant({
+    workspaceId,
+    projectId,
+    humanPrincipalId: device.principalId,
+    role: "viewer",
+    grantedBy: { kind: "human", id: ownerHumanPrincipalId }
   });
   const httpServer = createServer();
   servers.push(httpServer);
@@ -297,10 +323,12 @@ async function setupDirectObserver(deliveryLimits: HumanObserverDeliveryLimits) 
       hasScope: (scope) => scope.workspaceId === workspaceId && scope.projectId === projectId,
       hasProject: (candidateProjectId) => candidateProjectId === projectId
     },
+    authorizationChanges,
     maxPayloadBytes: 16_384,
     shutdownTimeoutMs: 1_000,
     transportAdmission: loopbackHttpTransportAdmission,
-    deliveryLimits
+    deliveryLimits,
+    authorizationSafetyCheckIntervalMs
   });
   observerServers.push(observer);
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
@@ -308,6 +336,11 @@ async function setupDirectObserver(deliveryLimits: HumanObserverDeliveryLimits) 
   if (!address || typeof address === "string") throw new Error("observer_test_address_missing");
   return {
     database,
+    authorizationChanges,
+    workspaceIdentity,
+    projectAccess,
+    grant,
+    ownerHumanPrincipalId,
     journal,
     observer,
     scope: { workspaceId, projectId },
@@ -345,87 +378,119 @@ function messagesThroughClose(socket: WebSocket) {
   });
 }
 
-class ControlledSendPort implements HumanObserverWebSocketSendPort {
-  readonly readyState = WebSocket.OPEN;
-  readonly bufferedAmount = 0;
-  private sendCallback: ((error?: Error) => void) | undefined;
-  private readonly listeners = {
-    close: new Set<() => void>(),
-    error: new Set<() => void>()
-  };
-
-  send(_data: string, callback: (error?: Error) => void): void {
-    this.sendCallback = callback;
-  }
-
-  once(event: "close" | "error", listener: () => void): this {
-    this.listeners[event].add(listener);
-    return this;
-  }
-
-  off(event: "close" | "error", listener: () => void): this {
-    this.listeners[event].delete(listener);
-    return this;
-  }
-
-  emit(event: "close" | "error"): void {
-    for (const listener of [...this.listeners[event]]) listener();
-  }
-
-  finishSend(error?: Error): void {
-    this.sendCallback?.(error);
-  }
-
-  listenerCount(): number {
-    return this.listeners.close.size + this.listeners.error.size;
-  }
-}
-
-describe("human observer WebSocket frame delivery", () => {
-  it.each([
-    "close",
-    "error"
-  ] as const)("settles and removes listeners when the socket emits %s", async (event) => {
-    const socket = new ControlledSendPort();
-    const result = sendHumanObserverWebSocketFrame(socket, { data: "{}", bytes: 2 }, 100, 1_000);
-
-    socket.emit(event);
-
-    await expect(result).resolves.toBe("unavailable");
-    expect(socket.listenerCount()).toBe(0);
-  });
-
-  it("settles callback errors and explicit send timeouts without leaving listeners", async () => {
-    const failedSocket = new ControlledSendPort();
-    const failed = sendHumanObserverWebSocketFrame(
-      failedSocket,
-      { data: "{}", bytes: 2 },
-      100,
-      1_000
-    );
-    failedSocket.finishSend(new Error("socket write failed"));
-    await expect(failed).resolves.toBe("unavailable");
-    expect(failedSocket.listenerCount()).toBe(0);
-
-    const timedOutSocket = new ControlledSendPort();
-    await expect(
-      sendHumanObserverWebSocketFrame(timedOutSocket, { data: "{}", bytes: 2 }, 100, 1)
-    ).resolves.toBe("timeout");
-    expect(timedOutSocket.listenerCount()).toBe(0);
-  });
-});
-
 describe("human observer WSS", () => {
-  it("does not initialize when shutdown and hello arrive in the same turn", async () => {
-    const fixture = await setupDirectObserver({
-      replay: { maxEvents: 10, maxBytes: 100_000 },
-      replayBatchEvents: 1,
-      maxBufferedBytes: 16_384,
-      maxPendingBytes: 16_384,
-      controlFrameReserveBytes: 1_024,
-      sendTimeoutMs: 1_000,
-      helloTimeoutMs: 10_000
+  it("does not repeatedly authenticate an idle observer in a 250ms-scale window", async () => {
+    const fixture = await setupDirectObserver(standardDeliveryLimits, 30_000);
+    const authenticate = vi.spyOn(fixture.workspaceIdentity, "authenticateWorkspaceDeviceSession");
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const callsAfterHello = authenticate.mock.calls.length;
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 350));
+
+    expect(authenticate).toHaveBeenCalledTimes(callsAfterHello);
+    socket.close();
+  });
+
+  it("invalidates a revoked read grant immediately after commit", async () => {
+    const fixture = await setupDirectObserver(standardDeliveryLimits);
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const closed = messagesThroughClose(socket);
+
+    fixture.projectAccess.revoke({
+      workspaceId: fixture.scope.workspaceId,
+      projectId: fixture.projectId,
+      grantId: fixture.grant.grantId,
+      actor: { kind: "human", id: fixture.ownerHumanPrincipalId },
+      expectedAclRevision: fixture.grant.aclRevision
     });
+
+    await expect(closed).resolves.toEqual({
+      code: 4001,
+      messages: [
+        {
+          type: "human.observer.auth_expired",
+          protocolVersion: 1,
+          code: "human_auth_unauthenticated"
+        }
+      ]
+    });
+  });
+
+  it("isolates authorization signals and removes the listener on close", async () => {
+    const fixture = await setupDirectObserver(standardDeliveryLimits, 30_000);
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    expect(fixture.authorizationChanges.subscriberCount()).toBe(1);
+
+    fixture.authorizationChanges.publish({
+      workspaceId: fixture.scope.workspaceId,
+      projectId: "other-project"
+    });
+    fixture.authorizationChanges.publish({
+      workspaceId: "other-workspace",
+      projectId: fixture.projectId
+    });
+    socket.send(JSON.stringify({ type: "human.observer.ping", protocolVersion: 1 }));
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.pong" });
+
+    const closed = nextClose(socket);
+    socket.close();
+    await closed;
+    await vi.waitFor(() => expect(fixture.authorizationChanges.subscriberCount()).toBe(0));
+  });
+
+  it("uses the safety deadline for non-eventized credential expiry", async () => {
+    const fixture = await setupDirectObserver(standardDeliveryLimits);
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const closed = messagesThroughClose(socket);
+    fixture.database
+      .prepare("UPDATE workspace_device_sessions SET expires_at=? WHERE device_session_id=?")
+      .run(new Date(Date.now() - 1).toISOString(), "observer-device-c");
+
+    await expect(closed).resolves.toMatchObject({
+      code: 4001,
+      messages: [{ type: "human.observer.auth_expired" }]
+    });
+  });
+
+  it("checks authorization before forwarding a new live event even without a signal", async () => {
+    const fixture = await setupDirectObserver(
+      {
+        replay: { maxEvents: 10, maxBytes: 100_000 },
+        replayBatchEvents: 1,
+        maxBufferedBytes: 16_384,
+        maxPendingBytes: 16_384,
+        controlFrameReserveBytes: 1_024,
+        sendTimeoutMs: 1_000,
+        helloTimeoutMs: 10_000
+      },
+      30_000
+    );
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const closed = messagesThroughClose(socket);
+    fixture.database
+      .prepare("UPDATE workspace_device_sessions SET revoked_at=? WHERE device_session_id=?")
+      .run(new Date().toISOString(), "observer-device-c");
+
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "membership" });
+
+    await expect(closed).resolves.toMatchObject({
+      code: 4001,
+      messages: [{ type: "human.observer.auth_expired" }]
+    });
+  });
+
+  it("does not initialize when shutdown and hello arrive in the same turn", async () => {
+    const fixture = await setupDirectObserver(standardDeliveryLimits);
     const socket = await connect(fixture.url, fixture.token);
     const closed = messagesThroughClose(socket);
 
@@ -449,21 +514,13 @@ describe("human observer WSS", () => {
     const socket = await connect(fixture.url, fixture.token);
     const closed = messagesThroughClose(socket);
 
-    setImmediate(() => sendHello(socket, fixture.projectId, 0));
+    setTimeout(() => sendHello(socket, fixture.projectId, 0), 5);
 
     await expect(closed).resolves.toEqual({ code: 4002, messages: [] });
   });
 
   it("does not process a ping queued after protocol close", async () => {
-    const fixture = await setupDirectObserver({
-      replay: { maxEvents: 10, maxBytes: 100_000 },
-      replayBatchEvents: 1,
-      maxBufferedBytes: 16_384,
-      maxPendingBytes: 16_384,
-      controlFrameReserveBytes: 1_024,
-      sendTimeoutMs: 1_000,
-      helloTimeoutMs: 10_000
-    });
+    const fixture = await setupDirectObserver(standardDeliveryLimits);
     const socket = await connect(fixture.url, fixture.token);
     sendHello(socket, fixture.projectId, 0);
     await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
@@ -476,15 +533,7 @@ describe("human observer WSS", () => {
   });
 
   it("preserves auth-expired control delivery and close ownership with in-flight sends", async () => {
-    const fixture = await setupDirectObserver({
-      replay: { maxEvents: 10, maxBytes: 100_000 },
-      replayBatchEvents: 1,
-      maxBufferedBytes: 16_384,
-      maxPendingBytes: 16_384,
-      controlFrameReserveBytes: 1_024,
-      sendTimeoutMs: 1_000,
-      helloTimeoutMs: 10_000
-    });
+    const fixture = await setupDirectObserver(standardDeliveryLimits);
     const socket = await connect(fixture.url, fixture.token);
     sendHello(socket, fixture.projectId, 0);
     await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
@@ -511,15 +560,7 @@ describe("human observer WSS", () => {
   });
 
   it("preserves graceful shutdown ownership with in-flight and pending sends", async () => {
-    const fixture = await setupDirectObserver({
-      replay: { maxEvents: 10, maxBytes: 100_000 },
-      replayBatchEvents: 1,
-      maxBufferedBytes: 16_384,
-      maxPendingBytes: 16_384,
-      controlFrameReserveBytes: 1_024,
-      sendTimeoutMs: 1_000,
-      helloTimeoutMs: 10_000
-    });
+    const fixture = await setupDirectObserver(standardDeliveryLimits);
     const socket = await connect(fixture.url, fixture.token);
     sendHello(socket, fixture.projectId, 0);
     await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
@@ -667,7 +708,10 @@ describe("human observer WSS", () => {
       workspaceId: "observer-workspace-b",
       suffix: "owner-b"
     });
-    const projectAccess = new ProjectAccessRepository(database);
+    const authorizationChanges = new AuthorizationChangeSignal();
+    const projectAccess = new ProjectAccessRepository(database, undefined, (change) =>
+      authorizationChanges.publish(change)
+    );
     for (const [workspaceId, ownerHumanPrincipalId] of [
       ["observer-workspace", firstOwner],
       ["observer-workspace-b", secondOwner]
@@ -694,9 +738,11 @@ describe("human observer WSS", () => {
           (workspaceId === "observer-workspace" || workspaceId === "observer-workspace-b"),
         hasProject: () => false
       },
+      authorizationChanges,
       maxPayloadBytes: 16_384,
       shutdownTimeoutMs: 1_000,
-      transportAdmission: loopbackHttpTransportAdmission
+      transportAdmission: loopbackHttpTransportAdmission,
+      authorizationSafetyCheckIntervalMs: 25
     });
     observerServers.push(observer);
     await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));

@@ -26,6 +26,7 @@ import {
 import { z } from "zod";
 import { inWriteTransaction, type SqliteDatabase } from "./sqlite.js";
 import { assertNoPendingSnapshotRestore } from "./authorizationFence.js";
+import type { AuthorizationChangeScope } from "./authorizationChangeSignal.js";
 import { ProjectAccessPolicy } from "./projectAccessPolicy.js";
 import {
   ProjectRegistryRepository,
@@ -68,7 +69,8 @@ export class ProjectAccessRepository {
 
   constructor(
     private readonly database: SqliteDatabase,
-    clock: () => Date = () => new Date()
+    clock: () => Date = () => new Date(),
+    private readonly onAuthorizationChangeAfterCommit?: (change: AuthorizationChangeScope) => void
   ) {
     this.registry = new ProjectRegistryRepository(database, clock);
     this.policy = new ProjectAccessPolicy(database, this.registry);
@@ -263,7 +265,7 @@ export class ProjectAccessRepository {
       canvasId: input.canvasId ?? undefined,
       actor: input.grantedBy
     });
-    return inWriteTransaction(this.database, () => {
+    const grant = inWriteTransaction(this.database, () => {
       assertNoPendingSnapshotRestore(this.database, {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
@@ -334,13 +336,19 @@ export class ProjectAccessRepository {
         canvasId: canvas?.canvasId ?? null
       });
     });
+    this.onAuthorizationChangeAfterCommit?.({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      humanPrincipalId: input.humanPrincipalId
+    });
+    return grant;
   }
 
   revoke(rawInput: unknown): MembershipGrant {
     const input = revokeInputSchema.parse(rawInput);
     const id = input.grantId;
     const expected = input.expectedAclRevision;
-    return inWriteTransaction(this.database, () => {
+    const grant = inWriteTransaction(this.database, () => {
       assertNoPendingSnapshotRestore(this.database, {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
@@ -421,6 +429,12 @@ export class ProjectAccessRepository {
           .get(id) as Record<string, unknown>
       );
     });
+    this.onAuthorizationChangeAfterCommit?.({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      humanPrincipalId: grant.humanPrincipalId
+    });
+    return grant;
   }
 
   /**
@@ -457,7 +471,7 @@ export class ProjectAccessRepository {
       };
     }
 
-    return inWriteTransaction(this.database, () => {
+    const result: AccessMutationResult = inWriteTransaction(this.database, () => {
       const current = this.currentAclRevision(scope.workspaceId, scope.projectId, canvasId);
       if (current !== request.expectedAclRevision) {
         return { status: "conflict", reason: "acl_revision_conflict", aclRevision: current };
@@ -599,6 +613,14 @@ export class ProjectAccessRepository {
       if (revoked.changes !== 1) throw new Error("access_grant_revision_race");
       return { status: "applied", aclRevision: current + 1, updatedAt: at };
     });
+    if (result.status === "applied") {
+      this.onAuthorizationChangeAfterCommit?.({
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        ...(request.operation === "grant" ? { humanPrincipalId: request.humanPrincipalId } : {})
+      });
+    }
+    return result;
   }
 
   private currentAclRevision(

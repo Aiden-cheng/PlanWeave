@@ -737,6 +737,7 @@
         "humanDisplayNameRepository.test.ts",
         "humanDisplayNameService.test.ts",
         "humanObserverJournal.test.ts",
+        "humanObserverWsFrame.test.ts",
         "humanObserverWs.test.ts",
         "humanRemoteHttp.test.ts",
         "lifecycle.test.ts",

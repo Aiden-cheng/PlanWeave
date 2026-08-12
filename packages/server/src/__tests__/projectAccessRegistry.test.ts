@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { accessMutationRequestSchema } from "@planweave-ai/collaboration-protocol/access/control";
 import { applyMigrations } from "../migrations.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
@@ -60,6 +60,31 @@ async function registered() {
 }
 
 describe("project access registry", () => {
+  it("publishes authority changes only after an ACL transaction commits", async () => {
+    const { database } = await registered();
+    const publish = vi.fn();
+    const access = new ProjectAccessRepository(
+      database,
+      () => new Date("2026-01-02T00:00:00.000Z"),
+      publish
+    );
+    database.exec(
+      `CREATE TRIGGER reject_test_access_grant BEFORE INSERT ON project_access_grants
+       BEGIN SELECT RAISE(ABORT, 'forced_acl_rollback'); END`
+    );
+
+    expect(() =>
+      access.grant({
+        workspaceId: "w",
+        projectId: "p",
+        humanPrincipalId: "viewer",
+        role: "viewer",
+        grantedBy: owner
+      })
+    ).toThrow();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   it("projects only active grants in the requested workspace and scope", async () => {
     const { access } = await registered();
     access.registerProjectInternal({
