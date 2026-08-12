@@ -207,6 +207,25 @@ export class AgentHostRepository {
     return this.workspaceIdentity.workspaceForHost(hostId);
   }
 
+  workspaceIdsForHosts(hostIds: readonly string[]): Map<string, readonly string[]> {
+    if (hostIds.length === 0) return new Map();
+    const uniqueHostIds = [...new Set(hostIds)];
+    const placeholders = uniqueHostIds.map(() => "?").join(",");
+    const rows = this.database
+      .prepare(
+        `SELECT host_id,workspace_id FROM workspace_agent_hosts
+         WHERE host_id IN (${placeholders}) ORDER BY host_id,workspace_id`
+      )
+      .all(...uniqueHostIds) as Array<{ host_id: string; workspace_id: string }>;
+    const result = new Map<string, string[]>();
+    for (const row of rows) {
+      const workspaceIds = result.get(row.host_id) ?? [];
+      workspaceIds.push(row.workspace_id);
+      result.set(row.host_id, workspaceIds);
+    }
+    return result;
+  }
+
   register(displayName: string): RegisteredAgentHost {
     const token = `pw_host_${randomBytes(32).toString("base64url")}`;
     return this.registerWithCredential(displayName, token, [], 1);

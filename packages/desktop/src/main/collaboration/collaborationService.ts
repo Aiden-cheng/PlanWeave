@@ -19,7 +19,8 @@ import {
 import {
   type AssignmentDisplayProjection,
   type AssignmentListPage,
-  type EligibleAssigneesResponse
+  type EligibleAssigneesResponse,
+  type EligibleHostBatchResponse
 } from "@planweave-ai/collaboration-protocol/work/assignment";
 import {
   type CollaborationWorkScope,
@@ -926,6 +927,10 @@ export class CollaborationService {
 
   async listEligibleAssignees(input: unknown): Promise<EligibleAssigneesResponse> {
     return this.readMutations.listEligibleAssignees(input);
+  }
+
+  async listEligibleHostsBatch(input: unknown): Promise<EligibleHostBatchResponse> {
+    return this.readMutations.listEligibleHostsBatch(input);
   }
 
   async getWorkAuthority(input: unknown): Promise<WorkAuthorityProjection> {

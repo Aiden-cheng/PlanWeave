@@ -4,8 +4,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   assignmentDisplayProjectionSchema,
-  type AssignmentDisplayProjection
+  assignmentHostFactsSchema,
+  eligibleHostBatchResponseSchema,
+  type AssignmentDisplayProjection,
+  type AssignmentHostFacts,
+  type EligibleHostBatchRequest,
+  type EligibleHostBatchResponse
 } from "@planweave-ai/collaboration-protocol/work/assignment";
+import type { BlockWorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import {
   exampleActivityListPage,
   exampleAssignmentProjection,
@@ -27,6 +33,35 @@ import type { CollaborationReadBridgePort } from "../renderer/collaboration/Coll
 
 const workItem = exampleAssignmentProjection.workItem;
 const workKey = workItemKey(workItem);
+
+function eligibleHost(hostId: string, capabilities = ["acp"]): AssignmentHostFacts {
+  return assignmentHostFactsSchema.parse({
+    workspaceId: "workspace-1",
+    projectId: "project-demo-001",
+    hostId,
+    exists: true,
+    revoked: false,
+    authorizedForProject: true,
+    online: true,
+    ready: true,
+    capabilities,
+    displayName: `Eligible ${hostId}`
+  });
+}
+
+function eligibleHostBatch(
+  workItems: readonly BlockWorkItemRef[],
+  hosts: readonly AssignmentHostFacts[]
+): EligibleHostBatchResponse {
+  return eligibleHostBatchResponseSchema.parse({
+    items: workItems.map((batchWorkItem, index) => ({
+      index,
+      workItem: batchWorkItem,
+      hostIds: hosts.map((host) => host.hostId)
+    })),
+    hosts
+  });
+}
 
 function blockAssignment(blockRef: string, hostId: string): AssignmentDisplayProjection {
   return assignmentDisplayProjectionSchema.parse({
@@ -118,7 +153,7 @@ function createMockApi(options?: {
   listAssignments: ReturnType<typeof vi.fn>;
   listActivity: ReturnType<typeof vi.fn>;
   listComments: ReturnType<typeof vi.fn>;
-  listEligible: ReturnType<typeof vi.fn>;
+  listEligibleBatch: ReturnType<typeof vi.fn>;
 } {
   const statusListeners: Array<(status: CollaborationStatus) => void> = [];
   const signalListeners: Array<(signal: CollaborationObserverSignal) => void> = [];
@@ -130,24 +165,10 @@ function createMockApi(options?: {
     );
   const listActivity = vi.fn().mockResolvedValue(options?.activity ?? exampleActivityListPage);
   const listComments = vi.fn().mockResolvedValue(options?.comments ?? exampleCommentListPage);
-  const listEligible = vi.fn().mockResolvedValue({
-    workItem,
-    humans: [],
-    hosts: [
-      {
-        projectId: "project-demo-001",
-        hostId: "host-001",
-        exists: true,
-        revoked: false,
-        authorizedForProject: true,
-        online: true,
-        capabilities: ["acp"],
-        displayName: "Host One"
-      }
-    ],
-    nextHumanCursor: null,
-    nextHostCursor: null
-  });
+  const listEligible = vi.fn();
+  const listEligibleBatch = vi.fn((request: EligibleHostBatchRequest) =>
+    Promise.resolve(eligibleHostBatch(request.workItems, []))
+  );
   const updateAssignment =
     options?.onUpdateAssignment ??
     vi.fn().mockResolvedValue({
@@ -168,6 +189,7 @@ function createMockApi(options?: {
     listCollaborationMembers: listMembers,
     listCollaborationAssignments: listAssignments,
     listCollaborationEligibleAssignees: listEligible,
+    listCollaborationEligibleHostsBatch: listEligibleBatch,
     getCollaborationWorkAuthority: vi.fn().mockImplementation(async ({ workItem: item }) => {
       const scope =
         item.kind === "task"
@@ -261,13 +283,13 @@ function createMockApi(options?: {
     listAssignments,
     listActivity,
     listComments,
-    listEligible
+    listEligibleBatch
   };
 }
 
 describe("CollaborationReadModelController", () => {
   it("loads membership, hosts, assignments, activity on setActiveProject", async () => {
-    const { api, listMembers, listAssignments, listActivity, listEligible } = createMockApi();
+    const { api, listMembers, listAssignments, listActivity, listEligibleBatch } = createMockApi();
     const controller = new CollaborationReadModelController({
       api,
       clock: { now: () => new Date("2030-01-01T00:00:00.000Z") }
@@ -288,58 +310,34 @@ describe("CollaborationReadModelController", () => {
     expect(listMembers).toHaveBeenCalledTimes(1);
     expect(listAssignments).toHaveBeenCalledTimes(1);
     expect(listActivity).toHaveBeenCalledTimes(1);
-    expect(listEligible).not.toHaveBeenCalled();
+    expect(listEligibleBatch).not.toHaveBeenCalled();
     controller.dispose();
   });
 
-  it("queries every bounded Block for eligible Hosts and dedupes the Host union", async () => {
+  it("queries 50 bounded Blocks in one eligible Host batch and maps the Host union", async () => {
     const firstBlockRef = "task-1#B-001";
     const secondBlockRef = "task-1#B-002";
     const firstBlock = blockAssignment(firstBlockRef, "host-assigned-1");
     const secondBlock = blockAssignment(secondBlockRef, "host-assigned-2");
+    const remainingBlocks = Array.from({ length: 48 }, (_, index) =>
+      blockAssignment(
+        `task-1#B-${String(index + 3).padStart(3, "0")}`,
+        `host-assigned-${index + 3}`
+      )
+    );
+    const allBlocks = [firstBlock, secondBlock, ...remainingBlocks];
     const mock = createMockApi({
       assignments: {
-        items: [exampleAssignmentProjection, firstBlock, secondBlock],
+        items: [exampleAssignmentProjection, ...allBlocks],
         nextCursor: null
       }
     });
-    mock.listEligible.mockImplementation(
-      async (input: { workItem: AssignmentDisplayProjection["workItem"] }) => {
-        const hostId =
-          input.workItem.kind === "block" && input.workItem.blockRef === firstBlockRef
-            ? "host-eligible-1"
-            : "host-eligible-2";
-        return {
-          workItem: input.workItem,
-          humans: [],
-          hosts: [
-            {
-              projectId: "project-demo-001",
-              hostId,
-              exists: true,
-              revoked: false,
-              authorizedForProject: true,
-              online: true,
-              capabilities: ["acp"]
-            },
-            ...(hostId === "host-eligible-1"
-              ? [
-                  {
-                    projectId: "project-demo-001",
-                    hostId: "host-assigned-1",
-                    exists: true,
-                    revoked: false,
-                    authorizedForProject: true,
-                    online: true,
-                    capabilities: ["acp", "shell"]
-                  }
-                ]
-              : [])
-          ],
-          nextHumanCursor: null,
-          nextHostCursor: null
-        };
-      }
+    mock.listEligibleBatch.mockImplementation(async (input: EligibleHostBatchRequest) =>
+      eligibleHostBatch(input.workItems, [
+        eligibleHost("host-eligible-1"),
+        eligibleHost("host-assigned-1", ["acp", "shell"]),
+        eligibleHost("host-eligible-2")
+      ])
     );
 
     const controller = new CollaborationReadModelController({ api: mock.api });
@@ -348,17 +346,66 @@ describe("CollaborationReadModelController", () => {
       projectId: "project-demo-001"
     });
 
-    expect(mock.listEligible).toHaveBeenCalledTimes(2);
-    expect(mock.listEligible).toHaveBeenNthCalledWith(1, { workItem: firstBlock.workItem });
-    expect(mock.listEligible).toHaveBeenNthCalledWith(2, { workItem: secondBlock.workItem });
+    expect(mock.listEligibleBatch).toHaveBeenCalledTimes(1);
+    expect(mock.listEligibleBatch).toHaveBeenCalledWith({
+      workItems: allBlocks.map((block) => block.workItem)
+    });
     const hostIds = controller.getSnapshot().hosts.map((host) => host.hostId);
-    expect(hostIds).toHaveLength(4);
-    expect(new Set(hostIds)).toEqual(
-      new Set(["host-assigned-1", "host-assigned-2", "host-eligible-1", "host-eligible-2"])
+    expect(hostIds).toHaveLength(52);
+    expect(hostIds).toEqual(
+      expect.arrayContaining([
+        "host-assigned-1",
+        "host-assigned-50",
+        "host-eligible-1",
+        "host-eligible-2"
+      ])
     );
     expect(
       controller.getSnapshot().hosts.find((host) => host.hostId === "host-assigned-1")
     ).toEqual(expect.objectContaining({ capabilities: ["acp", "shell"] }));
+    controller.dispose();
+  });
+
+  it("dedupes repeated Block assignments before the eligible Host batch", async () => {
+    const first = blockAssignment("task-1#B-001", "host-assigned-first");
+    const repeated = blockAssignment("task-1#B-001", "host-assigned-last");
+    const second = blockAssignment("task-1#B-002", "host-assigned-second");
+    if (
+      first.workItem.kind !== "block" ||
+      repeated.workItem.kind !== "block" ||
+      second.workItem.kind !== "block"
+    ) {
+      throw new Error("block_work_item_expected");
+    }
+    const mock = createMockApi({
+      assignments: { items: [first, repeated, second], nextCursor: null }
+    });
+    mock.listEligibleBatch.mockImplementation(async (input: EligibleHostBatchRequest) =>
+      eligibleHostBatch(input.workItems, [eligibleHost("host-eligible")])
+    );
+
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+
+    expect(mock.listEligibleBatch).toHaveBeenCalledTimes(1);
+    expect(mock.listEligibleBatch).toHaveBeenCalledWith({
+      workItems: [first.workItem, second.workItem]
+    });
+    const snapshot = controller.getSnapshot();
+    expect(Object.keys(snapshot.assignmentsByWorkItem)).toHaveLength(2);
+    expect(snapshot.assignmentsByWorkItem[workItemKey(first.workItem)]).toEqual(repeated);
+    expect(snapshot.assignmentsByWorkItem[workItemKey(second.workItem)]).toEqual(second);
+    expect(snapshot.hosts.map((host) => host.hostId)).toEqual(
+      expect.arrayContaining([
+        "host-assigned-first",
+        "host-assigned-last",
+        "host-assigned-second",
+        "host-eligible"
+      ])
+    );
     controller.dispose();
   });
 
@@ -370,24 +417,10 @@ describe("CollaborationReadModelController", () => {
         nextCursor: null
       }
     });
-    mock.listEligible.mockResolvedValue({
-      workItem: block.workItem,
-      humans: [],
-      hosts: [
-        {
-          projectId: "project-demo-001",
-          hostId: "host-eligible-1",
-          exists: true,
-          revoked: false,
-          authorizedForProject: true,
-          online: true,
-          capabilities: ["acp"],
-          displayName: "Eligible One"
-        }
-      ],
-      nextHumanCursor: null,
-      nextHostCursor: null
-    });
+    if (block.workItem.kind !== "block") throw new Error("block_work_item_expected");
+    mock.listEligibleBatch.mockResolvedValue(
+      eligibleHostBatch([block.workItem], [eligibleHost("host-eligible-1")])
+    );
 
     const controller = new CollaborationReadModelController({ api: mock.api });
     await controller.setActiveProject({
@@ -415,7 +448,7 @@ describe("CollaborationReadModelController", () => {
     const mock = createMockApi({
       assignments: { items: [block], nextCursor: null }
     });
-    mock.listEligible.mockRejectedValueOnce({
+    mock.listEligibleBatch.mockRejectedValueOnce({
       kind: "network",
       code: "eligible_hosts_unavailable",
       message: "Eligible Host query failed.",
@@ -452,23 +485,12 @@ describe("CollaborationReadModelController", () => {
         nextCursor: null
       }
     });
-    const eligibleHost = (hostId: string) => ({
-      projectId: "project-demo-001",
-      hostId,
-      exists: true,
-      revoked: false,
-      authorizedForProject: true,
-      online: true,
-      capabilities: ["acp"],
-      displayName: `Eligible ${hostId}`
-    });
-    mock.listEligible.mockResolvedValue({
-      workItem: initialBlock.workItem,
-      humans: [],
-      hosts: [eligibleHost("host-eligible-old")],
-      nextHumanCursor: null,
-      nextHostCursor: null
-    });
+    if (initialBlock.workItem.kind !== "block" || nextBlock.workItem.kind !== "block") {
+      throw new Error("block_work_item_expected");
+    }
+    mock.listEligibleBatch.mockResolvedValue(
+      eligibleHostBatch([initialBlock.workItem], [eligibleHost("host-eligible-old")])
+    );
 
     const controller = new CollaborationReadModelController({ api: mock.api });
     await controller.setActiveProject({
@@ -485,7 +507,7 @@ describe("CollaborationReadModelController", () => {
       retryable: true
     };
     mock.listAssignments.mockResolvedValueOnce({ items: [nextBlock], nextCursor: null });
-    mock.listEligible.mockRejectedValueOnce(failure);
+    mock.listEligibleBatch.mockRejectedValueOnce(failure);
     await controller.refreshAuthoritative({ reason: "eligible_failure" });
 
     const failedSnapshot = controller.getSnapshot();
@@ -503,13 +525,9 @@ describe("CollaborationReadModelController", () => {
     );
 
     mock.listAssignments.mockResolvedValueOnce({ items: [nextBlock], nextCursor: null });
-    mock.listEligible.mockResolvedValueOnce({
-      workItem: nextBlock.workItem,
-      humans: [],
-      hosts: [eligibleHost("host-eligible-new")],
-      nextHumanCursor: null,
-      nextHostCursor: null
-    });
+    mock.listEligibleBatch.mockResolvedValueOnce(
+      eligibleHostBatch([nextBlock.workItem], [eligibleHost("host-eligible-new")])
+    );
     await controller.refreshAuthoritative({ reason: "eligible_recovery" });
 
     const recoveredSnapshot = controller.getSnapshot();
@@ -767,7 +785,7 @@ describe("CollaborationReadModelController", () => {
     };
 
     mock.listAssignments.mockResolvedValueOnce({ items: [block], nextCursor: null });
-    mock.listEligible.mockRejectedValueOnce(failure);
+    mock.listEligibleBatch.mockRejectedValueOnce(failure);
     observerListener(assignmentObserverSignal(31));
     await waitFor(() => {
       expect(controller.getSnapshot().syncPhase).toBe("degraded");
@@ -781,13 +799,8 @@ describe("CollaborationReadModelController", () => {
     expect(controller.getSnapshot().loadingKinds).not.toContain("assignments");
 
     mock.listAssignments.mockResolvedValueOnce({ items: [block], nextCursor: null });
-    mock.listEligible.mockResolvedValueOnce({
-      workItem: block.workItem,
-      humans: [],
-      hosts: [],
-      nextHumanCursor: null,
-      nextHostCursor: null
-    });
+    if (block.workItem.kind !== "block") throw new Error("block_work_item_expected");
+    mock.listEligibleBatch.mockResolvedValueOnce(eligibleHostBatch([block.workItem], []));
     observerListener(assignmentObserverSignal(31));
     await waitFor(() => {
       expect(controller.getSnapshot().observerCursor).toBe(31);

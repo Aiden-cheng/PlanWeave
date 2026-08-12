@@ -29,15 +29,13 @@ import {
 import { COMMENT_ATTACHMENT_MAX_BYTES } from "@planweave-ai/collaboration-protocol/core/limits";
 import type { HumanObserverCursor } from "@planweave-ai/collaboration-protocol/activity/observer";
 import {
-  assignmentDisplayProjectionSchema,
-  assignmentListPageSchema,
   assignmentListQuerySchema,
-  assignmentUpdateWireCommandSchema,
-  eligibleAssigneesResponseSchema,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
   type AssignmentUpdateWireCommand,
-  type EligibleAssigneesResponse
+  type EligibleAssigneesResponse,
+  type EligibleHostBatchRequest,
+  type EligibleHostBatchResponse
 } from "@planweave-ai/collaboration-protocol/work/assignment";
 import {
   createPendingAttachmentRequestSchema,
@@ -179,6 +177,7 @@ import {
   type CollaborationRemoteOperationsPort
 } from "./CollaborationRemoteOperationsClient.js";
 import { HumanObserverClient } from "./HumanObserverClient.js";
+import { CollaborationAssignmentClient } from "./CollaborationAssignmentClient.js";
 
 export type {
   CollaborationClientClock,
@@ -219,6 +218,7 @@ export class CollaborationClient {
   private readonly registryClient: CollaborationRegistryClient;
   private readonly canvasCommands: CanvasCommandClient;
   private readonly remoteOperationsClient: CollaborationRemoteOperationsClient;
+  private readonly assignmentClient: CollaborationAssignmentClient;
   private readonly observer: HumanObserverClient;
 
   constructor(private readonly options: CollaborationClientOptions) {
@@ -264,6 +264,10 @@ export class CollaborationClient {
     this.remoteOperationsClient = new CollaborationRemoteOperationsClient(
       options.profile.projectId,
       this.transport
+    );
+    this.assignmentClient = new CollaborationAssignmentClient(
+      this.transport,
+      options.profile.projectId
     );
     this.observer = new HumanObserverClient({
       profile: options.profile,
@@ -527,58 +531,35 @@ export class CollaborationClient {
     workItem: WorkItemRef,
     signal?: AbortSignal
   ): Promise<AssignmentDisplayProjection> {
-    const params = new URLSearchParams({ workItem: JSON.stringify(workItem) });
-    return this.json(
-      "GET",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments?${params}`,
-      assignmentDisplayProjectionSchema,
-      { signal }
-    );
+    return this.assignmentClient.getAssignment(workItem, signal);
   }
 
   async listAssignments(
     query: z.input<typeof assignmentListQuerySchema> = {},
     signal?: AbortSignal
   ): Promise<AssignmentListPage> {
-    const q = assignmentListQuerySchema.parse(query);
-    const params = new URLSearchParams({
-      cursor: String(q.cursor),
-      limit: String(q.limit)
-    });
-    if (q.canvasId) params.set("canvasId", q.canvasId);
-    if (q.workItems) params.set("workItems", JSON.stringify(q.workItems));
-    return this.json(
-      "GET",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/list?${params}`,
-      assignmentListPageSchema,
-      { signal }
-    );
+    return this.assignmentClient.listAssignments(query, signal);
   }
 
   async updateAssignment(
     command: AssignmentUpdateWireCommand,
     signal?: AbortSignal
   ): Promise<AssignmentDisplayProjection> {
-    const body = assignmentUpdateWireCommandSchema.parse(command);
-    return this.json(
-      "POST",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments`,
-      assignmentDisplayProjectionSchema,
-      { body, signal }
-    );
+    return this.assignmentClient.updateAssignment(command, signal);
   }
 
   async listEligibleAssignees(
     workItem: WorkItemRef,
     signal?: AbortSignal
   ): Promise<EligibleAssigneesResponse> {
-    const params = new URLSearchParams({ workItem: JSON.stringify(workItem) });
-    return this.json(
-      "GET",
-      `/api/v1/projects/${encodeURIComponent(this.profile.projectId)}/assignments/eligible-assignees?${params}`,
-      eligibleAssigneesResponseSchema,
-      { signal }
-    );
+    return this.assignmentClient.listEligibleAssignees(workItem, signal);
+  }
+
+  async listEligibleHostsBatch(
+    request: EligibleHostBatchRequest,
+    signal?: AbortSignal
+  ): Promise<EligibleHostBatchResponse> {
+    return this.assignmentClient.listEligibleHostsBatch(request, signal);
   }
 
   // ---------------------------------------------------------------------------

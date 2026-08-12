@@ -11,9 +11,11 @@ import {
 import {
   assignmentListQuerySchema,
   assignmentUpdateWireCommandSchema,
+  eligibleHostBatchRequestSchema,
   type AssignmentDisplayProjection,
   type AssignmentListPage,
-  type EligibleAssigneesResponse
+  type EligibleAssigneesResponse,
+  type EligibleHostBatchResponse
 } from "@planweave-ai/collaboration-protocol/work/assignment";
 import {
   createPendingAttachmentRequestSchema,
@@ -86,6 +88,11 @@ export class CollaborationReadMutationsFacade {
   listEligibleAssignees(input: unknown): Promise<EligibleAssigneesResponse> {
     const { workItem } = workItemPayload(input);
     return this.withActiveClient((client) => client.listEligibleAssignees(workItem));
+  }
+
+  listEligibleHostsBatch(input: unknown): Promise<EligibleHostBatchResponse> {
+    const request = eligibleHostBatchRequestSchema.parse(input);
+    return this.withActiveClient((client) => client.listEligibleHostsBatch(request));
   }
 
   getWorkAuthority(input: unknown): Promise<WorkAuthorityProjection> {

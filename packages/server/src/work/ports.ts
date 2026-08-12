@@ -8,6 +8,7 @@ import {
 import type { HumanIdentityRepository } from "../identity/repository.js";
 import { isActiveMembership } from "../identity/schemas.js";
 import type { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { WORK_ELIGIBLE_HOST_BATCH_MAX } from "./limits.js";
 import {
   assignmentHostFactsSchema,
   assignmentMembershipFactsSchema,
@@ -55,6 +56,8 @@ export type AssignmentHostPort = {
       offset?: number;
     }
   ): AssignmentHostFacts[];
+  /** One inventory projection for batch eligibility; capability filtering stays in the service. */
+  listEligibleHostProjections(workspaceId: string, projectId: string): AssignmentHostFacts[];
 };
 
 export type AssignmentMembershipPortFromIdentityOptions =
@@ -162,7 +165,12 @@ export function createHostAssignmentPort(
     options.isHostAuthorizedForProject ??
     ((_workspaceId: string, _projectId: string, host: AgentHost) => host.revokedAt === undefined);
 
-  function toFacts(workspaceId: string, projectId: string, host: AgentHost): AssignmentHostFacts {
+  function toFacts(
+    workspaceId: string,
+    projectId: string,
+    host: AgentHost,
+    hostWorkspaceIds?: readonly string[]
+  ): AssignmentHostFacts {
     const online = isAgentHostOnline(host, { now: clock(), hostOfflineAfterMs });
     const availability = operatorHostAvailability(host, workspaceId, online);
     const active = options.countActiveDispatches?.(host.id);
@@ -173,7 +181,9 @@ export function createHostAssignmentPort(
       exists: true,
       revoked: host.revokedAt !== undefined,
       authorizedForProject:
-        options.hosts.workspaceForHost(host.id) === workspaceId &&
+        (hostWorkspaceIds === undefined
+          ? options.hosts.workspaceForHost(host.id) === workspaceId
+          : hostWorkspaceIds.length === 1 && hostWorkspaceIds[0] === workspaceId) &&
         isAuthorized(workspaceId, projectId, host),
       online,
       ready: availability.status === "available",
@@ -219,6 +229,15 @@ export function createHostAssignmentPort(
           const available = new Set(facts.capabilities);
           return required.every((capability) => available.has(capability));
         });
+    },
+    listEligibleHostProjections(workspaceId, projectId) {
+      const hosts = options.hosts.list(WORK_ELIGIBLE_HOST_BATCH_MAX, 0);
+      const workspaceIdsByHost = options.hosts.workspaceIdsForHosts(hosts.map((host) => host.id));
+      return hosts
+        .map((host) => toFacts(workspaceId, projectId, host, workspaceIdsByHost.get(host.id) ?? []))
+        .filter(
+          (facts) => facts.exists && !facts.revoked && facts.authorizedForProject && facts.ready
+        );
     }
   };
 }
@@ -244,6 +263,37 @@ export function createRoutedWorkItemPackagePort(
         });
       }
       return port.resolveWorkItem(workItem);
+    },
+    resolveWorkItems(workItems) {
+      const results = new Array<WorkItemPackageFacts>(workItems.length);
+      const byCanvas = new Map<string, Array<{ index: number; workItem: WorkItemRef }>>();
+      workItems.forEach((workItem, index) => {
+        const group = byCanvas.get(workItem.canvasId) ?? [];
+        group.push({ index, workItem });
+        byCanvas.set(workItem.canvasId, group);
+      });
+      for (const [canvasId, group] of byCanvas) {
+        const port = resolveCanvas(canvasId);
+        if (!port) {
+          for (const { index, workItem } of group) {
+            results[index] = workItemPackageFactsSchema.parse({
+              canvasId: workItem.canvasId,
+              kind: workItem.kind,
+              exists: false,
+              taskId: workItem.kind === "task" ? workItem.taskId : undefined,
+              blockRef: workItem.kind === "block" ? workItem.blockRef : undefined,
+              requiredCapabilities: []
+            });
+          }
+          continue;
+        }
+        const resolved = port.resolveWorkItems(group.map(({ workItem }) => workItem));
+        if (resolved.length !== group.length) throw new Error("work_item_batch_length_mismatch");
+        group.forEach(({ index }, resultIndex) => {
+          results[index] = resolved[resultIndex]!;
+        });
+      }
+      return results;
     }
   };
 }

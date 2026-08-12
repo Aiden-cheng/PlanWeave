@@ -3,11 +3,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
+import { eligibleHostBatchResponseSchema } from "@planweave-ai/collaboration-protocol/work/assignment";
 import {
   acquireCollaborationReadModelController,
   resetCollaborationReadModelHubForTests
 } from "../renderer/collaboration/collaborationReadModelHub";
 import type { CollaborationReadBridgePort } from "../renderer/collaboration/CollaborationReadModelController";
+import { toCollaborationReadBridge } from "../renderer/collaboration/collaborationReadBridge";
 import { useRemoteRunPanelController } from "../renderer/hooks/useRemoteRunPanelController";
 import { createTranslator } from "../renderer/i18n";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../shared/collaboration";
@@ -209,6 +211,7 @@ function createApi() {
   });
 
   const api = {
+    upsertCollaborationProfile: vi.fn(),
     getCollaborationStatus: vi.fn().mockResolvedValue(status),
     onCollaborationStatusChanged: vi.fn(() => () => undefined),
     onCollaborationObserverSignal: vi.fn(() => () => undefined),
@@ -329,8 +332,14 @@ function createApi() {
     executeCollaborationRemoteOperationAction: executeAction,
     replayCollaborationRemoteOperationEvents: replay,
     listCollaborationRemoteOperationInteractions: listInteractions,
-    settleCollaborationRemoteOperationInteraction: settle
-  } as unknown as PlanWeaveCollaborationApi;
+    settleCollaborationRemoteOperationInteraction: settle,
+    listCollaborationEligibleHostsBatch: vi.fn(async ({ workItems }) =>
+      eligibleHostBatchResponseSchema.parse({
+        items: workItems.map((workItem, index) => ({ index, workItem, hostIds: [] })),
+        hosts: []
+      })
+    )
+  } as PlanWeaveCollaborationApi;
 
   return {
     api,
@@ -346,6 +355,12 @@ function createApi() {
 
 const apis: CollaborationReadBridgePort[] = [];
 
+function readBridge(api: PlanWeaveCollaborationApi): CollaborationReadBridgePort {
+  const bridge = toCollaborationReadBridge(api);
+  if (!bridge) throw new Error("collaboration_read_bridge_missing");
+  return bridge;
+}
+
 afterEach(() => {
   while (apis.length > 0) {
     resetCollaborationReadModelHubForTests(apis.pop());
@@ -355,7 +370,7 @@ afterEach(() => {
 describe("useRemoteRunPanelController", () => {
   it("loads observation, events, and interactions when open", async () => {
     const { api, observe, replay, listInteractions } = createApi();
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -389,7 +404,7 @@ describe("useRemoteRunPanelController", () => {
   it("dispatches and cancels through the mock bridge", async () => {
     const { api, dispatch, executeAction, observe } = createApi();
     observe.mockResolvedValueOnce(observation("running"));
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -489,7 +504,7 @@ describe("useRemoteRunPanelController", () => {
         }
       ]
     });
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -548,7 +563,7 @@ describe("useRemoteRunPanelController", () => {
     listAgentEndpoints.mockImplementationOnce(
       () => new Promise((resolve) => (resolveNew = resolve))
     );
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -674,7 +689,7 @@ describe("useRemoteRunPanelController", () => {
         blockRef: testCase.next.blockRef
       });
     }
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -790,7 +805,7 @@ describe("useRemoteRunPanelController", () => {
     const { api, executeAction, observe } = createApi();
     const pendingAction = deferred<Awaited<ReturnType<typeof executeAction>>>();
     executeAction.mockImplementationOnce(() => pendingAction.promise);
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -867,7 +882,7 @@ describe("useRemoteRunPanelController", () => {
         }
       ]
     });
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -920,7 +935,7 @@ describe("useRemoteRunPanelController", () => {
       message: "agent_endpoint_unavailable",
       retryable: true
     });
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -982,7 +997,7 @@ describe("useRemoteRunPanelController", () => {
       message: "network failed",
       retryable: true
     });
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -1018,7 +1033,7 @@ describe("useRemoteRunPanelController", () => {
 
   it("settles one pending permission interaction", async () => {
     const { api, settle } = createApi();
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -1088,7 +1103,7 @@ describe("useRemoteRunPanelController", () => {
       },
       state: "settled"
     });
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({
@@ -1143,7 +1158,7 @@ describe("useRemoteRunPanelController", () => {
 
   it("clears observation state on project switch generation", async () => {
     const { api } = createApi();
-    const bridge = api as unknown as CollaborationReadBridgePort;
+    const bridge = readBridge(api);
     apis.push(bridge);
     const shell = acquireCollaborationReadModelController(bridge);
     await shell.controller.setActiveProject({

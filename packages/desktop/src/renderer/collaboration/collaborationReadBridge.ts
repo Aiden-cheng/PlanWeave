@@ -19,6 +19,7 @@ export function toCollaborationReadBridge(
     listCollaborationMembers: (input) => api.listCollaborationMembers(input),
     listCollaborationAssignments: (input) => api.listCollaborationAssignments(input),
     listCollaborationEligibleAssignees: (input) => api.listCollaborationEligibleAssignees(input),
+    listCollaborationEligibleHostsBatch: (input) => api.listCollaborationEligibleHostsBatch(input),
     getCollaborationWorkAuthority: (input) => api.getCollaborationWorkAuthority(input),
     updateCollaborationResponsibility: (input) => api.updateCollaborationResponsibility(input),
     updateCollaborationReviewer: (input) => api.updateCollaborationReviewer(input),

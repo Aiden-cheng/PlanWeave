@@ -42,7 +42,8 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       repository: fixture.workAssignments,
       hostPort: {
         getHostFacts: () => facts,
-        listHostFacts: () => []
+        listHostFacts: () => [],
+        listEligibleHostProjections: () => []
       },
       defaultAllowHumanOverride: false
     });

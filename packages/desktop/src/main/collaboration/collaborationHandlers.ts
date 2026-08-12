@@ -523,6 +523,10 @@ export function registerCollaborationHandlers(
     (_event, input: unknown) => active.listEligibleAssignees(input)
   );
   ipcMain.handle(
+    collaborationInvokeChannels.listCollaborationEligibleHostsBatch,
+    (_event, input: unknown) => active.listEligibleHostsBatch(input)
+  );
+  ipcMain.handle(
     collaborationInvokeChannels.getCollaborationWorkAuthority,
     (_event, input: unknown) => active.getWorkAuthority(input)
   );

@@ -31,6 +31,8 @@ export const HUMAN_MAX_INVITATIONS_LISTED_PER_PAGE = 100 as const;
 export const WORK_HOST_DISPLAY_NAME_MIN_LENGTH = 1 as const;
 export const WORK_HOST_DISPLAY_NAME_MAX_LENGTH = 128 as const;
 export const WORK_ASSIGNMENT_BATCH_MAX = 100 as const;
+/** Assignment refresh page budget for one bounded eligible-Host projection. */
+export const WORK_ELIGIBLE_HOST_BATCH_MAX = 50 as const;
 
 /** Bounded revisions and public collaboration assignment reason text. */
 export const COLLABORATION_REVISION_MAX = 9_007_199_254_740_991 as const;

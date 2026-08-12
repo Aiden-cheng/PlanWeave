@@ -25,6 +25,8 @@ import {
   exampleSecretsForRedaction
 } from "../fixtures/collaboration.js";
 import { COLLABORATION_JSON_BODY_MAX_BYTES } from "../limits.js";
+import { WORK_ELIGIBLE_HOST_BATCH_MAX } from "../limits.js";
+import { eligibleHostBatchRequestSchema, eligibleHostBatchResponseSchema } from "../assignment.js";
 import { humanObserverEventSchema, parseHumanObserverServerMessage } from "../observer.js";
 import {
   parseCollaborationClientLimits,
@@ -122,6 +124,64 @@ describe("collaboration-protocol", () => {
     const limits = parseCollaborationClientLimits();
     expect(COLLABORATION_JSON_BODY_MAX_BYTES).toBe(4 * 1_024 * 1_024);
     expect(limits.jsonBodyMaxBytes).toBe(COLLABORATION_JSON_BODY_MAX_BYTES);
+  });
+
+  it("bounds eligible Host batches and rejects duplicate or misordered projections", () => {
+    const workItems = Array.from({ length: WORK_ELIGIBLE_HOST_BATCH_MAX }, (_, index) => ({
+      kind: "block" as const,
+      canvasId: "default",
+      blockRef: `T-001#B-${String(index + 1).padStart(3, "0")}`
+    }));
+    expect(eligibleHostBatchRequestSchema.parse({ workItems }).workItems).toHaveLength(50);
+    expect(
+      eligibleHostBatchRequestSchema.safeParse({ workItems: [...workItems, workItems[0]] }).success
+    ).toBe(false);
+    expect(
+      eligibleHostBatchRequestSchema.safeParse({ workItems: [workItems[0], workItems[0]] }).success
+    ).toBe(false);
+    expect(
+      eligibleHostBatchRequestSchema.safeParse({
+        workItems: [
+          { kind: "block", canvasId: "a:b", blockRef: "T#B" },
+          { kind: "block", canvasId: "a", blockRef: "b:T#B" }
+        ]
+      }).success
+    ).toBe(true);
+    expect(
+      eligibleHostBatchRequestSchema.safeParse({
+        workItems: [{ kind: "task", canvasId: "default", taskId: "T-001" }]
+      }).success
+    ).toBe(false);
+
+    const host = {
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      hostId: "host-1",
+      exists: true,
+      revoked: false,
+      authorizedForProject: true,
+      online: true,
+      ready: true,
+      capabilities: ["acp.codex"]
+    };
+    expect(
+      eligibleHostBatchResponseSchema.parse({
+        items: [{ index: 0, workItem: workItems[0], hostIds: [host.hostId] }],
+        hosts: [host]
+      }).items[0]?.workItem
+    ).toEqual(workItems[0]);
+    expect(
+      eligibleHostBatchResponseSchema.safeParse({
+        items: [{ index: 1, workItem: workItems[0], hostIds: [host.hostId] }],
+        hosts: [host]
+      }).success
+    ).toBe(false);
+    expect(
+      eligibleHostBatchResponseSchema.safeParse({
+        items: [{ index: 0, workItem: workItems[0], hostIds: ["host-missing"] }],
+        hosts: [host]
+      }).success
+    ).toBe(false);
   });
 
   it("loads shared fixtures without digest fields", () => {

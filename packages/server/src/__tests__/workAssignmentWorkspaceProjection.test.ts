@@ -80,6 +80,9 @@ describe("workspace-scoped active dispatch projections", () => {
           };
         }
         return { ...candidate, exists: false, requiredCapabilities: [] };
+      },
+      resolveWorkItems(candidates) {
+        return candidates.map((candidate) => this.resolveWorkItem(candidate));
       }
     };
     const membershipPort: AssignmentMembershipPort = {
@@ -88,7 +91,8 @@ describe("workspace-scoped active dispatch projections", () => {
     };
     const hostPort: AssignmentHostPort = {
       getHostFacts: () => undefined,
-      listHostFacts: () => []
+      listHostFacts: () => [],
+      listEligibleHostProjections: () => []
     };
     const resolveActiveDispatch = createActiveDispatchResolver(server.database);
     const createService = (workspaceId: string) =>

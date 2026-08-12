@@ -290,21 +290,27 @@ export const actorRefSchema = z
   .strict();
 export type ActorRef = z.infer<typeof actorRefSchema>;
 
+export const taskWorkItemRefSchema = z
+  .object({
+    kind: z.literal("task"),
+    canvasId: opaqueIdentifierSchema,
+    taskId: opaqueIdentifierSchema
+  })
+  .strict();
+export type TaskWorkItemRef = z.infer<typeof taskWorkItemRefSchema>;
+
+export const blockWorkItemRefSchema = z
+  .object({
+    kind: z.literal("block"),
+    canvasId: opaqueIdentifierSchema,
+    blockRef: blockRefSchema
+  })
+  .strict();
+export type BlockWorkItemRef = z.infer<typeof blockWorkItemRefSchema>;
+
 export const workItemRefSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("task"),
-      canvasId: opaqueIdentifierSchema,
-      taskId: opaqueIdentifierSchema
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("block"),
-      canvasId: opaqueIdentifierSchema,
-      blockRef: blockRefSchema
-    })
-    .strict()
+  taskWorkItemRefSchema,
+  blockWorkItemRefSchema
 ]);
 export type WorkItemRef = z.infer<typeof workItemRefSchema>;
 

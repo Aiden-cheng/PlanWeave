@@ -230,6 +230,9 @@ export async function setup(
           blockRef: workItem.kind === "block" ? workItem.blockRef : undefined,
           requiredCapabilities: []
         };
+      },
+      resolveWorkItems(workItems) {
+        return workItems.map((workItem) => this.resolveWorkItem(workItem));
       }
     },
     membershipPort: createIdentityMembershipPort({ identity }),

@@ -1,4 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -191,14 +192,20 @@ describe("createTrustedRuntimeRegistry", () => {
     });
 
     const projectId = workspace.init.workspace.id;
-    const trusted = await createTrustedRuntimeRegistry([
-      {
-        workspaceId: "workspace-one",
-        projectId,
-        projectRoot: workspace.root,
-        trustAllDeclaredCanvases: true
-      }
-    ]);
+    const loadManifest = vi.fn((manifestFile: string) =>
+      JSON.parse(readFileSync(manifestFile, "utf8"))
+    );
+    const trusted = await createTrustedRuntimeRegistry(
+      [
+        {
+          workspaceId: "workspace-one",
+          projectId,
+          projectRoot: workspace.root,
+          trustAllDeclaredCanvases: true
+        }
+      ],
+      { loadManifest }
+    );
     expect(trusted.locators).toEqual([
       { workspaceId: "workspace-one", projectId, canvasId: "default" },
       { workspaceId: "workspace-one", projectId, canvasId: "secondary" }
@@ -222,6 +229,24 @@ describe("createTrustedRuntimeRegistry", () => {
     expect(() =>
       trusted.registry.resolve({ workspaceId: "workspace-one", projectId, canvasId: "secondary" })
     ).not.toThrow();
+    const projectPort = trusted.scopedProjectWorkItemPackagePort({
+      workspaceId: "workspace-one",
+      projectId
+    });
+    if (!projectPort) throw new Error("project_package_port_missing");
+    const defaultItems = Array.from({ length: 50 }, (_, index) => ({
+      kind: "block" as const,
+      canvasId: "default",
+      blockRef: `T-001#B-${String(index + 1).padStart(3, "0")}`
+    }));
+    projectPort.resolveWorkItems(defaultItems);
+    expect(loadManifest).toHaveBeenCalledTimes(1);
+    loadManifest.mockClear();
+    projectPort.resolveWorkItems([
+      defaultItems[0]!,
+      { ...defaultItems[0]!, canvasId: "secondary" }
+    ]);
+    expect(loadManifest).toHaveBeenCalledTimes(2);
     trusted.close();
   });
 

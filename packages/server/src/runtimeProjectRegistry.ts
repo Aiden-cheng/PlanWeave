@@ -88,8 +88,13 @@ export type TrustedRuntimeRegistry = {
   close(): void;
 };
 
+export type TrustedRuntimeRegistryOptions = {
+  loadManifest?: (manifestFile: string) => unknown;
+};
+
 export async function createTrustedRuntimeRegistry(
-  rawProjects: readonly TrustedRuntimeProject[]
+  rawProjects: readonly TrustedRuntimeProject[],
+  options: TrustedRuntimeRegistryOptions = {}
 ): Promise<TrustedRuntimeRegistry> {
   const projects = z.array(trustedRuntimeProjectSchema).max(256).parse(rawProjects);
   const registry = new RemoteRuntimePortRegistry();
@@ -98,6 +103,9 @@ export async function createTrustedRuntimeRegistry(
   const expansions: RuntimeCanvasExpansion[] = [];
   const canvasWorkItemPorts = new Map<string, Map<string, WorkItemPackagePort>>();
   const loadedGraphs = new Map<string, Awaited<ReturnType<typeof loadProjectGraph>>>();
+  const loadManifest =
+    options.loadManifest ??
+    ((manifestFile: string) => JSON.parse(readFileSync(manifestFile, "utf8")));
   try {
     for (const project of projects) {
       let loaded = loadedGraphs.get(project.projectRoot);
@@ -128,10 +136,12 @@ export async function createTrustedRuntimeRegistry(
         };
         projectPorts.set(canvas.id, {
           resolveWorkItem(workItem) {
-            const manifest = manifestSchema.parse(
-              JSON.parse(readFileSync(workspace.manifestFile, "utf8"))
-            );
+            const manifest = manifestSchema.parse(loadManifest(workspace.manifestFile));
             return createManifestWorkItemPort(manifest, canvas.id).resolveWorkItem(workItem);
+          },
+          resolveWorkItems(workItems) {
+            const manifest = manifestSchema.parse(loadManifest(workspace.manifestFile));
+            return createManifestWorkItemPort(manifest, canvas.id).resolveWorkItems(workItems);
           }
         });
         unbind.push(
@@ -198,6 +208,34 @@ export async function createTrustedRuntimeRegistry(
           });
         }
         return port.resolveWorkItem(workItem);
+      },
+      resolveWorkItems(workItems) {
+        const matchingWorkItems = workItems.filter(
+          (workItem) => workItem.canvasId === input.canvasId
+        );
+        const matchingFacts =
+          matchingWorkItems.length > 0 ? port.resolveWorkItems(matchingWorkItems) : [];
+        if (matchingFacts.length !== matchingWorkItems.length) {
+          throw new Error("runtime_package_batch_result_mismatch");
+        }
+        let matchingIndex = 0;
+        return workItems.map((workItem) => {
+          if (workItem.canvasId === input.canvasId) {
+            const facts = matchingFacts[matchingIndex];
+            matchingIndex += 1;
+            if (!facts) throw new Error("runtime_package_batch_result_mismatch");
+            return facts;
+          }
+          return workItemPackageFactsSchema.parse({
+            canvasId: input.canvasId,
+            kind: workItem.kind,
+            exists: false,
+            ...(workItem.kind === "task"
+              ? { taskId: workItem.taskId }
+              : { blockRef: workItem.blockRef }),
+            requiredCapabilities: []
+          });
+        });
       }
     };
   };
@@ -245,6 +283,10 @@ export async function createTrustedRuntimeRegistry(
           resolveWorkItem(workItem) {
             if (released) throw new Error("runtime_package_scope_released");
             return port.resolveWorkItem(workItem);
+          },
+          resolveWorkItems(workItems) {
+            if (released) throw new Error("runtime_package_scope_released");
+            return port.resolveWorkItems(workItems);
           }
         },
         release() {

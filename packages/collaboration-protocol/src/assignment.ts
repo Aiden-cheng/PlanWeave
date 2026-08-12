@@ -2,11 +2,13 @@ import { opaqueIdentifierSchema } from "@planweave-ai/agent-host-protocol/browse
 import { z } from "zod";
 import {
   WORK_ASSIGNMENT_BATCH_MAX,
+  WORK_ELIGIBLE_HOST_BATCH_MAX,
   WORK_HOST_DISPLAY_NAME_MAX_LENGTH,
   WORK_HOST_DISPLAY_NAME_MIN_LENGTH
 } from "./limits.js";
 import {
   actorRefSchema,
+  blockWorkItemRefSchema,
   humanAssignReasonSchema,
   humanDisplayNameSchema,
   humanPrincipalIdSchema,
@@ -204,3 +206,106 @@ export const eligibleAssigneesResponseSchema = z
   })
   .strict();
 export type EligibleAssigneesResponse = z.infer<typeof eligibleAssigneesResponseSchema>;
+
+/**
+ * Bounded, block-only Host eligibility projection used by assignment-page refreshes.
+ * Duplicate work items are rejected. The response is atomic: one invalid/missing/forbidden
+ * item fails the whole request, preserving the single-item endpoint's error semantics.
+ */
+export const eligibleHostBatchRequestSchema = z
+  .object({
+    workItems: z.array(blockWorkItemRefSchema).min(1).max(WORK_ELIGIBLE_HOST_BATCH_MAX)
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const seen = new Set<string>();
+    value.workItems.forEach((workItem, index) => {
+      const key = `${workItem.canvasId}\u0000${workItem.blockRef}`;
+      if (seen.has(key)) {
+        context.addIssue({
+          code: "custom",
+          message: "duplicate_work_item",
+          path: ["workItems", index]
+        });
+      }
+      seen.add(key);
+    });
+  });
+export type EligibleHostBatchRequest = z.infer<typeof eligibleHostBatchRequestSchema>;
+
+export const eligibleHostBatchItemSchema = z
+  .object({
+    /** Zero-based input position; items are returned in exactly this order. */
+    index: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(WORK_ELIGIBLE_HOST_BATCH_MAX - 1),
+    /** Stable structural key for the corresponding input item. */
+    workItem: blockWorkItemRefSchema,
+    hostIds: z.array(opaqueIdentifierSchema).max(100)
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (new Set(value.hostIds).size !== value.hostIds.length) {
+      context.addIssue({ code: "custom", message: "duplicate_host_id", path: ["hostIds"] });
+    }
+  });
+export type EligibleHostBatchItem = z.infer<typeof eligibleHostBatchItemSchema>;
+
+export const eligibleHostBatchResponseSchema = z
+  .object({
+    items: z.array(eligibleHostBatchItemSchema).min(1).max(WORK_ELIGIBLE_HOST_BATCH_MAX),
+    /** Host facts are projected once and referenced by item hostIds. */
+    hosts: z.array(assignmentHostFactsSchema).max(100)
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const hostIds = new Set<string>();
+    value.hosts.forEach((host, index) => {
+      if (hostIds.has(host.hostId)) {
+        context.addIssue({ code: "custom", message: "duplicate_host", path: ["hosts", index] });
+      }
+      hostIds.add(host.hostId);
+    });
+    const workItems = new Set<string>();
+    const referencedHostIds = new Set<string>();
+    value.items.forEach((item, index) => {
+      if (item.index !== index) {
+        context.addIssue({
+          code: "custom",
+          message: "item_order_mismatch",
+          path: ["items", index]
+        });
+      }
+      const key = `${item.workItem.canvasId}\u0000${item.workItem.blockRef}`;
+      if (workItems.has(key)) {
+        context.addIssue({
+          code: "custom",
+          message: "duplicate_work_item",
+          path: ["items", index]
+        });
+      }
+      workItems.add(key);
+      item.hostIds.forEach((hostId, hostIndex) => {
+        referencedHostIds.add(hostId);
+        if (!hostIds.has(hostId)) {
+          context.addIssue({
+            code: "custom",
+            message: "unknown_host_id",
+            path: ["items", index, "hostIds", hostIndex]
+          });
+        }
+      });
+    });
+    value.hosts.forEach((host, index) => {
+      if (!referencedHostIds.has(host.hostId)) {
+        context.addIssue({
+          code: "custom",
+          message: "unreferenced_host",
+          path: ["hosts", index]
+        });
+      }
+    });
+  });
+export type EligibleHostBatchResponse = z.infer<typeof eligibleHostBatchResponseSchema>;

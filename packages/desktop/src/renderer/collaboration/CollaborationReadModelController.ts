@@ -1,10 +1,14 @@
 import type { AssignmentDisplayProjection } from "@planweave-ai/collaboration-protocol/work/assignment";
+import { WORK_ELIGIBLE_HOST_BATCH_MAX } from "@planweave-ai/collaboration-protocol/core/limits";
 import type { CommentDisplayProjection } from "@planweave-ai/collaboration-protocol/activity/comments";
 import type { HumanObserverEvent } from "@planweave-ai/collaboration-protocol/activity/observer";
 import type { ResponsibilityReadModel } from "@planweave-ai/collaboration-protocol/work/responsibility";
 import type { ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
 import type { WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
-import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
+import type {
+  BlockWorkItemRef,
+  WorkItemRef
+} from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import {
   workItemKey,
@@ -35,6 +39,7 @@ export type CollaborationReadBridgePort = Pick<
   | "listCollaborationMembers"
   | "listCollaborationAssignments"
   | "listCollaborationEligibleAssignees"
+  | "listCollaborationEligibleHostsBatch"
   | "getCollaborationWorkAuthority"
   | "updateCollaborationResponsibility"
   | "updateCollaborationReviewer"
@@ -87,7 +92,7 @@ type InternalState = {
   updatedAt: string;
 };
 
-const DEFAULT_PAGE_LIMIT = 50;
+const DEFAULT_PAGE_LIMIT = WORK_ELIGIBLE_HOST_BATCH_MAX;
 
 function emptyState(now: string): InternalState {
   return {
@@ -756,15 +761,20 @@ export class CollaborationReadModelController {
         nextAssignments.set(workItemKey(item.workItem), item);
         this.ingestHostFromAssignment(nextHosts, item);
       }
-      // Hosts are filtered by each Block's package capabilities. Query every Block in this
-      // bounded assignment page (never Tasks), then union/dedupe by Host id. Any eligible
-      // failure remains an authoritative refresh failure instead of a partial success.
-      const blockItems = page.items
-        .filter((item) => item.workItem.kind === "block")
-        .slice(0, this.pageLimit);
-      for (const item of blockItems) {
-        const eligible = await this.api.listCollaborationEligibleAssignees({
-          workItem: item.workItem
+      // Hosts are filtered by each Block's package capabilities in one atomic bounded request.
+      const blockItems: BlockWorkItemRef[] = [];
+      const seenBlockItems = new Set<string>();
+      for (const { workItem } of page.items) {
+        if (workItem.kind !== "block") continue;
+        const key = workItemKey(workItem);
+        if (seenBlockItems.has(key)) continue;
+        seenBlockItems.add(key);
+        blockItems.push(workItem);
+        if (blockItems.length === this.pageLimit) break;
+      }
+      if (blockItems.length > 0) {
+        const eligible = await this.api.listCollaborationEligibleHostsBatch({
+          workItems: blockItems
         });
         if (!isCurrentProject()) return;
         for (const host of eligible.hosts) {

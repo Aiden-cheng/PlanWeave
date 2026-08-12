@@ -78,6 +78,7 @@ export const collaborationInvokeChannels = {
   listCollaborationAssignments: "planweave-collaboration:listAssignments",
   getCollaborationAssignment: "planweave-collaboration:getAssignment",
   listCollaborationEligibleAssignees: "planweave-collaboration:listEligibleAssignees",
+  listCollaborationEligibleHostsBatch: "planweave-collaboration:listEligibleHostsBatch",
   getCollaborationWorkAuthority: "planweave-collaboration:getWorkAuthority",
   updateCollaborationResponsibility: "planweave-collaboration:updateResponsibility",
   updateCollaborationReviewer: "planweave-collaboration:updateReviewer",

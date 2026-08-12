@@ -90,7 +90,9 @@ import {
 import {
   type AssignmentDisplayProjection,
   type AssignmentListPage,
-  type EligibleAssigneesResponse
+  type EligibleAssigneesResponse,
+  type EligibleHostBatchRequest,
+  type EligibleHostBatchResponse
 } from "@planweave-ai/collaboration-protocol/work/assignment";
 import { type CanvasRuntimeStatusProjection } from "@planweave-ai/collaboration-protocol/canvas/status";
 import { type CanvasLiveSyncServerMessage } from "@planweave-ai/collaboration-protocol/canvas/live-sync";
@@ -869,6 +871,9 @@ export type PlanWeaveCollaborationApi = {
   listCollaborationEligibleAssignees: (
     input: CollaborationWorkItemInput
   ) => Promise<EligibleAssigneesResponse>;
+  listCollaborationEligibleHostsBatch: (
+    input: EligibleHostBatchRequest
+  ) => Promise<EligibleHostBatchResponse>;
   getCollaborationWorkAuthority: (
     input: CollaborationWorkAuthorityScopeInput
   ) => Promise<WorkAuthorityProjection>;

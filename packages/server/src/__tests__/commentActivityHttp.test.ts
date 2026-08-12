@@ -452,6 +452,29 @@ describe("comment and activity production HTTP", () => {
         expect.objectContaining({ humanPrincipalId: joinedBody.principal.humanPrincipalId })
       ])
     });
+    const blockWorkItem = { kind: "block", canvasId: "default", blockRef: "T-001#B-001" };
+    const eligibleBatch = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments/eligible-hosts/batch`,
+      {
+        method: "POST",
+        headers: jsonHeaders(ownerToken),
+        body: JSON.stringify({ workItems: [blockWorkItem] })
+      }
+    );
+    expect(eligibleBatch.status).toBe(200);
+    await expect(eligibleBatch.json()).resolves.toMatchObject({
+      items: [{ index: 0, workItem: blockWorkItem }],
+      hosts: expect.any(Array)
+    });
+    const unauthenticatedBatch = await fetch(
+      `${fixture.origin}/api/v1/projects/${projectId}/assignments/eligible-hosts/batch`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workItems: [blockWorkItem] })
+      }
+    );
+    expect(unauthenticatedBatch.status).toBe(401);
 
     for (const action of ["promote", "promote", "demote", "remove"] as const) {
       const response = await fetch(

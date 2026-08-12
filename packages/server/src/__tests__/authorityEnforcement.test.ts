@@ -12,6 +12,7 @@ import {
   DispatchAssignmentError
 } from "../work/dispatchIntegration.js";
 import { workItemPackageFactsSchema, type WorkItemRef } from "../work/schemas.js";
+import type { WorkItemPackagePort } from "../work/workItemFacts.js";
 
 const databases: SqliteDatabase[] = [];
 const now = () => new Date("2026-07-27T10:00:00.000Z");
@@ -85,37 +86,40 @@ async function fixture() {
     ]
   });
   const repository = new AuthorityRepository(database, { clock: now });
-  const packagePort = {
-    resolveWorkItem(workItem: WorkItemRef) {
-      return workItemPackageFactsSchema.parse(
-        workItem.canvasId !== "c"
+  const resolveWorkItem = (workItem: WorkItemRef) =>
+    workItemPackageFactsSchema.parse(
+      workItem.canvasId !== "c"
+        ? {
+            canvasId: workItem.canvasId,
+            kind: workItem.kind,
+            exists: false,
+            ...(workItem.kind === "task"
+              ? { taskId: workItem.taskId }
+              : { blockRef: workItem.blockRef }),
+            requiredCapabilities: []
+          }
+        : workItem.kind === "task"
           ? {
-              canvasId: workItem.canvasId,
-              kind: workItem.kind,
-              exists: false,
-              ...(workItem.kind === "task"
-                ? { taskId: workItem.taskId }
-                : { blockRef: workItem.blockRef }),
+              canvasId: "c",
+              kind: "task",
+              taskId: workItem.taskId,
+              exists: workItem.taskId === "T-001",
               requiredCapabilities: []
             }
-          : workItem.kind === "task"
-            ? {
-                canvasId: "c",
-                kind: "task",
-                taskId: workItem.taskId,
-                exists: workItem.taskId === "T-001",
-                requiredCapabilities: []
-              }
-            : {
-                canvasId: "c",
-                kind: "block",
-                blockRef: workItem.blockRef,
-                taskId: "T-001",
-                blockType: "implementation",
-                exists: workItem.blockRef === "T-001#B-001",
-                requiredCapabilities: ["acp.codex"]
-              }
-      );
+          : {
+              canvasId: "c",
+              kind: "block",
+              blockRef: workItem.blockRef,
+              taskId: "T-001",
+              blockType: "implementation",
+              exists: workItem.blockRef === "T-001#B-001",
+              requiredCapabilities: ["acp.codex"]
+            }
+    );
+  const packagePort: WorkItemPackagePort = {
+    resolveWorkItem,
+    resolveWorkItems(workItems) {
+      return workItems.map(resolveWorkItem);
     }
   };
   const service = new AuthorityService({

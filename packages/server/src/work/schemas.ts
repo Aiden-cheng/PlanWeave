@@ -25,6 +25,7 @@ export {
   assignmentHostFactsSchema,
   assignmentHumanDisplaySchema,
   assignmentMembershipFactsSchema,
+  eligibleHostBatchRequestSchema,
   assignmentTargetSchema
 } from "@planweave-ai/collaboration-protocol/work/assignment";
 export type {
@@ -35,7 +36,10 @@ export type {
   AssignmentHostFacts,
   AssignmentHumanDisplay,
   AssignmentMembershipFacts,
-  AssignmentTarget
+  AssignmentTarget,
+  EligibleHostBatchItem,
+  EligibleHostBatchRequest,
+  EligibleHostBatchResponse
 } from "@planweave-ai/collaboration-protocol/work/assignment";
 
 /** Machine targets remain invalid for Task work items. */

@@ -1,6 +1,7 @@
 /** Public assignment wire budgets are owned by collaboration-protocol. */
 export {
   WORK_ASSIGNMENT_BATCH_MAX,
+  WORK_ELIGIBLE_HOST_BATCH_MAX,
   WORK_HOST_DISPLAY_NAME_MAX_LENGTH,
   WORK_HOST_DISPLAY_NAME_MIN_LENGTH
 } from "@planweave-ai/collaboration-protocol/core/limits";

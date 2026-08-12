@@ -1,4 +1,5 @@
 import {
+  eligibleHostBatchRequestSchema,
   assignmentListQuerySchema,
   assignmentUpdateWireCommandSchema
 } from "@planweave-ai/collaboration-protocol/work/assignment";
@@ -37,6 +38,7 @@ type AssignmentRoute = {
     | "list"
     | "update"
     | "eligible"
+    | "eligible_batch"
     | "authority_get"
     | "authority_projection"
     | "responsibility"
@@ -176,6 +178,9 @@ function route(request: IncomingMessage, pathname: string): AssignmentRoute | un
   if (request.method === "POST" && rest === "") return { kind: "update", projectId };
   if (request.method === "GET" && rest === "/eligible-assignees") {
     return { kind: "eligible", projectId };
+  }
+  if (request.method === "POST" && rest === "/eligible-hosts/batch") {
+    return { kind: "eligible_batch", projectId };
   }
   return undefined;
 }
@@ -595,6 +600,33 @@ export async function handleWorkAssignmentHttpRequest(
           nextHumanCursor: result.nextHumanCursor,
           nextHostCursor: result.nextHostCursor
         });
+        return true;
+      }
+      case "eligible_batch": {
+        query(url, []);
+        const body = eligibleHostBatchRequestSchema.parse(await readJson(request));
+        if (!serviceActor) throw new WorkAssignmentServiceError("work_auth_forbidden");
+        for (const canvasId of new Set(body.workItems.map((workItem) => workItem.canvasId))) {
+          assertTrustedScope({
+            projectAuthority: options.projectAuthority,
+            workspaceId: authenticated.workspaceId,
+            projectId: matched.projectId,
+            canvasId
+          });
+          assertAccessCapability({
+            actor,
+            workspaceId: authenticated.workspaceId,
+            projectId: matched.projectId,
+            canvasId,
+            capability: "read",
+            access: options.access
+          });
+        }
+        respond(
+          response,
+          200,
+          service!.listEligibleHostsBatch(serviceActor, matched.projectId, body)
+        );
         return true;
       }
       case "responsibility": {

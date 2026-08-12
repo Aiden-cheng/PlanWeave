@@ -71,6 +71,9 @@ function packageFactsFor(workItem: WorkItemRef): WorkItemPackageFacts {
 const packagePort: WorkItemPackagePort = {
   resolveWorkItem(workItem) {
     return packageFactsFor(workItem);
+  },
+  resolveWorkItems(workItems) {
+    return workItems.map(packageFactsFor);
   }
 };
 
@@ -355,6 +358,9 @@ describe("CommentService", () => {
           taskId: "T-001",
           requiredCapabilities: []
         };
+      },
+      resolveWorkItems(workItems) {
+        return workItems.map(() => this.resolveWorkItem(taskItem));
       }
     };
     const orphanService = new CommentService({

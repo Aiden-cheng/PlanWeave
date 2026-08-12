@@ -14,6 +14,8 @@ import {
  */
 export type WorkItemPackagePort = {
   resolveWorkItem(workItem: WorkItemRef): WorkItemPackageFacts;
+  /** Resolve one bounded request snapshot without reloading package state per item. */
+  resolveWorkItems(workItems: readonly WorkItemRef[]): WorkItemPackageFacts[];
 };
 
 /**
@@ -90,6 +92,9 @@ export function createCompiledGraphWorkItemPort(
   return {
     resolveWorkItem(workItem) {
       return workItemFactsFromCompiledGraph(graph, canvasId, workItem);
+    },
+    resolveWorkItems(workItems) {
+      return workItems.map((workItem) => workItemFactsFromCompiledGraph(graph, canvasId, workItem));
     }
   };
 }

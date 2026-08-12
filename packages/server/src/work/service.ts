@@ -12,6 +12,7 @@ import type { AssignmentHostPort, AssignmentMembershipPort } from "./ports.js";
 import { WorkAssignmentError, WorkAssignmentRepository } from "./repository.js";
 import {
   assignmentUpdateCommandSchema,
+  eligibleHostBatchRequestSchema,
   workAssignmentBatchLimitSchema,
   workItemRefSchema,
   type AssignmentDisplayProjection,
@@ -19,6 +20,7 @@ import {
   type AssignmentMembershipFacts,
   type AssignmentRecord,
   type AssignmentUpdateCommand,
+  type EligibleHostBatchResponse,
   type WorkItemPackageFacts,
   type WorkItemRef
 } from "./schemas.js";
@@ -98,6 +100,10 @@ export type AssignmentListResult = {
   items: AssignmentDisplayProjection[];
   nextCursor: number | null;
 };
+
+function capabilitySetKey(capabilities: readonly string[]): string {
+  return JSON.stringify([...new Set(capabilities)].sort());
+}
 
 /**
  * Application service for work assignment persistence and projections.
@@ -372,6 +378,55 @@ export class WorkAssignmentService {
         nextHumanCursor,
         nextHostCursor
       };
+    } catch (error) {
+      mapRepositoryError(error);
+    }
+  }
+
+  /** Atomic block-only Host eligibility projection for one bounded assignment page. */
+  listEligibleHostsBatch(
+    actor: HumanAuthContext,
+    projectId: string,
+    requestInput: unknown
+  ): EligibleHostBatchResponse {
+    try {
+      const context = humanAuthContextSchema.parse(actor);
+      const pid = humanProjectIdSchema.parse(projectId);
+      this.assertCanView(context, pid);
+      const request = eligibleHostBatchRequestSchema.parse(requestInput);
+      const workItems = request.workItems;
+      const resolvedFacts = this.packagePort.resolveWorkItems(workItems);
+      if (resolvedFacts.length !== workItems.length) deny("work_input_invalid");
+      const facts = workItems.map((workItem, index) => {
+        if (workItem.kind !== "block") deny("work_input_invalid");
+        const packageFacts = resolvedFacts[index]!;
+        if (!packageFacts.exists || packageFacts.kind !== workItem.kind) {
+          deny("work_item_not_found");
+        }
+        return packageFacts;
+      });
+
+      const hosts = this.hostPort.listEligibleHostProjections(this.workspaceId, pid);
+      const hostIdsByCapabilities = new Map<string, string[]>();
+      const items = workItems.map((workItem, index) => {
+        const requiredCapabilities = facts[index]!.requiredCapabilities;
+        const key = capabilitySetKey(requiredCapabilities);
+        let hostIds = hostIdsByCapabilities.get(key);
+        if (!hostIds) {
+          const required = new Set(requiredCapabilities);
+          hostIds = hosts
+            .filter((host) => {
+              const available = new Set(host.capabilities);
+              return [...required].every((capability) => available.has(capability));
+            })
+            .map((host) => host.hostId);
+          hostIdsByCapabilities.set(key, hostIds);
+        }
+        if (workItem.kind !== "block") deny("work_input_invalid");
+        return { index, workItem, hostIds };
+      });
+      const referencedHostIds = new Set(items.flatMap((item) => item.hostIds));
+      return { items, hosts: hosts.filter((host) => referencedHostIds.has(host.hostId)) };
     } catch (error) {
       mapRepositoryError(error);
     }

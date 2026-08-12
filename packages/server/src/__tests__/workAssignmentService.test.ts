@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHostRepository } from "../hosts.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import type { HumanAuthContext } from "../identity/schemas.js";
@@ -80,12 +80,15 @@ function packageFactsFor(workItem: WorkItemRef): WorkItemPackageFacts {
       requiredCapabilities: []
     };
   }
-  if (workItem.kind === "block" && workItem.blockRef === "T-001#B-001") {
+  if (
+    workItem.kind === "block" &&
+    (workItem.blockRef === "T-001#B-001" || workItem.blockRef === "T-001#B-002")
+  ) {
     return {
       canvasId: "default",
       kind: "block",
       exists: true,
-      blockRef: "T-001#B-001",
+      blockRef: workItem.blockRef,
       taskId: "T-001",
       blockType: "implementation",
       requiredCapabilities: ["acp.codex", "linux"]
@@ -104,6 +107,9 @@ function packageFactsFor(workItem: WorkItemRef): WorkItemPackageFacts {
 const packagePort: WorkItemPackagePort = {
   resolveWorkItem(workItem) {
     return packageFactsFor(workItem);
+  },
+  resolveWorkItems(workItems) {
+    return workItems.map(packageFactsFor);
   }
 };
 
@@ -209,17 +215,18 @@ async function openStack() {
   );
   hosts.revoke(revokedHost.host.id);
 
+  const hostPort = createHostAssignmentPort({
+    hosts,
+    hostOfflineAfterMs: 60_000,
+    clock: () => now,
+    countActiveDispatches: () => 0
+  });
   const service = new WorkAssignmentService({
     workspaceId,
     repository,
     packagePort,
     membershipPort: createIdentityMembershipPort({ identity }),
-    hostPort: createHostAssignmentPort({
-      hosts,
-      hostOfflineAfterMs: 60_000,
-      clock: () => now,
-      countActiveDispatches: () => 0
-    }),
+    hostPort,
     clock: () => now
   });
 
@@ -236,7 +243,8 @@ async function openStack() {
     capableHost,
     weakHost,
     offlineHost,
-    revokedHost
+    revokedHost,
+    hostPort
   };
 }
 
@@ -550,6 +558,45 @@ describe("work assignment service API", () => {
 
     // Removed member keeps durable assignment but surfaces invalid availability.
     // Re-open identity path: revoke via assign then remove.
+  });
+
+  it("projects a Host eligibility batch with one inventory read and single-item equivalence", async () => {
+    const { service, memberContext, capableHost, weakHost, hostPort, hosts } = await openStack();
+    const single = service.listEligibleAssignees(memberContext, projectId, blockItem);
+    const inventory = vi.spyOn(hostPort, "listEligibleHostProjections");
+    const hostList = vi.spyOn(hosts, "list");
+    const workspaceBatch = vi.spyOn(hosts, "workspaceIdsForHosts");
+    const equivalentBlockItem: WorkItemRef = {
+      kind: "block",
+      canvasId: "default",
+      blockRef: "T-001#B-002"
+    };
+    const batch = service.listEligibleHostsBatch(memberContext, projectId, {
+      workItems: [blockItem, equivalentBlockItem]
+    });
+
+    expect(inventory).toHaveBeenCalledTimes(1);
+    expect(hostList).toHaveBeenCalledTimes(1);
+    expect(workspaceBatch).toHaveBeenCalledTimes(1);
+    expect(batch.items).toEqual([
+      { index: 0, workItem: blockItem, hostIds: single.hosts.map((host) => host.hostId) },
+      {
+        index: 1,
+        workItem: equivalentBlockItem,
+        hostIds: single.hosts.map((host) => host.hostId)
+      }
+    ]);
+    expect(batch.hosts.some((host) => host.hostId === capableHost.host.id)).toBe(true);
+    expect(batch.hosts.some((host) => host.hostId === weakHost.host.id)).toBe(false);
+
+    expect(() =>
+      service.listEligibleHostsBatch({ ...memberContext, projectId: "project-other" }, projectId, {
+        workItems: [blockItem]
+      })
+    ).toThrowError(expect.objectContaining({ code: "work_auth_project_mismatch" }));
+    expect(() =>
+      service.listEligibleHostsBatch(memberContext, projectId, { workItems: [missingItem] })
+    ).toThrowError(expect.objectContaining({ code: "work_item_not_found" }));
   });
 
   it("keeps durable assignment when member is removed (no silent retarget)", async () => {

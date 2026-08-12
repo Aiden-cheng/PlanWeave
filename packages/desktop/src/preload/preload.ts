@@ -426,6 +426,8 @@ const collaborationApi: PlanWeaveCollaborationApi = {
     ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationAssignment, input),
   listCollaborationEligibleAssignees: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationEligibleAssignees, input),
+  listCollaborationEligibleHostsBatch: async (input) =>
+    ipcRenderer.invoke(collaborationInvokeChannels.listCollaborationEligibleHostsBatch, input),
   getCollaborationWorkAuthority: async (input) =>
     ipcRenderer.invoke(collaborationInvokeChannels.getCollaborationWorkAuthority, input),
   updateCollaborationResponsibility: async (input) =>
