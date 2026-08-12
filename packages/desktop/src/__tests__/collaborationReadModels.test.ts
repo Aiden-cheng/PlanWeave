@@ -398,14 +398,11 @@ describe("CollaborationReadModelController", () => {
     expect(Object.keys(snapshot.assignmentsByWorkItem)).toHaveLength(2);
     expect(snapshot.assignmentsByWorkItem[workItemKey(first.workItem)]).toEqual(repeated);
     expect(snapshot.assignmentsByWorkItem[workItemKey(second.workItem)]).toEqual(second);
-    expect(snapshot.hosts.map((host) => host.hostId)).toEqual(
-      expect.arrayContaining([
-        "host-assigned-first",
-        "host-assigned-last",
-        "host-assigned-second",
-        "host-eligible"
-      ])
-    );
+    expect(snapshot.hosts.map((host) => host.hostId)).toEqual([
+      "host-assigned-last",
+      "host-assigned-second",
+      "host-eligible"
+    ]);
     controller.dispose();
   });
 
@@ -462,7 +459,7 @@ describe("CollaborationReadModelController", () => {
       projectId: "project-demo-001"
     });
 
-    expect(controller.getSnapshot().syncPhase).toBe("degraded");
+    expect(controller.getSnapshot().syncPhase).toBe("error");
     expect(controller.getSnapshot().lastError).toEqual(
       expect.objectContaining({
         code: "eligible_hosts_unavailable",
@@ -511,7 +508,7 @@ describe("CollaborationReadModelController", () => {
     await controller.refreshAuthoritative({ reason: "eligible_failure" });
 
     const failedSnapshot = controller.getSnapshot();
-    expect(failedSnapshot.syncPhase).toBe("degraded");
+    expect(failedSnapshot.syncPhase).toBe("error");
     expect(failedSnapshot.lastError).toEqual(
       expect.objectContaining({
         code: "eligible_reload_failed",
@@ -788,7 +785,7 @@ describe("CollaborationReadModelController", () => {
     mock.listEligibleBatch.mockRejectedValueOnce(failure);
     observerListener(assignmentObserverSignal(31));
     await waitFor(() => {
-      expect(controller.getSnapshot().syncPhase).toBe("degraded");
+      expect(controller.getSnapshot().syncPhase).toBe("error");
     });
     expect(controller.getSnapshot().lastError).toEqual(
       expect.objectContaining({

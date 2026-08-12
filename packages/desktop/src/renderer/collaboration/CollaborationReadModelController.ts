@@ -5,10 +5,7 @@ import type { HumanObserverEvent } from "@planweave-ai/collaboration-protocol/ac
 import type { ResponsibilityReadModel } from "@planweave-ai/collaboration-protocol/work/responsibility";
 import type { ReviewAssignmentReadModel } from "@planweave-ai/collaboration-protocol/work/review";
 import type { WorkAuthorityProjection } from "@planweave-ai/collaboration-protocol/work/authority";
-import type {
-  BlockWorkItemRef,
-  WorkItemRef
-} from "@planweave-ai/collaboration-protocol/core/primitives";
+import type { WorkItemRef } from "@planweave-ai/collaboration-protocol/core/primitives";
 import type { CollaborationStatus, PlanWeaveCollaborationApi } from "../../shared/collaboration.js";
 import {
   workItemKey,
@@ -32,6 +29,16 @@ import {
   type HumanMembershipView
 } from "../../shared/collaborationReadModels.js";
 import { isCollaborationSessionConnected } from "./sessionState";
+import { readBoundedNumberCursorPages } from "./boundedPagination.js";
+import {
+  buildAssignmentRefreshProjection,
+  mergeAssignmentHosts
+} from "./assignmentRefreshProjection.js";
+import { beginLoading } from "./loadingLease.js";
+import {
+  AuthoritativeRefreshArbitrator,
+  type AggregateRefreshApplication
+} from "./refreshArbitration.js";
 
 export type CollaborationReadBridgePort = Pick<
   PlanWeaveCollaborationApi,
@@ -77,10 +84,8 @@ type InternalState = {
   remoteRuns: Map<string, CollaborationRemoteRunProjection>;
   mutations: Map<string, CollaborationMutationRecord>;
   lastError: CollaborationBoundaryErrorView | null;
-  loadingKinds: Set<string>;
-  /** Work items whose comments are actively tracked (invalidate/reload). */
+  loadingKinds: Map<string, number>;
   trackedCommentWorkItems: Map<string, WorkItemRef>;
-  /** Work items whose independent authorities are actively tracked. */
   trackedAuthorityWorkItems: Map<string, WorkItemRef>;
   /** Event cursors already applied (dedupe out-of-order/duplicate observer events). */
   appliedEventCursors: Set<number>;
@@ -93,6 +98,7 @@ type InternalState = {
 };
 
 const DEFAULT_PAGE_LIMIT = WORK_ELIGIBLE_HOST_BATCH_MAX;
+type RefreshApplication = "applied" | "superseded";
 
 function emptyState(now: string): InternalState {
   return {
@@ -110,7 +116,7 @@ function emptyState(now: string): InternalState {
     remoteRuns: new Map(),
     mutations: new Map(),
     lastError: null,
-    loadingKinds: new Set(),
+    loadingKinds: new Map(),
     trackedCommentWorkItems: new Map(),
     trackedAuthorityWorkItems: new Map(),
     appliedEventCursors: new Set(),
@@ -227,6 +233,9 @@ export class CollaborationReadModelController {
   private disposed = false;
   private mutationSeq = 0;
   private observerAttemptSeq = 0;
+  private refreshArbitration = new AuthoritativeRefreshArbitrator();
+  private assignmentReloadSeqByKey = new Map<string, number>();
+  private assignmentChangeVersionByKey = new Map<string, number>();
   private refreshQueue: Promise<void> = Promise.resolve();
   /** Cached for useSyncExternalStore — must be referentially stable between emissions. */
   private cachedSnapshot: CollaborationReadModelSnapshot;
@@ -283,6 +292,7 @@ export class CollaborationReadModelController {
     } else if ((input.canvasId ?? null) !== this.state.canvasId) {
       this.state.canvasId = input.canvasId ?? null;
       this.state.generation += 1;
+      this.state.loadingKinds = new Map();
     }
 
     const generation = this.state.generation;
@@ -322,7 +332,8 @@ export class CollaborationReadModelController {
       .catch(() => undefined)
       .then(async () => {
         if (this.disposed || generation !== this.state.generation) return;
-        this.setLoading("snapshot", true);
+        this.refreshArbitration.beginAggregate();
+        const snapshotLoading = beginLoading(this.state, "snapshot");
         if (this.state.syncPhase !== "reconnecting" && this.state.syncPhase !== "auth_expired") {
           this.state.syncPhase = "loading";
         }
@@ -340,16 +351,25 @@ export class CollaborationReadModelController {
           )
         ]);
 
+        snapshotLoading.release();
         if (this.disposed || generation !== this.state.generation) return;
 
-        this.setLoading("snapshot", false);
         const failures = results.filter((result) => result.status === "rejected");
         if (failures.length === 0) {
-          this.markReadyUnlessTerminal();
+          const replacements = results.flatMap((result) =>
+            result.status === "fulfilled" && result.value && typeof result.value === "object"
+              ? [result.value as AggregateRefreshApplication]
+              : []
+          );
+          if (this.refreshArbitration.settleAggregate(generation, replacements)) {
+            this.markReadyUnlessTerminal();
+          }
         } else {
+          this.refreshArbitration.cancelAggregate();
           const first = failures[0] as PromiseRejectedResult;
           const mapped = errorFromUnknown(first.reason);
           this.applyBoundaryError(mapped);
+          this.markIncompleteAuthoritativeRefresh();
         }
         this.emit();
       });
@@ -502,44 +522,16 @@ export class CollaborationReadModelController {
     ) {
       return;
     }
-    this.clearObserverLoading(signal);
     this.applyBoundaryError(errorFromUnknown(error));
-    this.emit();
-  }
-
-  private clearObserverLoading(signal: CollaborationObserverSignal): void {
-    switch (signal.type) {
-      case "human.observer.event":
-        switch (signal.event.kind) {
-          case "membership":
-          case "project":
-            this.setLoading("members", false);
-            break;
-          case "invitation":
-            break;
-          case "assignment":
-            this.setLoading("assignments", false);
-            break;
-          case "comment":
-          case "attachment":
-            if (signal.event.workItem) {
-              this.setLoading(`comments:${workItemKey(signal.event.workItem)}`, false);
-            }
-            break;
-          case "activity":
-          case "remote_run":
-            this.setLoading("activity", false);
-            break;
-          case "canvas":
-            break;
-          default:
-            break;
-        }
-        break;
-      case "human.observer.catchup_required":
-      case "human.observer.cursor":
-        break;
+    if (
+      signal.type === "human.observer.event" &&
+      (signal.event.kind === "membership" ||
+        signal.event.kind === "project" ||
+        (signal.event.kind === "assignment" && !signal.event.workItem))
+    ) {
+      this.markIncompleteAuthoritativeRefresh();
     }
+    this.emit();
   }
 
   private teardownSubscriptions(): void {
@@ -634,8 +626,12 @@ export class CollaborationReadModelController {
     const attemptToken = this.observerAttemptSeq;
     this.state.inFlightEventCursors.set(event.cursor, attemptToken);
     try {
-      await this.invalidateFromEvent(event.kind, event, generation);
+      const application = await this.invalidateFromEvent(event.kind, event, generation);
       if (generation !== this.state.generation) return;
+      if (application === "superseded") {
+        this.state.failedEventCursors.add(event.cursor);
+        return;
+      }
       this.state.appliedEventCursors.add(event.cursor);
       this.state.failedEventCursors.delete(event.cursor);
       if (event.cursor > this.state.observerCursor) {
@@ -658,34 +654,32 @@ export class CollaborationReadModelController {
     kind: HumanObserverEvent["kind"],
     event: HumanObserverEvent,
     generation: number
-  ): Promise<void> {
-    if (generation !== this.state.generation) return;
+  ): Promise<RefreshApplication> {
+    if (generation !== this.state.generation) return "superseded";
 
     switch (kind) {
       case "membership":
       case "project":
-        await this.reloadMembers(generation);
-        break;
+        return (await this.reloadMembers(generation)).application;
       case "invitation":
         // Invitations are owned by the on-demand People details projection.
         // They do not invalidate membership and must not fan out member reads.
-        break;
+        return "applied";
       case "assignment":
         if (event.workItem) {
-          await this.reloadAssignmentForWorkItem(event.workItem, generation);
+          return this.reloadAssignmentForWorkItem(event.workItem, generation);
         } else {
-          await this.reloadAssignments(generation);
+          return (await this.reloadAssignments(generation)).application;
         }
-        break;
       case "comment":
         if (event.workItem) {
           this.state.trackedCommentWorkItems.set(workItemKey(event.workItem), event.workItem);
           await this.reloadComments(event.workItem, generation);
         }
-        break;
+        return "applied";
       case "activity":
         await this.reloadActivity(generation);
-        break;
+        return "applied";
       case "remote_run":
         if (event.dispatchId && event.remoteRunStatus) {
           const existing = this.state.remoteRuns.get(event.dispatchId);
@@ -702,104 +696,135 @@ export class CollaborationReadModelController {
         } else {
           await this.reloadActivity(generation);
         }
-        break;
+        return "applied";
       case "attachment":
         if (event.workItem) {
           this.state.trackedCommentWorkItems.set(workItemKey(event.workItem), event.workItem);
           await this.reloadComments(event.workItem, generation);
         }
-        break;
+        return "applied";
       case "canvas":
         // Durable canvas reconciliation is owned by useSharedCanvasCommands.
-        break;
+        return "applied";
       default:
-        break;
+        return "applied";
     }
   }
 
-  private async reloadMembers(generation: number): Promise<void> {
-    this.setLoading("members", true);
+  private async reloadMembers(generation: number): Promise<AggregateRefreshApplication> {
+    const reloadToken = this.refreshArbitration.next("members");
+    const isCurrentReload = () =>
+      generation === this.state.generation &&
+      this.refreshArbitration.isLatest("members", reloadToken);
+    const loading = beginLoading(this.state, "members");
     this.emit();
     try {
-      const page = await this.api.listCollaborationMembers({
-        cursor: 0,
-        limit: this.pageLimit
+      const members = await readBoundedNumberCursorPages({
+        resource: "members",
+        readPage: (cursor) =>
+          this.api.listCollaborationMembers({
+            cursor,
+            limit: this.pageLimit
+          })
       });
-      if (generation !== this.state.generation) return;
-      this.state.members = page.items;
-      this.setLoading("members", false);
-      this.emit();
-    } catch (error) {
-      if (generation === this.state.generation) {
-        this.setLoading("members", false);
+      if (!isCurrentReload()) {
+        loading.release();
+        this.emit();
+        return { application: "superseded", resource: "members", token: reloadToken };
       }
+      const uniqueMembers = new Map<string, HumanMembershipView>();
+      for (const member of members) uniqueMembers.set(member.membershipId, member);
+      this.state.members = [...uniqueMembers.values()];
+      loading.release();
+      if (this.refreshArbitration.markApplied("members", reloadToken, generation)) {
+        this.markReadyUnlessTerminal();
+      }
+      this.emit();
+      return { application: "applied", resource: "members", token: reloadToken };
+    } catch (error) {
+      if (!isCurrentReload()) {
+        loading.release();
+        this.emit();
+        return { application: "superseded", resource: "members", token: reloadToken };
+      }
+      loading.release();
       throw error;
     }
   }
 
-  private async reloadAssignments(generation: number): Promise<void> {
-    this.setLoading("assignments", true);
+  private async reloadAssignments(generation: number): Promise<AggregateRefreshApplication> {
+    const reloadToken = this.refreshArbitration.next("assignments");
+    const changeVersionsAtStart = new Map(this.assignmentChangeVersionByKey);
+    const loading = beginLoading(this.state, "assignments");
     this.emit();
     const profileId = this.state.profileId;
     const projectId = this.state.projectId;
     const isCurrentProject = () =>
       generation === this.state.generation &&
+      this.refreshArbitration.isLatest("assignments", reloadToken) &&
       profileId === this.state.profileId &&
       projectId === this.state.projectId;
     try {
-      const query: CollaborationAssignmentListQueryInput = {
-        cursor: 0,
-        limit: this.pageLimit,
-        ...(this.state.canvasId ? { canvasId: this.state.canvasId } : {})
-      };
-      const page = await this.api.listCollaborationAssignments(query);
-      if (!isCurrentProject()) return;
+      const canvasId = this.state.canvasId;
+      const items = await readBoundedNumberCursorPages({
+        resource: "assignments",
+        readPage: (cursor) => {
+          const query: CollaborationAssignmentListQueryInput = {
+            cursor,
+            limit: this.pageLimit,
+            ...(canvasId ? { canvasId } : {})
+          };
+          return this.api.listCollaborationAssignments(query);
+        }
+      });
+      if (!isCurrentProject()) {
+        loading.release();
+        this.emit();
+        return { application: "superseded", resource: "assignments", token: reloadToken };
+      }
 
-      const nextAssignments = new Map<string, AssignmentDisplayProjection>();
-      const nextHosts = new Map<string, CollaborationHostProjection>();
-      for (const item of page.items) {
-        nextAssignments.set(workItemKey(item.workItem), item);
-        this.ingestHostFromAssignment(nextHosts, item);
+      const projection = await buildAssignmentRefreshProjection({
+        items,
+        readEligibleHosts: (workItems) =>
+          this.api.listCollaborationEligibleHostsBatch({ workItems }),
+        isCurrent: isCurrentProject
+      });
+      if (!projection) {
+        loading.release();
+        this.emit();
+        return { application: "superseded", resource: "assignments", token: reloadToken };
       }
-      // Hosts are filtered by each Block's package capabilities in one atomic bounded request.
-      const blockItems: BlockWorkItemRef[] = [];
-      const seenBlockItems = new Set<string>();
-      for (const { workItem } of page.items) {
-        if (workItem.kind !== "block") continue;
-        const key = workItemKey(workItem);
-        if (seenBlockItems.has(key)) continue;
-        seenBlockItems.add(key);
-        blockItems.push(workItem);
-        if (blockItems.length === this.pageLimit) break;
+      if (!isCurrentProject()) {
+        loading.release();
+        this.emit();
+        return { application: "superseded", resource: "assignments", token: reloadToken };
       }
-      if (blockItems.length > 0) {
-        const eligible = await this.api.listCollaborationEligibleHostsBatch({
-          workItems: blockItems
-        });
-        if (!isCurrentProject()) return;
-        for (const host of eligible.hosts) {
-          nextHosts.set(host.hostId, {
-            hostId: host.hostId,
-            projectId: host.projectId,
-            displayName: host.displayName,
-            online: host.online,
-            revoked: host.revoked,
-            authorizedForProject: host.authorizedForProject,
-            exists: host.exists,
-            capabilities: host.capabilities,
-            capacityRemaining: host.capacityRemaining
-          });
+      for (const [key, current] of this.state.assignments) {
+        if (
+          (this.assignmentChangeVersionByKey.get(key) ?? 0) > (changeVersionsAtStart.get(key) ?? 0)
+        ) {
+          projection.assignments.set(key, current);
         }
       }
-      if (!isCurrentProject()) return;
-      this.state.assignments = nextAssignments;
-      this.state.hosts = nextHosts;
-      this.setLoading("assignments", false);
+      const mergedHosts = mergeAssignmentHosts(projection.assignments, projection.eligibleHosts);
+      const replacementReady = this.refreshArbitration.markApplied(
+        "assignments",
+        reloadToken,
+        generation
+      );
+      this.state.assignments = projection.assignments;
+      this.state.hosts = mergedHosts;
+      loading.release();
+      if (replacementReady) this.markReadyUnlessTerminal();
       this.emit();
+      return { application: "applied", resource: "assignments", token: reloadToken };
     } catch (error) {
-      if (isCurrentProject()) {
-        this.setLoading("assignments", false);
+      if (!isCurrentProject()) {
+        loading.release();
+        this.emit();
+        return { application: "superseded", resource: "assignments", token: reloadToken };
       }
+      loading.release();
       throw error;
     }
   }
@@ -807,8 +832,16 @@ export class CollaborationReadModelController {
   private async reloadAssignmentForWorkItem(
     workItem: WorkItemRef,
     generation: number
-  ): Promise<void> {
-    this.setLoading("assignments", true);
+  ): Promise<RefreshApplication> {
+    const key = workItemKey(workItem);
+    const fullReloadSeqAtStart = this.refreshArbitration.latestToken("assignments");
+    const reloadToken = (this.assignmentReloadSeqByKey.get(key) ?? 0) + 1;
+    this.assignmentReloadSeqByKey.set(key, reloadToken);
+    const isCurrentReload = () =>
+      generation === this.state.generation &&
+      reloadToken === this.assignmentReloadSeqByKey.get(key) &&
+      this.refreshArbitration.appliedToken("assignments") <= fullReloadSeqAtStart;
+    const loading = beginLoading(this.state, "assignments");
     this.emit();
     try {
       const page = await this.api.listCollaborationAssignments({
@@ -816,48 +849,57 @@ export class CollaborationReadModelController {
         limit: 1,
         workItems: [workItem]
       });
-      if (generation !== this.state.generation) return;
-      const key = workItemKey(workItem);
+      if (!isCurrentReload()) {
+        loading.release();
+        this.emit();
+        return "superseded";
+      }
       const item = page.items[0];
       if (item) {
         this.state.assignments.set(key, item);
         this.ingestHostsFromAssignment(item);
+        this.assignmentChangeVersionByKey.set(
+          key,
+          (this.assignmentChangeVersionByKey.get(key) ?? 0) + 1
+        );
       }
-      this.setLoading("assignments", false);
+      loading.release();
       this.emit();
-      // Keep independent authorities in sync when assignment events fire.
-      this.state.trackedAuthorityWorkItems.set(key, workItem);
-      await this.reloadWorkAuthority(workItem, generation);
     } catch (error) {
-      if (generation === this.state.generation) {
-        this.setLoading("assignments", false);
+      if (!isCurrentReload()) {
+        loading.release();
+        this.emit();
+        return "superseded";
       }
+      loading.release();
       throw error;
     }
+    // Keep independent authorities in sync when assignment events fire.
+    this.state.trackedAuthorityWorkItems.set(key, workItem);
+    await this.reloadWorkAuthority(workItem, generation);
+    return "applied";
   }
 
   private async reloadWorkAuthority(workItem: WorkItemRef, generation: number): Promise<void> {
     const key = workItemKey(workItem);
-    this.setLoading(`authority:${key}`, true);
+    const loading = beginLoading(this.state, `authority:${key}`);
     this.emit();
     try {
       const projection = await this.api.getCollaborationWorkAuthority({ workItem });
+      loading.release();
       if (generation !== this.state.generation) return;
       this.state.workAuthorities.set(key, projection);
       this.state.trackedAuthorityWorkItems.set(key, workItem);
-      this.setLoading(`authority:${key}`, false);
       this.emit();
     } catch (error) {
-      if (generation === this.state.generation) {
-        this.setLoading(`authority:${key}`, false);
-      }
+      loading.release();
       throw error;
     }
   }
 
   private async reloadComments(workItem: WorkItemRef, generation: number): Promise<void> {
     const key = workItemKey(workItem);
-    this.setLoading(`comments:${key}`, true);
+    const loading = beginLoading(this.state, `comments:${key}`);
     this.emit();
     try {
       const query: CollaborationCommentListQueryInput = {
@@ -866,26 +908,25 @@ export class CollaborationReadModelController {
         includeTombstoned: true
       };
       const page = await this.api.listCollaborationComments(query);
+      loading.release();
       if (generation !== this.state.generation) return;
       this.state.comments.set(key, page.items);
-      this.setLoading(`comments:${key}`, false);
       this.emit();
     } catch (error) {
-      if (generation === this.state.generation) {
-        this.setLoading(`comments:${key}`, false);
-      }
+      loading.release();
       throw error;
     }
   }
 
   private async reloadActivity(generation: number): Promise<void> {
-    this.setLoading("activity", true);
+    const loading = beginLoading(this.state, "activity");
     this.emit();
     try {
       const query: CollaborationActivityListQueryInput = {
         limit: this.pageLimit
       };
       const page = await this.api.listCollaborationActivity(query);
+      loading.release();
       if (generation !== this.state.generation) return;
       this.state.activity = page.items;
       for (const record of page.items) {
@@ -908,12 +949,9 @@ export class CollaborationReadModelController {
           this.state.remoteRuns.set(dispatchId, next);
         }
       }
-      this.setLoading("activity", false);
       this.emit();
     } catch (error) {
-      if (generation === this.state.generation) {
-        this.setLoading("activity", false);
-      }
+      loading.release();
       throw error;
     }
   }
@@ -982,6 +1020,11 @@ export class CollaborationReadModelController {
     }
   }
 
+  private markIncompleteAuthoritativeRefresh(): void {
+    const specific: CollaborationSyncPhase[] = ["auth_expired", "forbidden", "stale_conflict"];
+    if (!specific.includes(this.state.syncPhase)) this.state.syncPhase = "error";
+  }
+
   private applyBoundaryError(error: CollaborationBoundaryErrorView): void {
     this.state.lastError = error;
     if (error.kind === "auth") {
@@ -1035,11 +1078,6 @@ export class CollaborationReadModelController {
     this.state.trackedCommentWorkItems.set(key, projection.workItem);
   }
 
-  private setLoading(kind: string, loading: boolean): void {
-    if (loading) this.state.loadingKinds.add(kind);
-    else this.state.loadingKinds.delete(kind);
-  }
-
   private buildSnapshot(): CollaborationReadModelSnapshot {
     return {
       profileId: this.state.profileId,
@@ -1056,7 +1094,7 @@ export class CollaborationReadModelController {
       remoteRunsByDispatchId: Object.fromEntries(this.state.remoteRuns),
       mutationsById: Object.fromEntries(this.state.mutations),
       lastError: this.state.lastError,
-      loadingKinds: [...this.state.loadingKinds],
+      loadingKinds: [...this.state.loadingKinds.keys()],
       updatedAt: this.state.updatedAt
     };
   }
