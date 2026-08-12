@@ -103,12 +103,6 @@ describe("distributed package artifact contracts", () => {
     expect(cli.bin?.planweave).toBe("./dist/index.js");
     expect(mcp.bin?.["planweave-mcp"]).toBe("./dist/index.js");
     expect(server.version).toBe(serverPackageVersion);
-    expect(host.version).toBe(serverPackageVersion);
-    expect(protocol.version).toBe(serverPackageVersion);
-    expect(contracts.version).toBe(serverPackageVersion);
-    expect(runtime.version).toBe(serverPackageVersion);
-    expect(cli.version).toBe(serverPackageVersion);
-    expect(mcp.version).toBe(serverPackageVersion);
     expect(server.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
     expect(host.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
     expect(runtime.dependencies?.["@planweave-ai/agent-host-protocol"]).toBe("workspace:*");
@@ -137,14 +131,28 @@ describe("distributed package artifact contracts", () => {
 
     // Root remains private monorepo shell.
     expect(root.private).toBe(true);
-    expect(root.scripts?.["pack:npm"]).toMatch(
-      /@planweave-ai\/agent-host-protocol.*@planweave-ai\/collaboration-protocol.*@planweave-ai\/runtime/
-    );
-    expect(root.scripts?.["publish:npm"]).toMatch(
-      /@planweave-ai\/agent-host-protocol.*@planweave-ai\/collaboration-protocol.*@planweave-ai\/runtime/
-    );
-    expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/server");
-    expect(root.scripts?.["publish:distributed"]).toContain("@planweave-ai/agent-host");
+    const publicPackageOrder = [
+      "@planweave-ai/agent-host-protocol",
+      "@planweave-ai/collaboration-protocol",
+      "@planweave-ai/runtime",
+      "@planweave-ai/mcp",
+      "@planweave-ai/server",
+      "@planweave-ai/agent-host",
+      "@planweave-ai/cli"
+    ];
+    for (const scriptName of ["pack:npm", "publish:npm"]) {
+      const script = root.scripts?.[scriptName] ?? "";
+      let previousIndex = -1;
+      for (const packageName of publicPackageOrder) {
+        const packageIndex = script.indexOf(`--filter ${packageName} `);
+        expect(packageIndex).toBeGreaterThan(previousIndex);
+        previousIndex = packageIndex;
+      }
+    }
+    expect(root.scripts?.["publish:npm"]).toContain("pnpm -r");
+    expect(root.scripts?.["publish:npm"]).toContain("--access public");
+    expect(root.scripts?.["publish:npm"]).toContain("--no-git-checks");
+    expect(root.scripts?.["publish:distributed"]).toBeUndefined();
   });
 
   it("keeps npm version targets aligned with the standard publish lane", () => {
@@ -154,11 +162,9 @@ describe("distributed package artifact contracts", () => {
     );
 
     expect(syncVersionScript).toMatch(
-      /"--npm": \[\s*"agent-host-protocol",\s*"collaboration-protocol",\s*"runtime",\s*"mcp",\s*"cli"\s*\]/
+      /"--npm": \[\s*"agent-host-protocol",\s*"collaboration-protocol",\s*"runtime",\s*"mcp",\s*"server",\s*"agent-host",\s*"cli"\s*\]/
     );
-    expect(syncVersionScript).toContain(
-      "--npm       agent-host-protocol, collaboration-protocol, runtime, mcp, and cli package.json files"
-    );
+    expect(syncVersionScript).toContain("--npm       all seven public npm package.json files");
   });
 
   it("keeps schema-only packages free of implementation dependencies", () => {

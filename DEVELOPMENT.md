@@ -158,7 +158,7 @@ pnpm --filter @planweave-ai/desktop smoke
 
 ## Distributed packages from source
 
-Packages: `@planweave-ai/server` → `planweave-server`, `@planweave-ai/agent-host` → `planweave-agent-host` (Node.js 22.13+). Desktop stays `private: true` and is not part of `publish:npm` / `publish:distributed`.
+Packages: `@planweave-ai/server` → `planweave-server`, `@planweave-ai/agent-host` → `planweave-agent-host` (Node.js 22.13+). Desktop stays `private: true` and is not part of `publish:npm`.
 
 Build order for the distributed graph (also used by `pnpm pack:distributed`):
 
