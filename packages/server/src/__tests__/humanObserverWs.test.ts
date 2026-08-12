@@ -6,14 +6,19 @@ import {
   basicManifest,
   createTestWorkspace
 } from "../../../runtime/src/__tests__/promptTestHelpers.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, type RawData } from "ws";
 import { parseServerConfig } from "../config.js";
 import { hashHumanToken } from "../identity/crypto.js";
 import { HumanIdentityRepository } from "../identity/repository.js";
 import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
 import { HumanObserverJournal } from "../humanObserverJournal.js";
-import { attachHumanObserverWebSocketServer } from "../humanObserverWs.js";
+import {
+  attachHumanObserverWebSocketServer,
+  type HumanObserverDeliveryLimits,
+  type HumanObserverWebSocketSendPort,
+  sendHumanObserverWebSocketFrame
+} from "../humanObserverWs.js";
 import { applyMigrations } from "../migrations.js";
 import { hashOperatorToken } from "../operatorAuth.js";
 import { ProjectAccessRepository } from "../projectAccessRepository.js";
@@ -32,6 +37,7 @@ const databases: SqliteDatabase[] = [];
 const observerServers: Array<{ close(): Promise<void> }> = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const composition of compositions.splice(0)) await composition.close();
   for (const observer of observerServers.splice(0)) await observer.close();
   for (const database of databases.splice(0)) database.close();
@@ -247,6 +253,10 @@ function nextMessages(socket: WebSocket, count: number): Promise<Record<string, 
   });
 }
 
+function nextClose(socket: WebSocket): Promise<number> {
+  return new Promise((resolve) => socket.once("close", resolve));
+}
+
 function sendHello(socket: WebSocket, projectId: string, lastCursor: number): void {
   socket.send(
     JSON.stringify({
@@ -258,7 +268,378 @@ function sendHello(socket: WebSocket, projectId: string, lastCursor: number): vo
   );
 }
 
+async function setupDirectObserver(deliveryLimits: HumanObserverDeliveryLimits) {
+  const database = await openServerDatabase(":memory:", 5_000);
+  databases.push(database);
+  applyMigrations(database);
+  const workspaceId = "bounded-observer-workspace";
+  const projectId = "bounded-observer-project";
+  const workspaceIdentity = new WorkspaceIdentityRepository(database);
+  workspaceIdentity.ensureConfiguredWorkspace(workspaceId);
+  const device = seedWorkspaceObserverDevice({ database, workspaceId, suffix: "c" });
+  const projectAccess = new ProjectAccessRepository(database);
+  projectAccess.registerProjectInternal({
+    workspaceId,
+    projectId,
+    projectRoot: `/tmp/${workspaceId}/${projectId}`,
+    ownerHumanPrincipalId: device.principalId
+  });
+  const httpServer = createServer();
+  servers.push(httpServer);
+  const journal = new HumanObserverJournal(database, 20);
+  const observer = attachHumanObserverWebSocketServer({
+    upgradeRouter: new WebSocketUpgradeRouter(httpServer),
+    journal,
+    repository: new HumanIdentityRepository(database),
+    workspaceIdentity,
+    projectAccess,
+    projectAuthority: {
+      hasScope: (scope) => scope.workspaceId === workspaceId && scope.projectId === projectId,
+      hasProject: (candidateProjectId) => candidateProjectId === projectId
+    },
+    maxPayloadBytes: 16_384,
+    shutdownTimeoutMs: 1_000,
+    transportAdmission: loopbackHttpTransportAdmission,
+    deliveryLimits
+  });
+  observerServers.push(observer);
+  await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+  const address = httpServer.address();
+  if (!address || typeof address === "string") throw new Error("observer_test_address_missing");
+  return {
+    database,
+    journal,
+    observer,
+    scope: { workspaceId, projectId },
+    projectId,
+    token: device.token,
+    url: `ws://127.0.0.1:${address.port}/api/v1/projects/${projectId}/human/observe`
+  };
+}
+
+function stallServerObserverEvents() {
+  const originalSend = WebSocket.prototype.send;
+  return vi.spyOn(WebSocket.prototype, "send").mockImplementation(function (
+    this: WebSocket,
+    data: Parameters<WebSocket["send"]>[0],
+    optionsOrCallback: WebSocket.SendOptions | ((error?: Error) => void),
+    callback?: (error?: Error) => void
+  ) {
+    const parsed = JSON.parse(data.toString()) as { type?: string };
+    if (parsed.type === "human.observer.event") return;
+    if (typeof optionsOrCallback === "function") {
+      originalSend.call(this, data, optionsOrCallback);
+      return;
+    }
+    originalSend.call(this, data, optionsOrCallback, callback);
+  });
+}
+
+function messagesThroughClose(socket: WebSocket) {
+  const messages: Record<string, unknown>[] = [];
+  socket.on("message", (data) => {
+    messages.push(JSON.parse(data.toString()) as Record<string, unknown>);
+  });
+  return new Promise<{ code: number; messages: Record<string, unknown>[] }>((resolve) => {
+    socket.once("close", (code) => resolve({ code, messages }));
+  });
+}
+
+class ControlledSendPort implements HumanObserverWebSocketSendPort {
+  readonly readyState = WebSocket.OPEN;
+  readonly bufferedAmount = 0;
+  private sendCallback: ((error?: Error) => void) | undefined;
+  private readonly listeners = {
+    close: new Set<() => void>(),
+    error: new Set<() => void>()
+  };
+
+  send(_data: string, callback: (error?: Error) => void): void {
+    this.sendCallback = callback;
+  }
+
+  once(event: "close" | "error", listener: () => void): this {
+    this.listeners[event].add(listener);
+    return this;
+  }
+
+  off(event: "close" | "error", listener: () => void): this {
+    this.listeners[event].delete(listener);
+    return this;
+  }
+
+  emit(event: "close" | "error"): void {
+    for (const listener of [...this.listeners[event]]) listener();
+  }
+
+  finishSend(error?: Error): void {
+    this.sendCallback?.(error);
+  }
+
+  listenerCount(): number {
+    return this.listeners.close.size + this.listeners.error.size;
+  }
+}
+
+describe("human observer WebSocket frame delivery", () => {
+  it.each([
+    "close",
+    "error"
+  ] as const)("settles and removes listeners when the socket emits %s", async (event) => {
+    const socket = new ControlledSendPort();
+    const result = sendHumanObserverWebSocketFrame(socket, { data: "{}", bytes: 2 }, 100, 1_000);
+
+    socket.emit(event);
+
+    await expect(result).resolves.toBe("unavailable");
+    expect(socket.listenerCount()).toBe(0);
+  });
+
+  it("settles callback errors and explicit send timeouts without leaving listeners", async () => {
+    const failedSocket = new ControlledSendPort();
+    const failed = sendHumanObserverWebSocketFrame(
+      failedSocket,
+      { data: "{}", bytes: 2 },
+      100,
+      1_000
+    );
+    failedSocket.finishSend(new Error("socket write failed"));
+    await expect(failed).resolves.toBe("unavailable");
+    expect(failedSocket.listenerCount()).toBe(0);
+
+    const timedOutSocket = new ControlledSendPort();
+    await expect(
+      sendHumanObserverWebSocketFrame(timedOutSocket, { data: "{}", bytes: 2 }, 100, 1)
+    ).resolves.toBe("timeout");
+    expect(timedOutSocket.listenerCount()).toBe(0);
+  });
+});
+
 describe("human observer WSS", () => {
+  it("does not initialize when shutdown and hello arrive in the same turn", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 10, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 16_384,
+      maxPendingBytes: 16_384,
+      controlFrameReserveBytes: 1_024,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 10_000
+    });
+    const socket = await connect(fixture.url, fixture.token);
+    const closed = messagesThroughClose(socket);
+
+    sendHello(socket, fixture.projectId, 0);
+    const shutdown = fixture.observer.close();
+
+    await expect(closed).resolves.toEqual({ code: 1001, messages: [] });
+    await shutdown;
+  });
+
+  it("does not initialize when hello follows the hello timeout", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 10, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 16_384,
+      maxPendingBytes: 16_384,
+      controlFrameReserveBytes: 1_024,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 1
+    });
+    const socket = await connect(fixture.url, fixture.token);
+    const closed = messagesThroughClose(socket);
+
+    setImmediate(() => sendHello(socket, fixture.projectId, 0));
+
+    await expect(closed).resolves.toEqual({ code: 4002, messages: [] });
+  });
+
+  it("does not process a ping queued after protocol close", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 10, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 16_384,
+      maxPendingBytes: 16_384,
+      controlFrameReserveBytes: 1_024,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 10_000
+    });
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const closed = messagesThroughClose(socket);
+
+    sendHello(socket, fixture.projectId, 0);
+    socket.send(JSON.stringify({ type: "human.observer.ping", protocolVersion: 1 }));
+
+    await expect(closed).resolves.toEqual({ code: 4000, messages: [] });
+  });
+
+  it("preserves auth-expired control delivery and close ownership with in-flight sends", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 10, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 16_384,
+      maxPendingBytes: 16_384,
+      controlFrameReserveBytes: 1_024,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 10_000
+    });
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const stalled = stallServerObserverEvents();
+    const closed = messagesThroughClose(socket);
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "membership" });
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "invitation" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    fixture.database
+      .prepare("UPDATE workspace_device_sessions SET revoked_at=? WHERE device_session_id=?")
+      .run(new Date().toISOString(), "observer-device-c");
+
+    await expect(closed).resolves.toEqual({
+      code: 4001,
+      messages: [
+        {
+          type: "human.observer.auth_expired",
+          protocolVersion: 1,
+          code: "human_auth_unauthenticated"
+        }
+      ]
+    });
+    expect(stalled).toHaveBeenCalled();
+  });
+
+  it("preserves graceful shutdown ownership with in-flight and pending sends", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 10, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 16_384,
+      maxPendingBytes: 16_384,
+      controlFrameReserveBytes: 1_024,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 10_000
+    });
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const stalled = stallServerObserverEvents();
+    const closed = messagesThroughClose(socket);
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "membership" });
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "invitation" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    await fixture.observer.close();
+
+    await expect(closed).resolves.toEqual({ code: 1001, messages: [] });
+    expect(stalled).toHaveBeenCalled();
+  });
+
+  it("closes after bounded catch-up so the client can reconnect and resume live events", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 1, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 16_384,
+      maxPendingBytes: 16_384,
+      controlFrameReserveBytes: 1_024,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 10_000
+    });
+    const first = fixture.journal.appendInCallerTransaction(fixture.scope, {
+      kind: "membership"
+    });
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "invitation" });
+    const head = fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "assignment" });
+    const socket = await connect(fixture.url, fixture.token);
+    const serverClose = nextClose(socket);
+
+    sendHello(socket, fixture.projectId, first.cursor);
+
+    await expect(nextMessage(socket)).resolves.toMatchObject({
+      type: "human.observer.catchup_required",
+      reason: "reset",
+      resumeCursor: head.cursor
+    });
+    await expect(serverClose).resolves.toBe(4003);
+
+    const resumed = await connect(fixture.url, fixture.token);
+    sendHello(resumed, fixture.projectId, head.cursor);
+    await expect(nextMessage(resumed)).resolves.toMatchObject({
+      type: "human.observer.welcome",
+      cursor: head.cursor
+    });
+    const liveEvent = nextMessage(resumed);
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "project" });
+    await expect(liveEvent).resolves.toMatchObject({
+      type: "human.observer.event",
+      previousCursor: head.cursor,
+      kind: "project"
+    });
+    resumed.close();
+  });
+
+  it("bounds queued live delivery and orders catch-up after already-sent events", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 10, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 16_384,
+      maxPendingBytes: 350,
+      controlFrameReserveBytes: 1_024,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 10_000
+    });
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const messages = nextMessages(socket, 2);
+    const serverClose = nextClose(socket);
+    for (let index = 0; index < 3; index += 1) {
+      fixture.journal.appendInCallerTransaction(fixture.scope, {
+        kind: "membership",
+        humanPrincipalId: `${index}-${"x".repeat(120)}`
+      });
+    }
+
+    const [delivered, catchup] = await messages;
+    expect(delivered).toMatchObject({ type: "human.observer.event", cursor: 1 });
+    expect(catchup).toMatchObject({
+      type: "human.observer.catchup_required",
+      reason: "reset",
+      resumeCursor: 3
+    });
+    await expect(serverClose).resolves.toBe(4003);
+  });
+
+  it("uses reserved control capacity when nonzero socket buffering blocks live delivery", async () => {
+    const fixture = await setupDirectObserver({
+      replay: { maxEvents: 10, maxBytes: 100_000 },
+      replayBatchEvents: 1,
+      maxBufferedBytes: 300,
+      maxPendingBytes: 16_384,
+      controlFrameReserveBytes: 256,
+      sendTimeoutMs: 1_000,
+      helloTimeoutMs: 10_000
+    });
+    const socket = await connect(fixture.url, fixture.token);
+    sendHello(socket, fixture.projectId, 0);
+    await expect(nextMessage(socket)).resolves.toMatchObject({ type: "human.observer.welcome" });
+    const catchup = nextMessage(socket);
+    const serverClose = nextClose(socket);
+    const bufferedAmount = vi
+      .spyOn(WebSocket.prototype, "bufferedAmount", "get")
+      .mockReturnValue(200);
+
+    fixture.journal.appendInCallerTransaction(fixture.scope, { kind: "membership" });
+
+    await expect(catchup).resolves.toMatchObject({
+      type: "human.observer.catchup_required",
+      reason: "reset",
+      resumeCursor: 1
+    });
+    await expect(serverClose).resolves.toBe(4003);
+    expect(bufferedAmount).toHaveBeenCalled();
+  });
+
   it("isolates same-project workspace subscriptions, cursors, replay, and revoked sessions", async () => {
     const database = await openServerDatabase(":memory:", 5_000);
     databases.push(database);

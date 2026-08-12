@@ -114,4 +114,61 @@ describe("HumanObserverJournal", () => {
     expect(observed).toEqual([]);
     expect(journal.head(rollbackScope)).toBe(0);
   });
+
+  it("requires authoritative catch-up when replay exceeds event or byte limits", async () => {
+    const database = await openServerDatabase(":memory:", 5_000);
+    databases.push(database);
+    applyMigrations(database);
+    const journal = new HumanObserverJournal(database, 10);
+    const first = journal.appendInCallerTransaction(projectA, { kind: "membership" });
+    journal.appendInCallerTransaction(projectA, { kind: "invitation" });
+    const head = journal.appendInCallerTransaction(projectA, { kind: "assignment" });
+
+    expect(journal.replay(projectA, first.cursor, { maxEvents: 1, maxBytes: 100_000 })).toEqual({
+      kind: "gap",
+      reason: "reset",
+      headCursor: head.cursor
+    });
+    expect(journal.replay(projectA, first.cursor, { maxEvents: 10, maxBytes: 1 })).toEqual({
+      kind: "gap",
+      reason: "reset",
+      headCursor: head.cursor
+    });
+  });
+
+  it("applies the replay byte budget exactly across accumulated serialized events", async () => {
+    const database = await openServerDatabase(":memory:", 5_000);
+    databases.push(database);
+    applyMigrations(database);
+    const journal = new HumanObserverJournal(database, 10);
+    const anchor = journal.appendInCallerTransaction(projectA, { kind: "membership" });
+    const detailed = journal.appendInCallerTransaction(projectA, {
+      kind: "membership",
+      humanPrincipalId: "observer-principal"
+    });
+    const detailedBytes = Buffer.byteLength(JSON.stringify(detailed), "utf8");
+    expect(
+      journal.replay(projectA, anchor.cursor, { maxEvents: 10, maxBytes: detailedBytes })
+    ).toEqual({
+      kind: "events",
+      headCursor: detailed.cursor,
+      events: [detailed]
+    });
+
+    const following = journal.appendInCallerTransaction(projectA, { kind: "invitation" });
+    const cumulativeBytes = detailedBytes + Buffer.byteLength(JSON.stringify(following), "utf8");
+    expect(
+      journal.replay(projectA, anchor.cursor, { maxEvents: 10, maxBytes: cumulativeBytes })
+    ).toEqual({
+      kind: "events",
+      headCursor: following.cursor,
+      events: [detailed, following]
+    });
+    expect(
+      journal.replay(projectA, anchor.cursor, {
+        maxEvents: 10,
+        maxBytes: cumulativeBytes - 1
+      })
+    ).toEqual({ kind: "gap", reason: "reset", headCursor: following.cursor });
+  });
 });

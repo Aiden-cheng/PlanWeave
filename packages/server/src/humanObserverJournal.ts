@@ -29,11 +29,21 @@ const humanObserverScopeSchema = z
 
 export type HumanObserverScope = z.input<typeof humanObserverScopeSchema>;
 
+export const HUMAN_OBSERVER_REPLAY_LIMITS = Object.freeze({
+  maxEvents: 1_024,
+  maxBytes: 512 * 1_024
+});
+
+export type HumanObserverReplayLimits = {
+  maxEvents: number;
+  maxBytes: number;
+};
+
 export type HumanObserverReplay =
   | { kind: "events"; headCursor: number; events: HumanObserverEvent[] }
   | {
       kind: "gap";
-      reason: "retention_gap" | "cursor_ahead";
+      reason: "retention_gap" | "cursor_ahead" | "reset";
       headCursor: number;
       droppedThroughCursor?: number;
     };
@@ -112,11 +122,16 @@ export class HumanObserverJournal {
     );
   }
 
-  replay(rawScope: HumanObserverScope, lastCursor: number): HumanObserverReplay {
+  replay(
+    rawScope: HumanObserverScope,
+    lastCursor: number,
+    rawLimits: HumanObserverReplayLimits = HUMAN_OBSERVER_REPLAY_LIMITS
+  ): HumanObserverReplay {
     const scope = humanObserverScopeSchema.parse(rawScope);
     if (!Number.isSafeInteger(lastCursor) || lastCursor < 0) {
       throw new Error("human_observer_cursor_invalid");
     }
+    const limits = replayLimits(rawLimits);
     const headCursor = this.head(scope);
     if (lastCursor === 0) return { kind: "events", headCursor, events: [] };
     if (lastCursor > headCursor) return { kind: "gap", reason: "cursor_ahead", headCursor };
@@ -139,22 +154,33 @@ export class HumanObserverJournal {
       .prepare(
         `SELECT cursor,previous_cursor,event_json,occurred_at
          FROM human_observer_events WHERE workspace_id=? AND project_id=? AND cursor>?
-         ORDER BY cursor ASC`
+         ORDER BY cursor ASC LIMIT ?`
       )
-      .all(scope.workspaceId, scope.projectId, lastCursor);
+      .all(scope.workspaceId, scope.projectId, lastCursor, limits.maxEvents + 1);
+    if (rows.length > limits.maxEvents) {
+      return { kind: "gap", reason: "reset", headCursor };
+    }
+    const events: HumanObserverEvent[] = [];
+    let serializedBytes = 0;
+    for (const row of rows) {
+      const event = humanObserverEventSchema.parse({
+        type: "human.observer.event",
+        protocolVersion: 1,
+        cursor: row.cursor,
+        previousCursor: row.previous_cursor,
+        occurredAt: row.occurred_at,
+        ...journalEventInputSchema.parse(JSON.parse(String(row.event_json)))
+      });
+      serializedBytes += Buffer.byteLength(JSON.stringify(event));
+      if (serializedBytes > limits.maxBytes) {
+        return { kind: "gap", reason: "reset", headCursor };
+      }
+      events.push(event);
+    }
     return {
       kind: "events",
       headCursor,
-      events: rows.map((row) =>
-        humanObserverEventSchema.parse({
-          type: "human.observer.event",
-          protocolVersion: 1,
-          cursor: row.cursor,
-          previousCursor: row.previous_cursor,
-          occurredAt: row.occurred_at,
-          ...journalEventInputSchema.parse(JSON.parse(String(row.event_json)))
-        })
-      )
+      events
     };
   }
 
@@ -171,6 +197,19 @@ export class HumanObserverJournal {
       if (projectSubscribers.size === 0) this.subscribers.delete(key);
     };
   }
+}
+
+function replayLimits(rawLimits: HumanObserverReplayLimits): HumanObserverReplayLimits {
+  if (!Number.isSafeInteger(rawLimits.maxEvents) || rawLimits.maxEvents < 1) {
+    throw new Error("human_observer_replay_max_events_invalid");
+  }
+  if (!Number.isSafeInteger(rawLimits.maxBytes) || rawLimits.maxBytes < 1) {
+    throw new Error("human_observer_replay_max_bytes_invalid");
+  }
+  if (rawLimits.maxEvents === Number.MAX_SAFE_INTEGER) {
+    throw new Error("human_observer_replay_max_events_invalid");
+  }
+  return rawLimits;
 }
 
 function scopeKey(scope: z.output<typeof humanObserverScopeSchema>): string {
