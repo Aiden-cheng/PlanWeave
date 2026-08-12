@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- Node.js 22.5 or newer
+- Node.js 22.13 or newer
 - An installed and authenticated ACP Agent
 - A reachable PlanWeave Server
 

@@ -22,6 +22,62 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  node-22-13-compatibility:
+    name: Node.js 22.13 compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: pnpm
+
+      - name: Verify Node.js version
+        run: |
+          node --version
+          npm --version
+          node -e 'if (process.versions.node !== "22.13.0") throw new Error("expected Node.js 22.13.0, got " + process.version)'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build public packages
+        run: >-
+          pnpm
+          --filter @planweave-ai/agent-host-protocol
+          --filter @planweave-ai/collaboration-protocol
+          --filter @planweave-ai/runtime
+          --filter @planweave-ai/mcp
+          --filter @planweave-ai/cli
+          --filter @planweave-ai/server
+          --filter @planweave-ai/agent-host
+          build
+
+      - name: Typecheck public packages
+        run: >-
+          pnpm
+          --filter @planweave-ai/agent-host-protocol
+          --filter @planweave-ai/collaboration-protocol
+          --filter @planweave-ai/runtime
+          --filter @planweave-ai/mcp
+          --filter @planweave-ai/cli
+          --filter @planweave-ai/server
+          --filter @planweave-ai/agent-host
+          typecheck
+
+      - name: Audit installed distributed tarballs
+        run: node scripts/distributed-package-install-smoke.mjs --skip-build
+
   ubuntu-gate:
     name: Ubuntu build, lint, and unit tests
     runs-on: ubuntu-latest

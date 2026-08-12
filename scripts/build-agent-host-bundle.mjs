@@ -37,12 +37,12 @@ export function renderAgentHostInstallScript(releaseId) {
 set -eu
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "PlanWeave Agent Host requires Node.js 22.5 or newer." >&2
+  echo "PlanWeave Agent Host requires Node.js 22.13 or newer." >&2
   exit 1
 fi
 
-node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 5)) process.exit(1)' || {
-  echo "PlanWeave Agent Host requires Node.js 22.5 or newer." >&2
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 13)) process.exit(1)' || {
+  echo "PlanWeave Agent Host requires Node.js 22.13 or newer." >&2
   exit 1
 }
 
@@ -81,7 +81,7 @@ function renderBundleReadme() {
   return `PlanWeave Agent Host for Linux/VPS
 
 Requirements:
-- Node.js 22.5 or newer
+- Node.js 22.13 or newer
 - Tailscale connected to the same tailnet as PlanWeave Server
 - The ACP agents you want to expose already installed and logged in on this host
 

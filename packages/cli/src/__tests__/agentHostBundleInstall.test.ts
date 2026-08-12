@@ -16,6 +16,13 @@ afterEach(async () => {
 });
 
 describe("Agent Host VPS bundle installer", () => {
+  it("requires the public minimum Node.js version", () => {
+    const installer = renderAgentHostInstallScript("0.3.0-test");
+
+    expect(installer).toContain("major === 22 && minor < 13");
+    expect(installer).toContain("requires Node.js 22.13 or newer");
+  });
+
   it("installs one planweave command and forwards Agent Host arguments", async () => {
     const root = await mkdtemp(join(tmpdir(), "planweave-agent-host-installer-"));
     directories.push(root);

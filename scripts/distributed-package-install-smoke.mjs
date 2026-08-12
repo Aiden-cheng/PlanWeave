@@ -282,7 +282,7 @@ function inspectTarball(tarballPath, meta) {
   if (packageJson.name !== meta.name) {
     throw new Error(`tarball_name_mismatch:${packageJson.name}`);
   }
-  if (packageJson.engines?.node !== ">=22.5") {
+  if (packageJson.engines?.node !== ">=22.13") {
     throw new Error(`tarball_engines_unexpected:${packageJson.engines?.node}`);
   }
   if (packageJson.license !== "MIT") {

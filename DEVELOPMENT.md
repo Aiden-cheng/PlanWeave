@@ -36,7 +36,7 @@ Module and security boundaries:
 | Desktop collab UI | Renderer hooks → preload → main vault/client → contracts package | DOM as business state; renderer-held secrets |
 | Compatibility | Matching package majors + `agentHostProtocolVersion` | Cross-major silent downgrade; ACP→CLI fallback |
 
-Node engines for Server/Host/protocol/contracts packages: **Node.js >= 22.5** (built-in `node:sqlite`). Production transport is HTTPS/WSS; loopback plain HTTP/WS requires explicit `allowInsecureDevelopment`.
+All published packages require **Node.js >= 22.13**. This is the first Node.js 22 release where the built-in `node:sqlite` module used by Runtime, Server, and Agent Host is available without a runtime flag. Production transport is HTTPS/WSS; loopback plain HTTP/WS requires explicit `allowInsecureDevelopment`.
 
 Provider API keys, Agent login state, Git credentials, and Host workspace/profile mappings remain on the Host machine. PlanWeave coordinates Blocks; it does not own Git branches, worktrees, or merge.
 
@@ -158,7 +158,7 @@ pnpm --filter @planweave-ai/desktop smoke
 
 ## Distributed packages from source
 
-Packages: `@planweave-ai/server` → `planweave-server`, `@planweave-ai/agent-host` → `planweave-agent-host` (Node.js 22.5+). Desktop stays `private: true` and is not part of `publish:npm` / `publish:distributed`.
+Packages: `@planweave-ai/server` → `planweave-server`, `@planweave-ai/agent-host` → `planweave-agent-host` (Node.js 22.13+). Desktop stays `private: true` and is not part of `publish:npm` / `publish:distributed`.
 
 Build order for the distributed graph (also used by `pnpm pack:distributed`):
 

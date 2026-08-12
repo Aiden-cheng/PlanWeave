@@ -54,6 +54,29 @@ describe("real-process CI registration gate", () => {
     expect(workflow).toMatch(/shard:\s*distributed[\s\S]*?max_workers:\s*1/);
     expect(workflow).not.toMatch(/shard:\s*distributed[\s\S]*?max_workers:\s*2/);
 
+    const minimumNodeJob = workflow.slice(
+      workflow.indexOf("  node-22-13-compatibility:"),
+      workflow.indexOf("\n  ubuntu-gate:")
+    );
+    expect(minimumNodeJob).toContain("name: Node.js 22.13 compatibility");
+    expect(minimumNodeJob).toContain('node-version: "22.13.0"');
+    expect(minimumNodeJob).toContain('process.versions.node !== "22.13.0"');
+    for (const packageName of [
+      "agent-host-protocol",
+      "collaboration-protocol",
+      "runtime",
+      "mcp",
+      "cli",
+      "server",
+      "agent-host"
+    ]) {
+      expect(minimumNodeJob).toContain(`--filter @planweave-ai/${packageName}`);
+    }
+    expect(minimumNodeJob).not.toContain("@planweave-ai/desktop");
+    expect(minimumNodeJob).toContain(
+      "node scripts/distributed-package-install-smoke.mjs --skip-build"
+    );
+
     const serverSuite = suites.groups.find(
       (entry) => entry.root === "packages/server/src/__tests__"
     );

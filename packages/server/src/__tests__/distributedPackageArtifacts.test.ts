@@ -39,7 +39,7 @@ function readPackageJson(relativePath: string): PackageJson {
 }
 
 function expectPublishableMetadata(pkg: PackageJson, directory: string): void {
-  expect(pkg.engines?.node).toBe(">=22.5");
+  expect(pkg.engines?.node).toBe(">=22.13");
   expect(pkg.license).toBe("MIT");
   expect(pkg.files).toEqual(["dist", "LICENSE"]);
   expect(pkg.publishConfig?.access).toBe("public");
