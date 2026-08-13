@@ -112,6 +112,7 @@
         "collaborationRegistryReadModelsHook.test.tsx",
         "collaborationRemoteOperationsClient.test.ts",
         "collaborationRenderBenchmark.test.ts",
+        "collaborationRetention.test.ts",
         "collaborationSessionState.test.ts",
         "commentViewModels.test.ts",
         "commentsPanel.test.tsx",

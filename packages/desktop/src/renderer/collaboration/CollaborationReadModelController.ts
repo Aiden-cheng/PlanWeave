@@ -36,6 +36,18 @@ import {
 } from "./assignmentRefreshProjection.js";
 import { beginLoading } from "./loadingLease.js";
 import {
+  collaborationBoundaryErrorFromUnknown,
+  syncPhaseAfterCollaborationBoundaryError
+} from "./collaborationBoundaryError.js";
+import { CollaborationObserverQueue } from "./collaborationObserverQueue.js";
+import { CollaborationObserverRecovery } from "./collaborationObserverRecovery.js";
+import { ingestAssignmentHost, upsertCommentProjection } from "./collaborationProjectionUpdates.js";
+import { buildCollaborationSnapshot } from "./collaborationSnapshot.js";
+import {
+  CollaborationEventCursorWindow,
+  CollaborationMutationLedger
+} from "./collaborationRetention.js";
+import {
   AuthoritativeRefreshArbitrator,
   type AggregateRefreshApplication
 } from "./refreshArbitration.js";
@@ -62,10 +74,8 @@ export type CollaborationReadBridgePort = Pick<
 
 export type CollaborationReadModelControllerOptions = {
   api: CollaborationReadBridgePort;
-  /** Bound list page size for authoritative refreshes. */
   pageLimit?: number;
   clock?: { now(): Date };
-  /** Deterministic mutation ids for tests. */
   createMutationId?: () => string;
 };
 
@@ -82,23 +92,27 @@ type InternalState = {
   comments: Map<string, CommentDisplayProjection[]>;
   activity: CollaborationReadModelSnapshot["activity"];
   remoteRuns: Map<string, CollaborationRemoteRunProjection>;
-  mutations: Map<string, CollaborationMutationRecord>;
+  mutations: CollaborationMutationLedger;
   lastError: CollaborationBoundaryErrorView | null;
   loadingKinds: Map<string, number>;
   trackedCommentWorkItems: Map<string, WorkItemRef>;
   trackedAuthorityWorkItems: Map<string, WorkItemRef>;
-  /** Event cursors already applied (dedupe out-of-order/duplicate observer events). */
-  appliedEventCursors: Set<number>;
-  /** Event cursors currently being invalidated (dedupe concurrent observer deliveries). */
-  inFlightEventCursors: Map<number, number>;
-  /** Event cursors whose invalidation failed and may be retried despite a later high-water mark. */
-  failedEventCursors: Set<number>;
+  eventCursors: CollaborationEventCursorWindow;
   generation: number;
   updatedAt: string;
 };
 
 const DEFAULT_PAGE_LIMIT = WORK_ELIGIBLE_HOST_BATCH_MAX;
 type RefreshApplication = "applied" | "superseded";
+type ObserverEventSignal = Extract<CollaborationObserverSignal, { type: "human.observer.event" }>;
+type ObserverEventQueueEntry = {
+  signal: ObserverEventSignal;
+  generation: number;
+  eventCursors: CollaborationEventCursorWindow;
+};
+
+const OBSERVER_INVALIDATION_CONCURRENCY = 4;
+const OBSERVER_EVENT_QUEUE_LIMIT = 128;
 
 function emptyState(now: string): InternalState {
   return {
@@ -114,50 +128,14 @@ function emptyState(now: string): InternalState {
     comments: new Map(),
     activity: [],
     remoteRuns: new Map(),
-    mutations: new Map(),
+    mutations: new CollaborationMutationLedger(),
     lastError: null,
     loadingKinds: new Map(),
     trackedCommentWorkItems: new Map(),
     trackedAuthorityWorkItems: new Map(),
-    appliedEventCursors: new Set(),
-    inFlightEventCursors: new Map(),
-    failedEventCursors: new Set(),
+    eventCursors: new CollaborationEventCursorWindow(),
     generation: 0,
     updatedAt: now
-  };
-}
-
-function errorFromUnknown(error: unknown): CollaborationBoundaryErrorView {
-  if (
-    error &&
-    typeof error === "object" &&
-    "kind" in error &&
-    "code" in error &&
-    typeof (error as { kind: unknown }).kind === "string" &&
-    typeof (error as { code: unknown }).code === "string"
-  ) {
-    const typed = error as {
-      kind: string;
-      code: string;
-      message?: string;
-      httpStatus?: number;
-      retryAfterMs?: number;
-      retryable?: boolean;
-    };
-    return {
-      kind: typed.kind,
-      code: typed.code,
-      message: typed.message ?? typed.code,
-      httpStatus: typed.httpStatus,
-      retryAfterMs: typed.retryAfterMs,
-      retryable: typed.retryable ?? false
-    };
-  }
-  return {
-    kind: "unknown",
-    code: "collaboration_unknown",
-    message: error instanceof Error ? error.message : String(error),
-    retryable: false
   };
 }
 
@@ -231,8 +209,19 @@ export class CollaborationReadModelController {
   private listeners = new Set<(snapshot: CollaborationReadModelSnapshot) => void>();
   private unsubscribers: Array<() => void> = [];
   private disposed = false;
+  private generationEpoch = 0;
   private mutationSeq = 0;
   private observerAttemptSeq = 0;
+  private refreshRequestSeq = 0;
+  private lastSuccessfulRefreshRequest = 0;
+  private readonly observerCursorRecovery = new CollaborationObserverRecovery();
+  private readonly observerEventQueue = new CollaborationObserverQueue<ObserverEventQueueEntry>({
+    concurrency: OBSERVER_INVALIDATION_CONCURRENCY,
+    queueLimit: OBSERVER_EVENT_QUEUE_LIMIT,
+    key: (entry) => entry.signal.event.cursor,
+    isCurrent: (entry) => this.matchesObserverContext(entry),
+    execute: (entry) => this.applyObserverEvent(entry)
+  });
   private refreshArbitration = new AuthoritativeRefreshArbitrator();
   private assignmentReloadSeqByKey = new Map<string, number>();
   private assignmentChangeVersionByKey = new Map<string, number>();
@@ -251,7 +240,7 @@ export class CollaborationReadModelController {
         return `mut-${this.mutationSeq}`;
       });
     this.state = emptyState(this.clock.now().toISOString());
-    this.cachedSnapshot = this.buildSnapshot();
+    this.cachedSnapshot = buildCollaborationSnapshot(this.state);
   }
 
   getSnapshot(): CollaborationReadModelSnapshot {
@@ -279,19 +268,20 @@ export class CollaborationReadModelController {
       this.state.profileId === input.profileId && this.state.projectId === input.projectId;
     if (!sameIdentity) {
       this.teardownSubscriptions();
+      this.observerEventQueue.cancelQueued();
       this.state = {
         ...emptyState(this.clock.now().toISOString()),
         profileId: input.profileId,
         projectId: input.projectId,
         canvasId: input.canvasId ?? null,
         syncPhase: "loading",
-        generation: this.state.generation + 1
+        generation: this.nextGeneration()
       };
       this.attachSubscriptions();
       this.emit();
     } else if ((input.canvasId ?? null) !== this.state.canvasId) {
       this.state.canvasId = input.canvasId ?? null;
-      this.state.generation += 1;
+      this.state.generation = this.nextGeneration();
       this.state.loadingKinds = new Map();
     }
 
@@ -302,7 +292,12 @@ export class CollaborationReadModelController {
   /** Stop all subscriptions and clear server projections (project switch / logout). */
   clear(): void {
     this.teardownSubscriptions();
-    this.state = emptyState(this.clock.now().toISOString());
+    this.observerEventQueue.cancelQueued();
+    this.observerCursorRecovery.clear();
+    this.state = {
+      ...emptyState(this.clock.now().toISOString()),
+      generation: this.nextGeneration()
+    };
     this.emit();
   }
 
@@ -327,6 +322,8 @@ export class CollaborationReadModelController {
   ): Promise<void> {
     this.assertOpen();
     if (!this.state.profileId || !this.state.projectId) return;
+    this.refreshRequestSeq += 1;
+    const refreshRequest = this.refreshRequestSeq;
 
     this.refreshQueue = this.refreshQueue
       .catch(() => undefined)
@@ -362,12 +359,13 @@ export class CollaborationReadModelController {
               : []
           );
           if (this.refreshArbitration.settleAggregate(generation, replacements)) {
+            this.lastSuccessfulRefreshRequest = refreshRequest;
             this.markReadyUnlessTerminal();
           }
         } else {
           this.refreshArbitration.cancelAggregate();
           const first = failures[0] as PromiseRejectedResult;
-          const mapped = errorFromUnknown(first.reason);
+          const mapped = collaborationBoundaryErrorFromUnknown(first.reason);
           this.applyBoundaryError(mapped);
           this.markIncompleteAuthoritativeRefresh();
         }
@@ -387,7 +385,7 @@ export class CollaborationReadModelController {
       execute: () => this.api.updateCollaborationAssignment(command),
       onConfirmed: (projection) => {
         this.state.assignments.set(workItemKey(projection.workItem), projection);
-        this.ingestHostsFromAssignment(projection);
+        ingestAssignmentHost(this.state.hosts, projection);
       }
     });
   }
@@ -522,7 +520,7 @@ export class CollaborationReadModelController {
     ) {
       return;
     }
-    this.applyBoundaryError(errorFromUnknown(error));
+    this.applyBoundaryError(collaborationBoundaryErrorFromUnknown(error));
     if (
       signal.type === "human.observer.event" &&
       (signal.event.kind === "membership" ||
@@ -586,11 +584,10 @@ export class CollaborationReadModelController {
 
     if (signal.type === "human.observer.catchup_required") {
       // Retention gap / cursor reset: drop cached projections and reload bounded APIs.
-      this.state.generation += 1;
+      this.observerEventQueue.cancelQueued();
+      this.state.generation = this.nextGeneration();
       this.state.observerCursor = signal.resumeCursor;
-      this.state.appliedEventCursors.clear();
-      this.state.inFlightEventCursors.clear();
-      this.state.failedEventCursors.clear();
+      this.state.eventCursors.resetForCatchup();
       this.state.assignments.clear();
       this.state.workAuthorities.clear();
       this.state.comments.clear();
@@ -604,50 +601,87 @@ export class CollaborationReadModelController {
       return;
     }
 
-    // human.observer.event
+    await this.enqueueObserverEvent(signal, generation);
+  }
+
+  private enqueueObserverEvent(signal: ObserverEventSignal, generation: number): Promise<void> {
     const event = signal.event;
-    if (this.state.appliedEventCursors.has(event.cursor)) {
-      return;
-    }
-    if (this.state.inFlightEventCursors.has(event.cursor)) {
-      return;
+    const eventCursors = this.state.eventCursors;
+    if (
+      eventCursors.hasApplied(event.cursor) ||
+      eventCursors.isInFlight(event.cursor) ||
+      this.observerEventQueue.hasQueued(event.cursor)
+    ) {
+      return Promise.resolve();
     }
     if (event.cursor <= this.state.observerCursor && this.state.observerCursor > 0) {
       // Out-of-order or stale duplicate relative to validated high-water mark.
       if (
         event.previousCursor < this.state.observerCursor &&
-        !this.state.failedEventCursors.has(event.cursor)
+        !eventCursors.isFailed(event.cursor) &&
+        !eventCursors.requiresRefresh()
       ) {
-        this.state.appliedEventCursors.add(event.cursor);
-        return;
+        return Promise.resolve();
       }
     }
+
+    const entry = { signal, generation, eventCursors };
+    const queued = this.observerEventQueue.enqueue(entry);
+    if (!queued) {
+      eventCursors.requestRefresh();
+      this.scheduleObserverCursorRefresh(generation, eventCursors);
+      return Promise.resolve();
+    }
+    return queued;
+  }
+
+  private async applyObserverEvent(entry: ObserverEventQueueEntry): Promise<void> {
+    const { event } = entry.signal;
     this.observerAttemptSeq += 1;
     const attemptToken = this.observerAttemptSeq;
-    this.state.inFlightEventCursors.set(event.cursor, attemptToken);
+    entry.eventCursors.begin(event.cursor, attemptToken);
     try {
-      const application = await this.invalidateFromEvent(event.kind, event, generation);
-      if (generation !== this.state.generation) return;
+      const application = await this.invalidateFromEvent(event.kind, event, entry.generation);
+      if (!this.matchesObserverContext(entry)) return;
       if (application === "superseded") {
-        this.state.failedEventCursors.add(event.cursor);
+        entry.eventCursors.markFailed(event.cursor);
+        this.scheduleObserverCursorRefresh(entry.generation, entry.eventCursors);
         return;
       }
-      this.state.appliedEventCursors.add(event.cursor);
-      this.state.failedEventCursors.delete(event.cursor);
+      entry.eventCursors.markApplied(event.cursor);
+      this.scheduleObserverCursorRefresh(entry.generation, entry.eventCursors);
       if (event.cursor > this.state.observerCursor) {
         this.state.observerCursor = event.cursor;
       }
       this.emit();
     } catch (error) {
-      if (generation === this.state.generation) {
-        this.state.failedEventCursors.add(event.cursor);
+      if (this.matchesObserverContext(entry)) {
+        entry.eventCursors.markFailed(event.cursor);
+        this.scheduleObserverCursorRefresh(entry.generation, entry.eventCursors);
       }
       throw error;
     } finally {
-      if (this.state.inFlightEventCursors.get(event.cursor) === attemptToken) {
-        this.state.inFlightEventCursors.delete(event.cursor);
-      }
+      entry.eventCursors.finish(event.cursor, attemptToken);
     }
+  }
+
+  private matchesObserverContext(entry: {
+    signal: ObserverEventSignal;
+    generation: number;
+    eventCursors: CollaborationEventCursorWindow;
+  }): boolean {
+    return (
+      !this.disposed &&
+      entry.generation === this.state.generation &&
+      entry.signal.profileId === this.state.profileId &&
+      entry.signal.projectId === this.state.projectId &&
+      entry.eventCursors === this.state.eventCursors
+    );
+  }
+
+  private nextGeneration(): number {
+    this.generationEpoch += 1;
+    return this.generationEpoch;
   }
 
   private async invalidateFromEvent(
@@ -857,7 +891,7 @@ export class CollaborationReadModelController {
       const item = page.items[0];
       if (item) {
         this.state.assignments.set(key, item);
-        this.ingestHostsFromAssignment(item);
+        ingestAssignmentHost(this.state.hosts, item);
         this.assignmentChangeVersionByKey.set(
           key,
           (this.assignmentChangeVersionByKey.get(key) ?? 0) + 1
@@ -974,7 +1008,7 @@ export class CollaborationReadModelController {
       expectedRevision: input.expectedRevision,
       submittedAt: this.clock.now().toISOString()
     };
-    this.state.mutations.set(mutationId, record);
+    this.state.mutations.setPending(record);
     this.emit();
 
     try {
@@ -986,7 +1020,7 @@ export class CollaborationReadModelController {
           typeof result.revision === "number" ? result.revision : input.expectedRevision,
         resolvedAt: this.clock.now().toISOString()
       };
-      this.state.mutations.set(mutationId, confirmed);
+      this.state.mutations.setTerminal(confirmed);
       input.onConfirmed(result);
       if (this.state.syncPhase === "stale_conflict") {
         this.state.syncPhase = "ready";
@@ -995,10 +1029,10 @@ export class CollaborationReadModelController {
       this.emit();
       return result;
     } catch (error) {
-      const mapped = errorFromUnknown(error);
+      const mapped = collaborationBoundaryErrorFromUnknown(error);
       const status: CollaborationMutationRecord["status"] =
         mapped.kind === "offline" || mapped.kind === "timeout" ? "offline" : "rejected";
-      this.state.mutations.set(mutationId, {
+      this.state.mutations.setTerminal({
         ...record,
         status,
         errorKind: mapped.kind,
@@ -1010,6 +1044,36 @@ export class CollaborationReadModelController {
       this.emit();
       return null;
     }
+  }
+
+  private scheduleObserverCursorRefresh(
+    generation: number,
+    eventCursors: CollaborationEventCursorWindow
+  ): void {
+    const profileId = this.state.profileId;
+    const projectId = this.state.projectId;
+    if (profileId === null || projectId === null) return;
+    const isCurrent = () =>
+      !this.disposed &&
+      generation === this.state.generation &&
+      profileId === this.state.profileId &&
+      projectId === this.state.projectId &&
+      eventCursors === this.state.eventCursors;
+    this.observerCursorRecovery.schedule({
+      eventCursors,
+      isCurrent,
+      refresh: () => ({
+        completion: this.refreshAuthoritative({ reason: "observer_cursor_window" }, generation),
+        requestId: this.refreshRequestSeq
+      }),
+      wasSuccessful: (requestId) => this.lastSuccessfulRefreshRequest === requestId,
+      onError: (error) => {
+        this.applyBoundaryError(collaborationBoundaryErrorFromUnknown(error));
+        this.markIncompleteAuthoritativeRefresh();
+        this.emit();
+      },
+      onRetired: () => this.emit()
+    });
   }
 
   private markReadyUnlessTerminal(): void {
@@ -1027,81 +1091,16 @@ export class CollaborationReadModelController {
 
   private applyBoundaryError(error: CollaborationBoundaryErrorView): void {
     this.state.lastError = error;
-    if (error.kind === "auth") {
-      this.state.syncPhase = "auth_expired";
-    } else if (error.kind === "forbidden") {
-      this.state.syncPhase = "forbidden";
-    } else if (error.kind === "conflict") {
-      this.state.syncPhase = "stale_conflict";
-    } else if (error.kind === "offline" || error.kind === "timeout") {
-      this.state.syncPhase =
-        this.state.syncPhase === "ready" || this.state.syncPhase === "degraded"
-          ? "degraded"
-          : this.state.syncPhase === "loading"
-            ? "disconnected"
-            : this.state.syncPhase;
-    } else if (this.state.syncPhase === "loading" || this.state.syncPhase === "ready") {
-      this.state.syncPhase = "degraded";
-    }
-  }
-
-  private ingestHostsFromAssignment(assignment: AssignmentDisplayProjection): void {
-    this.ingestHostFromAssignment(this.state.hosts, assignment);
-  }
-
-  private ingestHostFromAssignment(
-    hosts: Map<string, CollaborationHostProjection>,
-    assignment: AssignmentDisplayProjection
-  ): void {
-    if (!assignment.host) return;
-    const existing = hosts.get(assignment.host.hostId);
-    hosts.set(assignment.host.hostId, {
-      hostId: assignment.host.hostId,
-      projectId: assignment.projectId,
-      displayName: assignment.host.displayName,
-      online: assignment.host.online,
-      revoked: assignment.host.revoked,
-      authorizedForProject: assignment.host.authorizedForProject,
-      exists: true,
-      capabilities: existing?.capabilities ?? [],
-      capacityRemaining: existing?.capacityRemaining
-    });
+    this.state.syncPhase = syncPhaseAfterCollaborationBoundaryError(this.state.syncPhase, error);
   }
 
   private upsertComment(projection: CommentDisplayProjection): void {
-    const key = workItemKey(projection.workItem);
-    const existing = this.state.comments.get(key) ?? [];
-    const next = existing.filter((item) => item.commentId !== projection.commentId);
-    next.push(projection);
-    next.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-    this.state.comments.set(key, next);
-    this.state.trackedCommentWorkItems.set(key, projection.workItem);
-  }
-
-  private buildSnapshot(): CollaborationReadModelSnapshot {
-    return {
-      profileId: this.state.profileId,
-      projectId: this.state.projectId,
-      canvasId: this.state.canvasId,
-      syncPhase: this.state.syncPhase,
-      observerCursor: this.state.observerCursor,
-      members: this.state.members,
-      hosts: [...this.state.hosts.values()],
-      assignmentsByWorkItem: Object.fromEntries(this.state.assignments),
-      workAuthorityByWorkItem: Object.fromEntries(this.state.workAuthorities),
-      commentsByWorkItem: Object.fromEntries(this.state.comments),
-      activity: this.state.activity,
-      remoteRunsByDispatchId: Object.fromEntries(this.state.remoteRuns),
-      mutationsById: Object.fromEntries(this.state.mutations),
-      lastError: this.state.lastError,
-      loadingKinds: [...this.state.loadingKinds.keys()],
-      updatedAt: this.state.updatedAt
-    };
+    upsertCommentProjection(this.state.comments, this.state.trackedCommentWorkItems, projection);
   }
 
   private emit(): void {
     this.state.updatedAt = this.clock.now().toISOString();
-    this.cachedSnapshot = this.buildSnapshot();
+    this.cachedSnapshot = buildCollaborationSnapshot(this.state);
     const snapshot = this.cachedSnapshot;
     for (const listener of this.listeners) {
       listener(snapshot);

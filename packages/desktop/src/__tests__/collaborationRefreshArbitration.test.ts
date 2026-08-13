@@ -143,6 +143,89 @@ function signal(kind: "membership" | "assignment", cursor: number): Collaboratio
 }
 
 describe("CollaborationReadModelController refresh arbitration", () => {
+  it("bounds observer invalidation concurrency and queued cursors during a large burst", async () => {
+    const mock = createApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    mock.listMembers.mockClear();
+
+    const releaseReads = deferred<void>();
+    let activeReads = 0;
+    let peakReads = 0;
+    mock.listMembers.mockImplementation(async () => {
+      activeReads += 1;
+      peakReads = Math.max(peakReads, activeReads);
+      await releaseReads.promise;
+      activeReads -= 1;
+      return exampleMemberPage;
+    });
+
+    for (let cursor = 1; cursor <= 10_000; cursor += 1) {
+      mock.listeners[0]!(signal("membership", cursor));
+    }
+    await waitFor(() => expect(mock.listMembers).toHaveBeenCalledTimes(4));
+    // Four event invalidations plus one authoritative overflow refresh may read concurrently.
+    expect(peakReads).toBe(5);
+
+    releaseReads.resolve();
+    await waitFor(() => expect(controller.getSnapshot().observerCursor).toBe(132));
+    await waitFor(() => expect(controller.getSnapshot().loadingKinds).toEqual([]));
+    expect(peakReads).toBeLessThanOrEqual(5);
+    expect(mock.listMembers.mock.calls.length).toBeLessThan(200);
+    controller.dispose();
+  });
+
+  it("does not let overflow recovery from before clear retire the reactivated cursor window", async () => {
+    const mock = createApi();
+    const controller = new CollaborationReadModelController({ api: mock.api });
+    await controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    mock.listMembers.mockClear();
+
+    const oldRecovery = deferred<typeof exampleMemberPage>();
+    const reactivation = deferred<typeof exampleMemberPage>();
+    mock.listMembers
+      .mockImplementationOnce(() => oldRecovery.promise)
+      .mockImplementationOnce(() => reactivation.promise)
+      .mockResolvedValue(exampleMemberPage);
+
+    for (let cursor = 100; cursor < 612; cursor += 1) {
+      mock.listeners[0]!({
+        ...signal("membership", cursor),
+        event: { ...exampleObserverEvent, kind: "invitation", cursor, previousCursor: cursor - 1 }
+      });
+    }
+    await waitFor(() => expect(mock.listMembers).toHaveBeenCalledTimes(1));
+
+    controller.clear();
+    const activating = controller.setActiveProject({
+      profileId: "profile-demo-001",
+      projectId: "project-demo-001"
+    });
+    for (let cursor = 100; cursor < 612; cursor += 1) {
+      mock.listeners[0]!({
+        ...signal("membership", cursor),
+        event: { ...exampleObserverEvent, kind: "invitation", cursor, previousCursor: cursor - 1 }
+      });
+    }
+
+    oldRecovery.resolve(exampleMemberPage);
+    await waitFor(() => expect(mock.listMembers).toHaveBeenCalledTimes(2));
+    mock.listeners[0]!(signal("membership", 50));
+    await waitFor(() => expect(mock.listMembers).toHaveBeenCalledTimes(3));
+
+    reactivation.resolve(exampleMemberPage);
+    await activating;
+    await waitFor(() => expect(controller.getSnapshot().loadingKinds).toEqual([]));
+    expect(controller.getSnapshot().projectId).toBe("project-demo-001");
+    controller.dispose();
+  });
+
   it.each([
     "members",
     "assignments"

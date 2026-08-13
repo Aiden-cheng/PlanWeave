@@ -6,6 +6,9 @@ import type {
   CanvasReconnectResponse,
   CanvasRevision
 } from "@planweave-ai/collaboration-protocol/canvas/commands";
+import { CANVAS_COMMAND_MAX_JOURNAL_RETAINED } from "@planweave-ai/collaboration-protocol/core/limits";
+
+const APPLIED_OPERATION_ID_WINDOW = Math.min(1_024, CANVAS_COMMAND_MAX_JOURNAL_RETAINED);
 
 /**
  * Client-side durable canvas command session state.
@@ -37,6 +40,7 @@ export class CanvasCommandSessionState {
   private lastRejectCode: string | null = null;
   /** operationIds already acknowledged (accepted, including idempotent replay). */
   private readonly appliedOperationIds = new Set<string>();
+  private readonly appliedOperationIdOrder: string[] = [];
 
   bind(canvasId: string): void {
     if (this.canvasId === canvasId) return;
@@ -106,7 +110,7 @@ export class CanvasCommandSessionState {
     this.pendingOperationId = null;
     this.lastConflict = null;
     this.lastRejectCode = null;
-    this.appliedOperationIds.add(accepted.operationId);
+    this.rememberAppliedOperation(accepted.operationId);
   }
 
   /**
@@ -143,6 +147,7 @@ export class CanvasCommandSessionState {
       return prepared;
     }
     if (response.type === "canvas.reconnect.snapshot") {
+      this.clearAppliedOperations();
       this.revision = response.snapshot.metadata.revision;
       this.contentDigest = response.snapshot.metadata.contentDigest;
       this.lastConflict = null;
@@ -151,7 +156,7 @@ export class CanvasCommandSessionState {
       return prepared;
     }
     for (const entry of response.entries) {
-      this.appliedOperationIds.add(entry.operationId);
+      this.rememberAppliedOperation(entry.operationId);
       this.revision = entry.revision;
       this.contentDigest = entry.contentDigest;
       this.lastOperationId = entry.operationId;
@@ -169,6 +174,23 @@ export class CanvasCommandSessionState {
     return this.appliedOperationIds.has(operationId);
   }
 
+  private rememberAppliedOperation(operationId: string): void {
+    if (this.appliedOperationIds.has(operationId)) return;
+    this.appliedOperationIds.add(operationId);
+    this.appliedOperationIdOrder.push(operationId);
+    while (this.appliedOperationIdOrder.length > APPLIED_OPERATION_ID_WINDOW) {
+      const oldestOperationId = this.appliedOperationIdOrder.shift();
+      if (oldestOperationId !== undefined) {
+        this.appliedOperationIds.delete(oldestOperationId);
+      }
+    }
+  }
+
+  private clearAppliedOperations(): void {
+    this.appliedOperationIds.clear();
+    this.appliedOperationIdOrder.length = 0;
+  }
+
   private reset(canvasId: string | null): void {
     this.canvasId = canvasId;
     this.revision = 0;
@@ -178,6 +200,6 @@ export class CanvasCommandSessionState {
     this.pendingOperationId = null;
     this.lastConflict = null;
     this.lastRejectCode = null;
-    this.appliedOperationIds.clear();
+    this.clearAppliedOperations();
   }
 }

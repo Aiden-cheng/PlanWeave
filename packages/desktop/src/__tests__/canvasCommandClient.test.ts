@@ -87,6 +87,44 @@ describe("CanvasCommandSessionState", () => {
     expect(reconnect.entriesToApply).toEqual([]);
     expect(session.getRevision()).toBe(4);
   });
+
+  it("bounds operation dedupe and resets it after an authoritative snapshot", () => {
+    const session = new CanvasCommandSessionState();
+    session.bind("canvas-default");
+    for (let index = 0; index < 1_025; index += 1) {
+      session.applyAccepted({
+        ...exampleCanvasCommandAccepted,
+        operationId: `op-${index}`,
+        journalEntryId: `journal-${index}`,
+        previousRevision: index,
+        revision: index + 1
+      });
+    }
+
+    expect(session.hasApplied("op-0")).toBe(false);
+    expect(session.hasApplied("op-1")).toBe(true);
+    expect(session.hasApplied("op-1024")).toBe(true);
+    const journalEntry = exampleCanvasReconnectAfterDisconnect.entries[0]!;
+    expect(
+      session.prepareReconnect({
+        ...exampleCanvasReconnectAfterDisconnect,
+        entries: [{ ...journalEntry, operationId: "op-1024" }]
+      }).entriesToApply
+    ).toEqual([]);
+    expect(
+      session.prepareReconnect({
+        ...exampleCanvasReconnectAfterDisconnect,
+        entries: [{ ...journalEntry, operationId: "op-0" }]
+      }).entriesToApply
+    ).toHaveLength(1);
+
+    session.applyReconnect(exampleCanvasReconnectTruncatedJournal);
+    expect(session.hasApplied("op-1024")).toBe(false);
+    expect(session.snapshot()).toMatchObject({
+      revision: exampleCanvasReconnectTruncatedJournal.snapshot.metadata.revision,
+      contentDigest: exampleCanvasReconnectTruncatedJournal.snapshot.metadata.contentDigest
+    });
+  });
 });
 
 describe("CollaborationClient canvas commands", () => {
