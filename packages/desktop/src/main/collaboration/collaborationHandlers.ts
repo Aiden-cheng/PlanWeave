@@ -299,6 +299,7 @@ export function registerCollaborationHandlers(
   ipcMain.handle(collaborationInvokeChannels.getDesktopServerExposure, () =>
     lifecycle.run(async () => {
       await localReady;
+      await local.reconcileManagementProfile();
       return local.getExposureView();
     })
   );

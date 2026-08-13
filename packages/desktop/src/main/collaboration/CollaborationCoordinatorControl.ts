@@ -119,6 +119,7 @@ export interface CollaborationCoordinatorControl {
   currentSelection(): { projectId: string; canvasId: string } | null;
   restore(): Promise<LocalCollaborationServerStatus>;
   status(): LocalCollaborationServerStatus;
+  reconcileManagementProfile(): Promise<void>;
   start(): Promise<LocalCollaborationServerStatus>;
   stop(): Promise<LocalCollaborationServerStatus>;
   setLanSharing(input: unknown): Promise<LocalCollaborationServerStatus>;
@@ -400,10 +401,21 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
     return this.enqueue(() => this.startUnlocked());
   }
 
+  reconcileManagementProfile(): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.status().state !== "running") return;
+      await this.ensureOperatorToken();
+      await this.syncMainOwnedOperatorProfile();
+    });
+  }
+
   private async startUnlocked(): Promise<LocalCollaborationServerStatus> {
     await this.ensureOperatorToken();
     const current = this.status();
-    if (current.state === "running") return current;
+    if (current.state === "running") {
+      await this.syncMainOwnedOperatorProfile();
+      return current;
+    }
     const trustedProjects = await this.resolveTrustedProjects();
     const ownerTrustedProjects = await this.resolveOwnerTrustedProjects();
     let lastStatus: LocalCollaborationServerStatus = current;
@@ -601,11 +613,14 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   invitationEndpoint(): DeploymentEndpoint | null {
-    const status = this.status();
-    if (status.state !== "running") return null;
     const selection = this.selection;
     if (!selection || !this.isTrustedSelection(selection)) return null;
-    const profile = this.connectionProfileFor(selection);
+    return this.managementEndpoint();
+  }
+
+  private managementEndpoint(): DeploymentEndpoint | null {
+    const status = this.status();
+    if (status.state !== "running") return null;
     if (this.exposureMode === "private_https") {
       if (!this.privateHttpsOrigin) return null;
       return deploymentEndpointSchema.parse({
@@ -624,6 +639,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
         tlsTrust: "not_applicable"
       });
     }
+    const profile = this.serverProfile();
     return deploymentEndpointSchema.parse({
       topology: "loopback_http",
       serverOrigin: profile.serverBaseUrl,
@@ -729,7 +745,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   localProfileForId(profileId: string) {
     const authorityProjectId = this.authorityProjectIdForLocalProfile(profileId);
     if (!authorityProjectId || this.localPort === null) return null;
-    const endpoint = this.invitationEndpoint();
+    const endpoint = this.managementEndpoint();
     if (!endpoint) return null;
     const profile = this.connectionProfileFor({ authorityProjectId });
     return collaborationConnectionProfileSchema.parse({
@@ -1042,7 +1058,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
   }
 
   private async syncMainOwnedOperatorProfile(): Promise<void> {
-    const endpoint = this.invitationEndpoint();
+    const endpoint = this.managementEndpoint();
     if (!endpoint || !this.operatorToken) return;
     await this.syncOperatorProfile({
       profile: {

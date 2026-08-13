@@ -18,6 +18,7 @@ import {
   operatorCredentialsDocumentSchema,
   type OperatorCredentialsDocument
 } from "../operatorControl/operatorCredentialVault.js";
+import { LOCAL_OPERATOR_PROFILE_ID } from "../operatorControl/localOperatorBackend.js";
 import {
   readTunnelClientConfig,
   writeTunnelClientConfig,
@@ -206,6 +207,35 @@ async function migrateOperatorCredentials(options: {
   return changed;
 }
 
+async function restoreLocalOperatorCredentialFromCoordinator(options: {
+  coordinatorPath: string;
+  operatorPath: string;
+}): Promise<number> {
+  const coordinator = await readDocument(
+    options.coordinatorPath,
+    (input) => operatorCredentialsDocumentSchema.parse(input),
+    "target_coordinator_credentials"
+  );
+  const coordinatorRecord = coordinator?.credentials[LOCAL_OPERATOR_PROFILE_ID];
+  if (!coordinatorRecord) return 0;
+  const operator =
+    (await readDocument(
+      options.operatorPath,
+      (input) => operatorCredentialsDocumentSchema.parse(input),
+      "target_operator_credentials"
+    )) ?? ({ version: 1, credentials: {} } satisfies OperatorCredentialsDocument);
+  const operatorRecord = operator.credentials[LOCAL_OPERATOR_PROFILE_ID];
+  if (
+    operatorRecord?.operatorId === coordinatorRecord.operatorId &&
+    operatorRecord.updatedAt === coordinatorRecord.updatedAt
+  ) {
+    return 0;
+  }
+  operator.credentials[LOCAL_OPERATOR_PROFILE_ID] = coordinatorRecord;
+  await writePrivateJson(options.operatorPath, operator);
+  return 1;
+}
+
 async function migrateMcpRuntimeApiKey(options: {
   paths: TunnelClientConfigStorePaths;
   sourceMode: CredentialStorageMode;
@@ -298,5 +328,9 @@ export async function migrateCredentialStorage(options: {
       targetStorage: options.targetStorage
     })
   };
+  counts.operatorCredentials += await restoreLocalOperatorCredentialFromCoordinator({
+    coordinatorPath: options.targetPaths.coordinatorCredentialsFile,
+    operatorPath: options.targetPaths.operatorCredentialsFile
+  });
   return { counts, rollbackSharedFiles: async () => undefined };
 }

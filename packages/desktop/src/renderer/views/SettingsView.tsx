@@ -17,6 +17,7 @@ import { SettingsMcpSection } from "../settings/SettingsMcpSection";
 import { SettingsProjectDoctorSection } from "../settings/SettingsProjectDoctorSection";
 import { SettingsReviewSection } from "../settings/SettingsReviewSection";
 import { SettingsConnectionsSection } from "../settings/SettingsConnectionsSection";
+import { SettingsSecuritySection } from "../settings/SettingsSecuritySection";
 import type { createTranslator, Language } from "../i18n";
 import type { AppView, DesktopSettingsUpdate, DesktopUiSettings } from "../types";
 
@@ -215,6 +216,7 @@ export function SettingsView({
                 onTabChange={resetSettingsViewport}
               />
             ) : null}
+            {section === "security" ? <SettingsSecuritySection t={t} /> : null}
           </div>
         </ScrollArea>
       </section>

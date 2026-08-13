@@ -11,6 +11,7 @@ import { CollaborationInvitationVault } from "../main/collaboration/collaboratio
 import { migrateCredentialStorage } from "../main/credentialStorage/credentialStorageMigration.js";
 import type { CredentialStoragePaths } from "../main/credentialStorage/credentialStoragePaths.js";
 import { OperatorCredentialVault } from "../main/operatorControl/operatorCredentialVault.js";
+import { LOCAL_OPERATOR_PROFILE_ID } from "../main/operatorControl/localOperatorBackend.js";
 import {
   readTunnelClientConfig,
   writeTunnelClientConfig
@@ -157,6 +158,88 @@ describe("credential storage migration", () => {
     await expect(readFile(systemPaths.coordinatorCredentialsFile, "utf8")).resolves.toBe(
       `${JSON.stringify(targetDocument, null, 2)}\n`
     );
+  });
+
+  it("restores the local management credential from the coordinator without creating duplicates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-credential-migration-local-operator-"));
+    roots.push(root);
+    const applicationStorage = storage("application");
+    const systemStorage = storage("system");
+    const applicationPaths = paths(root, "application");
+    const systemPaths = paths(root, "system");
+    const mcpTunnelPaths = { configPath: join(root, "mcp-tunnel.json") };
+    const coordinator = new OperatorCredentialVault({
+      paths: { credentialsPath: applicationPaths.coordinatorCredentialsFile },
+      safeStorage: applicationStorage
+    });
+    await coordinator.setOperatorToken(
+      LOCAL_OPERATOR_PROFILE_ID,
+      operatorToken,
+      "desktop-local-admin"
+    );
+    const staleSystemOperator = new OperatorCredentialVault({
+      paths: { credentialsPath: systemPaths.operatorCredentialsFile },
+      safeStorage: systemStorage
+    });
+    await staleSystemOperator.setOperatorToken(
+      LOCAL_OPERATOR_PROFILE_ID,
+      "operator_stale_token_abcdefghijklmnopqrstuvwxyz_12",
+      "stale-local-admin"
+    );
+
+    const first = await migrateCredentialStorage({
+      sourceMode: "application",
+      targetMode: "system",
+      sourcePaths: applicationPaths,
+      targetPaths: systemPaths,
+      sourceStorage: applicationStorage,
+      targetStorage: systemStorage,
+      mcpTunnelPaths
+    });
+    expect(first.counts).toMatchObject({
+      coordinatorCredentials: 1,
+      operatorCredentials: 1
+    });
+    const systemOperator = new OperatorCredentialVault({
+      paths: { credentialsPath: systemPaths.operatorCredentialsFile },
+      safeStorage: systemStorage
+    });
+    await expect(systemOperator.getOperatorToken(LOCAL_OPERATOR_PROFILE_ID)).resolves.toBe(
+      operatorToken
+    );
+
+    const back = await migrateCredentialStorage({
+      sourceMode: "system",
+      targetMode: "application",
+      sourcePaths: systemPaths,
+      targetPaths: applicationPaths,
+      sourceStorage: systemStorage,
+      targetStorage: applicationStorage,
+      mcpTunnelPaths
+    });
+    expect(back.counts.operatorCredentials).toBe(1);
+    const applicationOperator = new OperatorCredentialVault({
+      paths: { credentialsPath: applicationPaths.operatorCredentialsFile },
+      safeStorage: applicationStorage
+    });
+    await expect(applicationOperator.getOperatorToken(LOCAL_OPERATOR_PROFILE_ID)).resolves.toBe(
+      operatorToken
+    );
+
+    const repeated = await migrateCredentialStorage({
+      sourceMode: "application",
+      targetMode: "system",
+      sourcePaths: applicationPaths,
+      targetPaths: systemPaths,
+      sourceStorage: applicationStorage,
+      targetStorage: systemStorage,
+      mcpTunnelPaths
+    });
+    expect(repeated.counts.operatorCredentials).toBe(0);
+    const systemDocument = JSON.parse(
+      await readFile(systemPaths.operatorCredentialsFile, "utf8")
+    ) as { credentials: Record<string, unknown> };
+    expect(Object.keys(systemDocument.credentials)).toEqual([LOCAL_OPERATOR_PROFILE_ID]);
   });
 
   it("re-encrypts credentials once per stable id and remains idempotent after switching back", async () => {

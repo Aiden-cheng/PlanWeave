@@ -146,6 +146,7 @@ export function HostAdministrationContent({
     error,
     handoff,
     hosts,
+    hostInventoryState,
     hostsLoading,
     loadState,
     localAgentHost,
@@ -227,6 +228,7 @@ export function HostAdministrationContent({
       <HostAvailabilityCard
         busy={busy}
         hosts={hosts}
+        inventoryState={hostInventoryState}
         loading={hostsLoading}
         onRefresh={() => void refreshHosts()}
         onRevoke={(host) => void handleRevoke(host)}

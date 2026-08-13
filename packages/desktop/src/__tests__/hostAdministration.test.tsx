@@ -508,6 +508,31 @@ describe("Agent Host settings", () => {
     expect(screen.queryByText(/^2\./)).not.toBeInTheDocument();
   });
 
+  it("does not present an inaccessible device inventory as an empty Server", async () => {
+    bridgeMock.getOperatorControlStatus.mockResolvedValue({
+      ...status(),
+      profiles: [
+        {
+          ...status().profiles[0],
+          hostedByThisDesktop: true,
+          hasOperatorCredential: false,
+          operatorCredentialPersistence: "missing" as const
+        }
+      ]
+    });
+
+    render(<HostAdministrationSection t={createTranslator("en")} />);
+
+    expect(await screen.findByTestId("host-availability-unavailable")).toHaveTextContent(
+      "Remote devices are temporarily unavailable"
+    );
+    expect(screen.getByTestId("host-availability-unavailable")).toHaveTextContent(
+      "Registered devices remain stored on the Server"
+    );
+    expect(screen.queryByText("No remote devices yet")).not.toBeInTheDocument();
+    expect(bridgeMock.listOperatorHosts).not.toHaveBeenCalled();
+  });
+
   it("registers this computer with an explicitly selected Agent", async () => {
     const user = userEvent.setup();
     render(<HostAdministrationSection t={createTranslator("en")} />);

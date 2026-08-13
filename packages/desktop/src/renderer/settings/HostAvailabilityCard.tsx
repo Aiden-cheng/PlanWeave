@@ -5,10 +5,12 @@ import type {
 import { RefreshCwIcon, RotateCwIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { createTranslator } from "../i18n";
+import type { HostInventoryState } from "../hooks/useHostAdministrationController";
 
 type HostAvailabilityCardProps = {
   busy: boolean;
   hosts: OperatorHostView[];
+  inventoryState: HostInventoryState;
   loading: boolean;
   onRefresh: () => void;
   onRevoke: (host: OperatorHostView) => void;
@@ -58,6 +60,7 @@ function agentNames(host: OperatorHostView): string[] {
 export function HostAvailabilityCard({
   busy,
   hosts,
+  inventoryState,
   loading,
   onRefresh,
   onRevoke,
@@ -83,7 +86,12 @@ export function HostAvailabilityCard({
           size="sm"
           variant="ghost"
           data-testid="host-availability-refresh"
-          disabled={loading}
+          disabled={
+            loading ||
+            inventoryState === "loading" ||
+            inventoryState === "profile_missing" ||
+            inventoryState === "credential_missing"
+          }
           onClick={onRefresh}
         >
           <RefreshCwIcon data-icon="inline-start" />
@@ -91,7 +99,20 @@ export function HostAvailabilityCard({
         </Button>
       </div>
       <div className="mt-5">
-        {activeHosts.length === 0 ? (
+        {inventoryState === "loading" ? (
+          <div className="py-6" data-testid="host-availability-loading">
+            <p className="text-sm text-text-muted">{t("hostAvailabilityLoading")}</p>
+          </div>
+        ) : inventoryState !== "ready" ? (
+          <div className="py-6" data-testid="host-availability-unavailable">
+            <p className="text-sm font-medium text-text-strong">
+              {t("hostAvailabilityUnavailable")}
+            </p>
+            <p className="mt-1 max-w-xl text-xs leading-5 text-text-muted">
+              {t(`hostAvailabilityUnavailable_${inventoryState}`)}
+            </p>
+          </div>
+        ) : activeHosts.length === 0 ? (
           <div className="py-6" data-testid="host-availability-empty">
             <p className="text-sm font-medium text-text-strong">{t("hostAvailabilityEmpty")}</p>
             <p className="mt-1 max-w-xl text-xs leading-5 text-text-muted">

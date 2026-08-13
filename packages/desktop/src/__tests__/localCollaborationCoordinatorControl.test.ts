@@ -1,4 +1,5 @@
 import { mkdtemp } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DesktopProjectSummary } from "@planweave-ai/runtime";
@@ -308,6 +309,58 @@ describe("LocalCollaborationCoordinatorControl", () => {
       lanSharingEnabled: true,
       lanServerBaseUrl: "http://10.0.0.15:18788/"
     });
+  });
+
+  it("restores the local management profile without requiring a current canvas selection", async () => {
+    const fake = fakeControl();
+    const syncOperatorProfile = vi.fn().mockResolvedValue(undefined);
+    const control = new LocalCollaborationCoordinatorControl({
+      safeStorage,
+      syncOperatorProfile,
+      scopeStore: scopeStore([{ projectId: project.projectId, canvasId: "canvas-1" }]),
+      networkStore: networkStore(),
+      projects: {
+        listProjects: async () => [project],
+        resolveAuthorityProjectId: async () => authorityProjectId
+      },
+      createController: () => fake.control,
+      allocatePort: async () => 18_788
+    });
+
+    await expect(control.restore()).resolves.toMatchObject({ state: "running" });
+    expect(control.currentSelection()).toBeNull();
+    expect(control.invitationEndpoint()).toBeNull();
+    const localProfileId = `planweave-local-${createHash("sha256")
+      .update(authorityProjectId)
+      .digest("hex")
+      .slice(0, 24)}`;
+    expect(control.localProfileForId(localProfileId)).toMatchObject({
+      profileId: localProfileId,
+      projectId: authorityProjectId,
+      serverBaseUrl: "http://127.0.0.1:18788/"
+    });
+    expect(syncOperatorProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          profileId: "planweave-local-loopback",
+          endpoint: expect.objectContaining({
+            topology: "loopback_http",
+            serverOrigin: "http://127.0.0.1:18788/"
+          })
+        }),
+        operatorId: "desktop-local-admin",
+        operatorToken: expect.any(String)
+      })
+    );
+
+    syncOperatorProfile.mockClear();
+    await control.reconcileManagementProfile();
+    expect(syncOperatorProfile).toHaveBeenCalledOnce();
+
+    syncOperatorProfile.mockClear();
+    await expect(control.start()).resolves.toMatchObject({ state: "running" });
+    expect(fake.apply).toHaveBeenCalledOnce();
+    expect(syncOperatorProfile).toHaveBeenCalledOnce();
   });
 
   it("reuses the advertised LAN port after a full coordinator restart", async () => {

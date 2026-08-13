@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "../renderer/i18n";
 import { SettingsCredentialStorageSection } from "../renderer/settings/SettingsCredentialStorageSection";
+import { SettingsSecuritySection } from "../renderer/settings/SettingsSecuritySection";
 
 const { credentialStorageSettingsBridge } = vi.hoisted(() => ({
   credentialStorageSettingsBridge: {
@@ -23,6 +24,17 @@ afterEach(() => {
 });
 
 describe("credential storage settings view", () => {
+  it("presents credential storage as a dedicated security setting", () => {
+    credentialStorageSettingsBridge.getCredentialStorageSettings.mockReturnValue(
+      new Promise(() => undefined)
+    );
+
+    render(<SettingsSecuritySection t={createTranslator("zh-CN")} />);
+
+    expect(screen.getByRole("heading", { name: "安全与凭据", level: 1 })).toBeVisible();
+    expect(screen.getByTestId("credential-storage-settings")).toBeVisible();
+  });
+
   it("renders the storage choices before the asynchronous status request resolves", () => {
     credentialStorageSettingsBridge.getCredentialStorageSettings.mockReturnValue(
       new Promise(() => undefined)
@@ -30,7 +42,8 @@ describe("credential storage settings view", () => {
 
     render(<SettingsCredentialStorageSection t={createTranslator("zh-CN")} />);
 
-    expect(screen.getByText("Workspace 凭据存储")).toBeVisible();
+    expect(screen.getByText("PlanWeave 凭据存储")).toBeVisible();
+    expect(screen.getByText(/Agent Host 管理凭据/)).toBeVisible();
     expect(screen.getByTestId("credential-storage-option-application")).toBeVisible();
     expect(screen.getByTestId("credential-storage-option-system")).toBeVisible();
   });

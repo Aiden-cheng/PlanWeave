@@ -19,12 +19,19 @@ import {
 import { operatorControlBridge } from "../bridge";
 
 export type HostAdministrationLoadState = "loading" | "ready" | "unavailable";
+export type HostInventoryState =
+  | "loading"
+  | "ready"
+  | "profile_missing"
+  | "credential_missing"
+  | "unavailable";
 
 export type HostAdministrationController = {
   status: OperatorControlStatus | null;
   hosts: OperatorHostView[];
   activeProfile: OperatorProfileView | null;
   loadState: HostAdministrationLoadState;
+  hostInventoryState: HostInventoryState;
   hostsLoading: boolean;
   busy: boolean;
   error: string | null;
@@ -130,6 +137,8 @@ export function useHostAdministrationController(): HostAdministrationController 
   const [status, setStatus] = useState<OperatorControlStatus | null>(null);
   const [hosts, setHosts] = useState<OperatorHostView[]>([]);
   const [loadState, setLoadState] = useState<HostAdministrationLoadState>("loading");
+  const [hostInventoryState, setHostInventoryState] =
+    useState<HostInventoryState>("loading");
   const [hostsLoading, setHostsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -183,25 +192,52 @@ export function useHostAdministrationController(): HostAdministrationController 
 
   const refreshHosts = useCallback(
     (options?: { silent?: boolean }): Promise<void> => {
-      if (!operatorControlBridge || !activeProfileId || !activeProfileHasOperatorCredential) {
+      if (!operatorControlBridge) {
         setHosts([]);
+        setHostsLoading(false);
+        setHostInventoryState("unavailable");
+        return Promise.resolve();
+      }
+      if (!status) {
+        setHosts([]);
+        setHostsLoading(false);
+        setHostInventoryState(loadState === "loading" ? "loading" : "unavailable");
+        return Promise.resolve();
+      }
+      if (!activeProfileId) {
+        setHosts([]);
+        setHostsLoading(false);
+        setHostInventoryState("profile_missing");
+        return Promise.resolve();
+      }
+      if (!activeProfileHasOperatorCredential) {
+        setHosts([]);
+        setHostsLoading(false);
+        setHostInventoryState("credential_missing");
         return Promise.resolve();
       }
       if (hostRefreshInFlight.current?.profileId === activeProfileId) {
         return hostRefreshInFlight.current.promise;
       }
-      if (!options?.silent) setHostsLoading(true);
+      if (!options?.silent) {
+        setHostsLoading(true);
+        setHostInventoryState("loading");
+      }
       const profileId = activeProfileId;
       const promise = operatorControlBridge
         .listOperatorHosts({ profileId, query: { cursor: 0, limit: 100 } })
         .then((page: OperatorHostPage) => {
           if (activeProfileIdRef.current !== profileId) return;
           setHosts(page.items);
+          setHostInventoryState("ready");
           setError(null);
         })
         .catch((cause) => {
           if (activeProfileIdRef.current !== profileId) return;
-          if (!options?.silent) setHosts([]);
+          if (!options?.silent) {
+            setHosts([]);
+            setHostInventoryState("unavailable");
+          }
           setError(errorMessage(cause));
         })
         .finally(() => {
@@ -215,7 +251,7 @@ export function useHostAdministrationController(): HostAdministrationController 
       hostRefreshInFlight.current = { profileId, promise };
       return promise;
     },
-    [activeProfileId, activeProfileHasOperatorCredential]
+    [activeProfileId, activeProfileHasOperatorCredential, loadState, status]
   );
 
   useEffect(() => {
@@ -546,6 +582,7 @@ export function useHostAdministrationController(): HostAdministrationController 
     hosts,
     activeProfile,
     loadState,
+    hostInventoryState,
     hostsLoading,
     busy,
     error,

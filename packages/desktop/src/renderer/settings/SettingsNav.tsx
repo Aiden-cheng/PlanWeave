@@ -4,6 +4,7 @@ import {
   BotIcon,
   CableIcon,
   GitPullRequestIcon,
+  KeyRoundIcon,
   NetworkIcon,
   SettingsIcon,
   WrenchIcon
@@ -19,7 +20,8 @@ export type SettingsSection =
   | "project-doctor"
   | "agents"
   | "mcp"
-  | "connections";
+  | "connections"
+  | "security";
 
 type SettingsNavProps = {
   developerMode: boolean;
@@ -45,7 +47,8 @@ export function SettingsNav({
       : []),
     { key: "agents", label: t("settingsAgents"), icon: BotIcon },
     { key: "mcp", label: t("settingsMcpTunnel"), icon: CableIcon },
-    { key: "connections", label: t("settingsConnections"), icon: NetworkIcon }
+    { key: "connections", label: t("settingsConnections"), icon: NetworkIcon },
+    { key: "security", label: t("settingsSecurity"), icon: KeyRoundIcon }
   ] satisfies Array<{ key: SettingsSection; label: string; icon: typeof SettingsIcon }>;
 
   return (

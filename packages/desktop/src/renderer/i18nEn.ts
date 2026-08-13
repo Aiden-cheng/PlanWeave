@@ -458,11 +458,12 @@ export const enCatalog = {
   settingsAgents: "Agents",
   settingsMcpTunnel: "MCP Tunnel",
   settingsConnections: "Connections & Devices",
-  settingsConnectionsHint: "Manage remote devices and how they connect to PlanWeave Server.",
+  settingsConnectionsHint: "Manage PlanWeave Server, Agent Host devices, and their connections.",
   settingsConnectionsOverview: "Overview",
   settingsConnectionsDevices: "My devices",
-  settingsConnectionsCredentials: "Credential storage",
   settingsConnectionsAdvanced: "Advanced connection",
+  settingsSecurity: "Security & Credentials",
+  settingsSecurityHint: "Manage credentials saved by PlanWeave Desktop and how they are protected.",
   settingsConnectionsOverviewTitle: "Current status",
   settingsConnectionsServer: "Server",
   settingsConnectionsServerReady: "Available",
@@ -472,9 +473,9 @@ export const enCatalog = {
   settingsConnectionsDevicesOnline: "{online} of {total} online",
   settingsConnectionsDevicesLoading: "Loading devices…",
   settingsConnectionsDevicesUnavailable: "Device status unavailable",
-  credentialStorageTitle: "Workspace credential storage",
+  credentialStorageTitle: "PlanWeave credential storage",
   credentialStorageHint:
-    "Choose how PlanWeave stores device tokens. Existing credentials are migrated without creating duplicate records.",
+    "Choose how Workspace device tokens, Agent Host administration credentials, and MCP Tunnel keys are stored. Existing credentials are migrated without creating duplicate records. Model providers, Agent CLI tools, and third-party account sign-ins are not included.",
   credentialStorageApplication: "PlanWeave app storage",
   credentialStorageApplicationRecommended: "Recommended",
   credentialStorageApplicationDescription:
@@ -617,6 +618,14 @@ export const enCatalog = {
     "Unavailable: the Server does not yet report workspace mapping or ACP profile readiness.",
   hostAvailabilityTitle: "Remote devices",
   hostAvailabilityDescription: "Registered devices automatically show the agents they share.",
+  hostAvailabilityLoading: "Loading remote devices…",
+  hostAvailabilityUnavailable: "Remote devices are temporarily unavailable",
+  hostAvailabilityUnavailable_profile_missing:
+    "Start or connect a PlanWeave Server you manage from Members first.",
+  hostAvailabilityUnavailable_credential_missing:
+    "Restart PlanWeave to restore this Server's management connection. Registered devices remain stored on the Server.",
+  hostAvailabilityUnavailable_unavailable:
+    "The device list could not be read from the Server. Check the connection and try again.",
   hostAvailabilityEmpty: "No remote devices yet",
   hostAvailabilityEmptyHint: "Copy enrollment details above, then register another computer.",
   hostAvailabilityNoAgents: "This device is not sharing any agents yet",
