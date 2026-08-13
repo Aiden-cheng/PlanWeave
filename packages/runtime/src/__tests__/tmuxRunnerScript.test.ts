@@ -119,7 +119,6 @@ describe("tmux runner script", () => {
     const donePath = join(dir, "done.json");
     const stdinPath = join(dir, "stdin.txt");
     const childPidPath = join(dir, "child.pid");
-    const heartbeatPath = join(dir, "heartbeat.txt");
     const configPath = join(dir, "command.json");
     const runnerPath = join(dir, "runner.mjs");
     await runCommand("mkfifo", [stdoutPath], dir);
@@ -133,11 +132,9 @@ describe("tmux runner script", () => {
           `
 const fs = require("node:fs");
 const childPidPath = ${JSON.stringify(childPidPath)};
-const heartbeatPath = ${JSON.stringify(heartbeatPath)};
 process.on("SIGTERM", () => {});
 fs.writeFileSync(childPidPath, String(process.pid));
-fs.writeFileSync(heartbeatPath, "start");
-setInterval(() => fs.appendFileSync(heartbeatPath, "x"), 50);
+setTimeout(() => process.exit(124), 30_000);
 setTimeout(() => process.stdout.write("trigger"), 500);
 `
         ],

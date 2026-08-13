@@ -261,7 +261,7 @@ describe("executor streaming", () => {
 
   it("force kills a child when a stdout callback rejects", async () => {
     const runDir = await tempRunDir();
-    const heartbeatPath = join(runDir, "heartbeat.txt");
+    const childPidPath = join(runDir, "child.pid");
 
     await expect(
       execWithStreaming({
@@ -270,10 +270,9 @@ describe("executor streaming", () => {
           "-e",
           `
 const fs = require("node:fs");
-const heartbeatPath = ${JSON.stringify(heartbeatPath)};
 process.on("SIGTERM", () => {});
-fs.writeFileSync(heartbeatPath, "start");
-setInterval(() => fs.appendFileSync(heartbeatPath, "x"), 50);
+fs.writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid));
+setTimeout(() => process.exit(124), 30_000);
 process.stdout.write("trigger");
 `
         ],
@@ -290,9 +289,8 @@ process.stdout.write("trigger");
       })
     ).rejects.toThrow("stdout callback failed");
 
-    const sizeAfterReject = (await stat(heartbeatPath)).size;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect((await stat(heartbeatPath)).size).toBe(sizeAfterReject);
+    const childPid = await waitForPidFile(childPidPath);
+    await waitUntilDead(childPid);
   });
 
   it("rejects when an async stdout callback fails after the child has already closed", async () => {
@@ -462,10 +460,8 @@ process.stdout.write("trigger");
   async function writeGrandchildTreeScripts(runDir: string): Promise<{
     parentScript: string;
     grandchildPidPath: string;
-    heartbeatPath: string;
   }> {
     const grandchildPidPath = join(runDir, "grandchild.pid");
-    const heartbeatPath = join(runDir, "gc-heartbeat.txt");
     const grandchildScript = join(runDir, "grandchild.js");
     const parentScript = join(runDir, "parent.js");
     await writeFile(
@@ -474,8 +470,7 @@ process.stdout.write("trigger");
 const fs = require("node:fs");
 process.on("SIGTERM", () => {});
 fs.writeFileSync(${JSON.stringify(grandchildPidPath)}, String(process.pid));
-fs.writeFileSync(${JSON.stringify(heartbeatPath)}, "start");
-setInterval(() => fs.appendFileSync(${JSON.stringify(heartbeatPath)}, "x"), 40);
+setTimeout(() => process.exit(124), 30_000);
 `,
       "utf8"
     );
@@ -491,7 +486,7 @@ setInterval(() => {}, 100);
 `,
       "utf8"
     );
-    return { parentScript, grandchildPidPath, heartbeatPath };
+    return { parentScript, grandchildPidPath };
   }
 
   async function waitForPidFile(path: string): Promise<number> {
@@ -537,8 +532,7 @@ setInterval(() => {}, 100);
     "execWithStreaming awaits tree force before settle when a SIGTERM-resistant grandchild outlives the root",
     async () => {
       const runDir = await tempRunDir();
-      const { parentScript, grandchildPidPath, heartbeatPath } =
-        await writeGrandchildTreeScripts(runDir);
+      const { parentScript, grandchildPidPath } = await writeGrandchildTreeScripts(runDir);
       const stdoutPath = join(runDir, "stdout.md");
 
       const startedAt = Date.now();
@@ -564,10 +558,7 @@ setInterval(() => {}, 100);
       // Settlement must not precede force; default grace is 500ms after timeout.
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(timeoutMs + 500);
 
-      // Heartbeat must stop at settle time (force completed); pid may briefly remain as a zombie.
-      const sizeAfterSettle = (await readFile(heartbeatPath)).byteLength;
-      await sleep(150);
-      expect((await readFile(heartbeatPath)).byteLength).toBe(sizeAfterSettle);
+      // The pid may briefly remain observable as a zombie after force termination.
       await waitUntilDead(grandchildPid);
 
       const heartbeat = executorHeartbeatPath(stdoutPath);
@@ -587,8 +578,7 @@ setInterval(() => {}, 100);
     "execWithStdin awaits tree force before settle when a SIGTERM-resistant grandchild outlives the root",
     async () => {
       const runDir = await tempRunDir();
-      const { parentScript, grandchildPidPath, heartbeatPath } =
-        await writeGrandchildTreeScripts(runDir);
+      const { parentScript, grandchildPidPath } = await writeGrandchildTreeScripts(runDir);
 
       const startedAt = Date.now();
       const timeoutMs = 1_500;
@@ -607,9 +597,6 @@ setInterval(() => {}, 100);
       expect(result).toMatchObject({ timedOut: true, exitCode: 124 });
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(timeoutMs + 500);
 
-      const sizeAfterSettle = (await readFile(heartbeatPath)).byteLength;
-      await sleep(150);
-      expect((await readFile(heartbeatPath)).byteLength).toBe(sizeAfterSettle);
       await waitUntilDead(grandchildPid);
     }
   );

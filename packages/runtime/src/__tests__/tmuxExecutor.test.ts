@@ -47,6 +47,26 @@ async function waitForTmuxSessionExit(sessionName: string): Promise<void> {
   expect(await hasTmuxSession(sessionName)).toBe(false);
 }
 
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitUntilDead(pid: number, timeoutMs = 3_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!processIsAlive(pid)) {
+      return;
+    }
+    await sleep(20);
+  }
+  throw new Error(`Process ${String(pid)} still observable after ${String(timeoutMs)}ms.`);
+}
+
 afterEach(async () => {
   await killActiveTmuxSessions();
   await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
@@ -286,7 +306,6 @@ describe("tmux executor", () => {
     }
     const dir = await mkdtemp(join(tmpdir(), "planweave-tmux-force-stop-"));
     tempDirs.push(dir);
-    const heartbeatPath = join(dir, "heartbeat.txt");
     const childPidPath = join(dir, "child.pid");
     const tmux = await createTmuxSessionInfo({
       runDir: dir,
@@ -306,12 +325,10 @@ describe("tmux executor", () => {
 const { spawn } = require("node:child_process");
 const childCode = ${JSON.stringify(`
 const fs = require("node:fs");
-const heartbeatPath = ${JSON.stringify(heartbeatPath)};
 const childPidPath = ${JSON.stringify(childPidPath)};
 process.on("SIGTERM", () => {});
 fs.writeFileSync(childPidPath, String(process.pid));
-fs.writeFileSync(heartbeatPath, "start");
-setInterval(() => fs.appendFileSync(heartbeatPath, "x"), 50);
+setTimeout(() => process.exit(124), 30_000);
 `)};
 const child = spawn(process.execPath, ["-e", childCode], { detached: true, stdio: "ignore" });
 child.unref();
@@ -328,16 +345,14 @@ setInterval(() => {}, 100);
         onStderr: () => undefined
       });
 
-      await waitForFile(heartbeatPath);
       await waitForFile(childPidPath);
       childPid = Number.parseInt(await readFile(childPidPath, "utf8"), 10);
+      expect(processIsAlive(childPid)).toBe(true);
       await expect(killTmuxSessionsForRun("AUTO-RUN-FORCE-STOP")).resolves.toEqual([
         tmux!.sessionName
       ]);
       await expect(running).resolves.toMatchObject({ exitCode: 130, timedOut: false });
-      const sizeAfterStop = (await stat(heartbeatPath)).size;
-      await sleep(800);
-      expect((await stat(heartbeatPath)).size).toBe(sizeAfterStop);
+      await waitUntilDead(childPid);
     } finally {
       if (childPid !== null) {
         try {

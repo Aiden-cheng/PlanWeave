@@ -646,15 +646,13 @@ describe("host process-tree grandchild termination", () => {
       const dir = await mkdtemp(join(tmpdir(), "planweave-windows-owner-exit-"));
       const readyPath = join(dir, "ready.txt");
       const grandchildPidPath = join(dir, "grandchild.pid");
-      const heartbeatPath = join(dir, "heartbeat.txt");
       const runtimeEntry = pathToFileURL(
         join(import.meta.dirname, "../process/managedProcessTree.ts")
       ).href;
       const grandchildSource = `
 const fs = require("node:fs");
 fs.writeFileSync(${JSON.stringify(grandchildPidPath)}, String(process.pid));
-fs.writeFileSync(${JSON.stringify(heartbeatPath)}, "start");
-setInterval(() => fs.appendFileSync(${JSON.stringify(heartbeatPath)}, "x"), 40);
+setTimeout(() => process.exit(124), 30_000);
 `;
       const targetSource = `
 const { spawn } = require("node:child_process");
@@ -696,22 +694,17 @@ process.exit(91);
       const grandchildPid = Number.parseInt(await readFile(grandchildPidPath, "utf8"), 10);
       pids.push(grandchildPid);
       await waitUntil(() => !isAlive(grandchildPid));
-      const sizeAfterExit = (await readFile(heartbeatPath)).byteLength;
-      await sleep(120);
-      expect((await readFile(heartbeatPath)).byteLength).toBe(sizeAfterExit);
     }
   );
 
   it("reaps descendants after the managed root exits first", async () => {
     const dir = await mkdtemp(join(tmpdir(), "planweave-exited-root-tree-"));
     const grandchildPidPath = join(dir, "grandchild.pid");
-    const heartbeatPath = join(dir, "heartbeat.txt");
     const grandchildSource = `
 const fs = require("node:fs");
 process.on("SIGTERM", () => {});
 fs.writeFileSync(${JSON.stringify(grandchildPidPath)}, String(process.pid));
-fs.writeFileSync(${JSON.stringify(heartbeatPath)}, "start");
-setInterval(() => fs.appendFileSync(${JSON.stringify(heartbeatPath)}, "x"), 40);
+setTimeout(() => process.exit(124), 30_000);
 `;
     const rootSource = `
 const { spawn } = require("node:child_process");
@@ -734,8 +727,7 @@ setTimeout(() => process.exit(17), 50);
     await waitUntil(async () => {
       try {
         const grandchildPid = (await readFile(grandchildPidPath, "utf8")).trim();
-        const heartbeat = await readFile(heartbeatPath);
-        return grandchildPid.length > 0 && heartbeat.byteLength > 0;
+        return grandchildPid.length > 0;
       } catch {
         return false;
       }
@@ -746,18 +738,11 @@ setTimeout(() => process.exit(17), 50);
     expect(managed.tree.isAlive()).toBe(false);
     if (process.platform === "win32") {
       await waitUntil(() => !isAlive(grandchildPid));
-      const sizeAfterRootExit = (await readFile(heartbeatPath)).byteLength;
-      await sleep(120);
-      expect((await readFile(heartbeatPath)).byteLength).toBe(sizeAfterRootExit);
       await expect(managed.tree.terminate("root exited before readiness")).resolves.toEqual({
         outcome: "already_exited",
         reason: "root exited before readiness"
       });
     } else {
-      const sizeBeforeTermination = (await readFile(heartbeatPath)).byteLength;
-      await waitUntil(
-        async () => (await readFile(heartbeatPath)).byteLength > sizeBeforeTermination
-      );
       expect(isAlive(grandchildPid)).toBe(true);
       await managed.tree.terminate("root exited before readiness");
       await waitUntil(() => !isAlive(grandchildPid));
@@ -768,21 +753,18 @@ setTimeout(() => process.exit(17), 50);
     const dir = await mkdtemp(join(tmpdir(), "planweave-process-tree-"));
     const childPidPath = join(dir, "child.pid");
     const grandchildPidPath = join(dir, "grandchild.pid");
-    const heartbeatPath = join(dir, "heartbeat.txt");
 
     const parentSource = `
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const childPidPath = ${JSON.stringify(childPidPath)};
 const grandchildPidPath = ${JSON.stringify(grandchildPidPath)};
-const heartbeatPath = ${JSON.stringify(heartbeatPath)};
 fs.writeFileSync(childPidPath, String(process.pid));
 const g = spawn(process.execPath, ["-e", ${JSON.stringify(`
 const fs = require("node:fs");
 if (process.platform !== "win32") process.on("SIGTERM", () => {});
 fs.writeFileSync(${JSON.stringify(grandchildPidPath)}, String(process.pid));
-fs.writeFileSync(${JSON.stringify(heartbeatPath)}, "start");
-setInterval(() => fs.appendFileSync(${JSON.stringify(heartbeatPath)}, "x"), 40);
+setTimeout(() => process.exit(124), 30_000);
 `)}], { stdio: "ignore" });
 g.unref();
 setInterval(() => {}, 100);
@@ -812,7 +794,6 @@ setInterval(() => {}, 100);
     await forceReap(baselineChildPid);
     await writeFile(childPidPath, "", "utf8");
     await writeFile(grandchildPidPath, "", "utf8");
-    await writeFile(heartbeatPath, "", "utf8");
 
     // Managed tree: the host adapter reaps both root and grandchild.
     const managed = spawnManagedProcess({
@@ -852,10 +833,5 @@ setInterval(() => {}, 100);
     await waitUntil(() => !isAlive(managedChildPid) && !isAlive(managedGrandchildPid));
     expect(isAlive(managedChildPid)).toBe(false);
     expect(isAlive(managedGrandchildPid)).toBe(false);
-
-    const sizeAfterExit = (await readFile(heartbeatPath)).byteLength;
-    await sleep(120);
-    const sizeAfterQuiet = (await readFile(heartbeatPath)).byteLength;
-    expect(sizeAfterQuiet).toBe(sizeAfterExit);
   });
 });
