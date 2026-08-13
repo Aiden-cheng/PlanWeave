@@ -1,7 +1,28 @@
+# Dependencies and package-manager caches
 node_modules/
-.DS_Store
+.pnpm-store/
+
+# Build outputs
 packages/*/dist/
 packages/*/release/
 packages/desktop/build/generated/
 packages/desktop/build/icon.iconset/
+*.tsbuildinfo
+
+# Test reports and tool caches
 .coverage/
+coverage/
+playwright-report/
+test-results/
+.cache/
+.vite/
+*.log
+
+# Local environment and tool settings
+.env
+.env.local
+.env.*.local
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
