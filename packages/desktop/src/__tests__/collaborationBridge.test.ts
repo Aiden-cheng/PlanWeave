@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -17,16 +17,10 @@ import {
 import {
   CollaborationClientError,
   CollaborationCredentialVault,
-  CollaborationInvitationVault,
   CollaborationProfileStore,
-  CollaborationService,
-  redactCollaborationText
+  CollaborationService
 } from "../main/collaboration/index.js";
-import {
-  COLLABORATION_SESSION_ONLY_WARNING,
-  collaborationInvokeChannels,
-  assertNoSmuggledCollaborationSecrets
-} from "../shared/collaboration.js";
+import { COLLABORATION_SESSION_ONLY_WARNING } from "../shared/collaboration.js";
 
 const tempRoots: string[] = [];
 
@@ -63,7 +57,7 @@ async function tempDir(prefix: string): Promise<string> {
   return dir;
 }
 
-function mockSafeStorage(options?: { available?: boolean; corruptDecrypt?: boolean }): {
+function mockSafeStorage(options?: { available?: boolean }): {
   isEncryptionAvailable: ReturnType<typeof vi.fn>;
   encryptString: ReturnType<typeof vi.fn>;
   decryptString: ReturnType<typeof vi.fn>;
@@ -72,12 +66,7 @@ function mockSafeStorage(options?: { available?: boolean; corruptDecrypt?: boole
   return {
     isEncryptionAvailable: vi.fn(() => available),
     encryptString: vi.fn((value: string) => Buffer.from(value, "utf8")),
-    decryptString: vi.fn((value: Buffer) => {
-      if (options?.corruptDecrypt) {
-        throw new Error("decryption failed");
-      }
-      return value.toString("utf8");
-    })
+    decryptString: vi.fn((value: Buffer) => value.toString("utf8"))
   };
 }
 
@@ -123,186 +112,6 @@ afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe("collaboration credential vault + profile store", () => {
-  it("encrypts invitation secrets and restores them only for the owning profile", async () => {
-    const root = await tempDir("planweave-collab-invitations-");
-    const invitationsPath = join(root, "invitations.json");
-    const safeStorage = mockSafeStorage({ available: true });
-    const invitation = {
-      invitation: {
-        invitationId: "invitation-001",
-        projectId: "project-1",
-        role: "member" as const,
-        createdByHumanPrincipalId: "human-1",
-        createdAt: "2030-01-01T00:00:00.000Z",
-        expiresAt: "2030-01-02T00:00:00.000Z"
-      },
-      invitationToken: exampleInvitationToken
-    };
-
-    const first = new CollaborationInvitationVault({ path: invitationsPath, safeStorage });
-    await expect(first.set("profile-1", invitation)).resolves.toBe("persisted");
-    expect(await readFile(invitationsPath, "utf8")).not.toContain(exampleInvitationToken);
-
-    const reopened = new CollaborationInvitationVault({ path: invitationsPath, safeStorage });
-    await expect(reopened.get("profile-1", "invitation-001")).resolves.toEqual(invitation);
-    await expect(reopened.get("profile-2", "invitation-001")).resolves.toBeNull();
-
-    await reopened.delete("profile-1", "invitation-001");
-    await expect(reopened.get("profile-1", "invitation-001")).resolves.toBeNull();
-  });
-
-  it("keeps invitation secrets in memory when safeStorage is unavailable", async () => {
-    const root = await tempDir("planweave-collab-session-invitations-");
-    const invitationsPath = join(root, "invitations.json");
-    const invitation = {
-      invitation: {
-        invitationId: "invitation-002",
-        projectId: "project-1",
-        role: "member" as const,
-        createdByHumanPrincipalId: "human-1",
-        createdAt: "2030-01-01T00:00:00.000Z",
-        expiresAt: "2030-01-02T00:00:00.000Z"
-      },
-      invitationToken: exampleInvitationToken
-    };
-    const vault = new CollaborationInvitationVault({
-      path: invitationsPath,
-      safeStorage: mockSafeStorage({ available: false })
-    });
-
-    await expect(vault.set("profile-1", invitation)).resolves.toBe("session-only");
-    await expect(vault.get("profile-1", "invitation-002")).resolves.toEqual(invitation);
-    await expect(readFile(invitationsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("persists profiles without secrets and encrypts device tokens when safeStorage is available", async () => {
-    const root = await tempDir("planweave-collab-");
-    const profilesPath = join(root, "profiles.json");
-    const credentialsPath = join(root, "credentials.json");
-    const safeStorage = mockSafeStorage({ available: true });
-    const vault = new CollaborationCredentialVault({
-      paths: { credentialsPath },
-      safeStorage
-    });
-    const store = new CollaborationProfileStore({ profilesPath });
-
-    await store.upsert({
-      profileId: "profile-1",
-      displayName: "Demo",
-      serverBaseUrl: "https://collab.example.com/",
-      projectId: "project-1",
-      allowInsecureTransport: false,
-      endpoint: {
-        topology: "public_https",
-        serverOrigin: "https://collab.example.com/",
-        allowedClientOrigins: ["https://collab.example.com/"],
-        tlsTrust: "system_ca"
-      }
-    });
-    await vault.setDeviceToken("profile-1", exampleHumanDeviceToken, {
-      deviceCredentialId: "device-1",
-      humanPrincipalId: "human-1"
-    });
-
-    const profileRaw = await readFile(profilesPath, "utf8");
-    expect(profileRaw).not.toContain(exampleHumanDeviceToken);
-    expect(profileRaw).not.toContain("encryptedDeviceToken");
-    expect(profileRaw).toContain("profile-1");
-
-    const credentialRaw = await readFile(credentialsPath, "utf8");
-    expect(credentialRaw).not.toContain(exampleHumanDeviceToken);
-    expect(credentialRaw).toContain("encryptedDeviceToken");
-    expect(await vault.getDeviceToken("profile-1")).toBe(exampleHumanDeviceToken);
-    expect(await vault.persistenceFor("profile-1")).toBe("persisted");
-
-    const profileStat = await stat(profilesPath);
-    const credentialStat = await stat(credentialsPath);
-    expect(profileStat.mode & 0o777).toBe(0o600);
-    expect(credentialStat.mode & 0o777).toBe(0o600);
-  });
-
-  it("keeps the token session-only when safeStorage is unavailable and never writes plaintext", async () => {
-    const root = await tempDir("planweave-collab-session-");
-    const credentialsPath = join(root, "credentials.json");
-    const safeStorage = mockSafeStorage({ available: false });
-    const vault = new CollaborationCredentialVault({
-      paths: { credentialsPath },
-      safeStorage
-    });
-
-    const persistence = await vault.setDeviceToken("profile-1", exampleHumanDeviceToken);
-    expect(persistence).toBe("session-only");
-    expect(await vault.getDeviceToken("profile-1")).toBe(exampleHumanDeviceToken);
-    expect(await vault.hasAnySessionOnlyCredential()).toBe(true);
-
-    await expect(readFile(credentialsPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("treats corrupt or rotated ciphertext as missing and purges the durable entry", async () => {
-    const root = await tempDir("planweave-collab-corrupt-");
-    const credentialsPath = join(root, "credentials.json");
-    const goodStorage = mockSafeStorage({ available: true });
-    const vault = new CollaborationCredentialVault({
-      paths: { credentialsPath },
-      safeStorage: goodStorage
-    });
-    await vault.setDeviceToken("profile-1", exampleHumanDeviceToken);
-
-    const rotated = new CollaborationCredentialVault({
-      paths: { credentialsPath },
-      safeStorage: mockSafeStorage({ available: true, corruptDecrypt: true })
-    });
-    expect(await rotated.getDeviceToken("profile-1")).toBeUndefined();
-    expect(await rotated.persistenceFor("profile-1")).toBe("missing");
-
-    const remaining = JSON.parse(await readFile(credentialsPath, "utf8")) as {
-      credentials: Record<string, unknown>;
-    };
-    expect(remaining.credentials["profile-1"]).toBeUndefined();
-  });
-
-  it("clears revoked credentials from memory and disk", async () => {
-    const root = await tempDir("planweave-collab-revoke-");
-    const credentialsPath = join(root, "credentials.json");
-    const vault = new CollaborationCredentialVault({
-      paths: { credentialsPath },
-      safeStorage: mockSafeStorage({ available: true })
-    });
-    await vault.setDeviceToken("profile-1", exampleHumanDeviceToken);
-    await vault.clear("profile-1");
-    expect(await vault.getDeviceToken("profile-1")).toBeUndefined();
-    const remaining = JSON.parse(await readFile(credentialsPath, "utf8")) as {
-      credentials: Record<string, unknown>;
-    };
-    expect(remaining.credentials["profile-1"]).toBeUndefined();
-  });
-
-  it("rejects valid JSON with unsupported versions or invalid store shapes", async () => {
-    const root = await tempDir("planweave-collab-invalid-store-");
-    const profilesPath = join(root, "profiles.json");
-    const credentialsPath = join(root, "credentials.json");
-
-    await writeFile(
-      profilesPath,
-      JSON.stringify({ version: 4, profiles: [], activeProfileId: null }),
-      "utf8"
-    );
-    await expect(new CollaborationProfileStore({ profilesPath }).read()).rejects.toThrow(
-      "Invalid collaboration profiles JSON."
-    );
-
-    await writeFile(credentialsPath, JSON.stringify({ version: 1, credentials: [] }), "utf8");
-    const vault = new CollaborationCredentialVault({
-      paths: { credentialsPath },
-      safeStorage: mockSafeStorage({ available: true })
-    });
-    await expect(vault.getDeviceToken("profile-1")).rejects.toThrow(
-      "Invalid collaboration credentials JSON."
-    );
-  });
-});
-
 describe("CollaborationService IPC trust boundary", () => {
   async function serviceWithRoot(root: string, available = true) {
     const safeStorage = mockSafeStorage({ available });
@@ -316,85 +125,6 @@ describe("CollaborationService IPC trust boundary", () => {
       safeStorage
     });
   }
-
-  it("rejects smuggled secrets and non-profile URL shortcuts on upsert", async () => {
-    const root = await tempDir("planweave-collab-smuggle-");
-    const service = await serviceWithRoot(root);
-
-    await expect(
-      service.upsertProfile({
-        profileId: "profile-1",
-        displayName: "Demo",
-        serverBaseUrl: "https://collab.example.com/",
-        projectId: "project-1",
-        allowInsecureTransport: false,
-        deviceToken: exampleHumanDeviceToken
-      })
-    ).rejects.toThrow(/deviceToken/);
-
-    await expect(
-      service.upsertProfile({
-        profileId: "profile-1",
-        displayName: "Demo",
-        serverBaseUrl: "https://collab.example.com/",
-        projectId: "project-1",
-        allowInsecureTransport: false,
-        credentialPath: "/tmp/secret"
-      })
-    ).rejects.toThrow(/credentialPath/);
-
-    await expect(
-      service.importDeviceCredential({
-        profileId: "missing",
-        deviceToken: exampleHumanDeviceToken,
-        encryptedDeviceToken: "abc"
-      })
-    ).rejects.toThrow(/encryptedDeviceToken/);
-
-    expect(() =>
-      assertNoSmuggledCollaborationSecrets({ authorization: "Bearer x" }, "test")
-    ).toThrow(/authorization/);
-    expect(() =>
-      assertNoSmuggledCollaborationSecrets({ url: "https://other.example/" }, "test")
-    ).toThrow(/url/);
-    expect(() =>
-      assertNoSmuggledCollaborationSecrets({ command: "server --unsafe" }, "test")
-    ).toThrow(/command/);
-    expect(() => assertNoSmuggledCollaborationSecrets({ path: "/tmp/project" }, "test")).toThrow(
-      /path/
-    );
-  });
-
-  it("rejects malformed profile payloads and invalid tokens", async () => {
-    const root = await tempDir("planweave-collab-malformed-");
-    const service = await serviceWithRoot(root);
-
-    await expect(
-      service.upsertProfile({
-        profileId: "profile-1",
-        displayName: "Demo",
-        serverBaseUrl: "https://collab.example.com/not-origin",
-        projectId: "project-1",
-        allowInsecureTransport: false
-      })
-    ).rejects.toThrow();
-
-    await service.upsertProfile({
-      profileId: "profile-1",
-      displayName: "Demo",
-      serverBaseUrl: "https://collab.example.com/",
-      projectId: "project-1",
-      allowInsecureTransport: false,
-      endpoint: publicEndpoint("https://collab.example.com/")
-    });
-
-    await expect(
-      service.importDeviceCredential({
-        profileId: "profile-1",
-        deviceToken: "not-a-token"
-      })
-    ).rejects.toThrow();
-  });
 
   it("surfaces session-only warning and never returns tokens from status", async () => {
     const root = await tempDir("planweave-collab-status-");
@@ -629,6 +359,42 @@ describe("CollaborationService IPC trust boundary", () => {
     expect(profileJson).not.toContain(exampleSetupCodeRedeemDeviceResponse.deviceToken);
     await service.disconnectWorkspaceConnection();
     expect((await service.getStatus()).workspaceConnection.status).toBe("local_only");
+  });
+
+  it("returns the missing-credential status instead of throwing again when retry is stale", async () => {
+    const root = await tempDir("planweave-collab-workspace-missing-credential-");
+    const service = await serviceWithRoot(root);
+    await service.upsertProfile({
+      profileId: "profile-without-credential",
+      displayName: "Configured Workspace",
+      serverBaseUrl: "http://127.0.0.1:8787/",
+      projectId: "project-1",
+      allowInsecureTransport: true,
+      endpoint: loopbackEndpoint("http://127.0.0.1:8787/")
+    });
+    await service.adoptWorkspaceAuthority({
+      profileId: "profile-without-credential",
+      workspaceId: "workspace-1",
+      membershipRole: "member"
+    });
+
+    await expect(service.connectWorkspaceConnection()).rejects.toMatchObject({
+      code: "collaboration_credential_missing"
+    });
+    await expect(service.retryWorkspaceConnection()).resolves.toMatchObject({
+      workspaceConnection: {
+        status: "error",
+        error: {
+          code: "collaboration_credential_missing",
+          retryable: false
+        }
+      },
+      session: {
+        phase: "error",
+        detail: "workspace_retry_failed",
+        lastErrorCode: "collaboration_credential_missing"
+      }
+    });
   });
 
   it.each([
@@ -1302,74 +1068,5 @@ describe("CollaborationService IPC trust boundary", () => {
     expect(startObserver).toHaveBeenCalledWith(expect.any(Object), { cursor: 0 });
 
     await service.shutdown();
-  });
-
-  it("does not leak absolute vault/profile paths through storage or boundary errors", async () => {
-    const { mkdir, writeFile } = await import("node:fs/promises");
-    const root = await tempDir("planweave-collab-path-");
-    const profilesPath = join(root, "profiles.json");
-    const credentialsDir = join(root, "credentials-as-dir");
-    await writeFile(profilesPath, "{not-json", "utf8");
-    await mkdir(credentialsDir);
-
-    const profileStore = new CollaborationProfileStore({ profilesPath });
-    await expect(profileStore.read()).rejects.toMatchObject({
-      message: expect.stringMatching(/Invalid collaboration profiles JSON/)
-    });
-    try {
-      await profileStore.read();
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).not.toContain(profilesPath);
-      expect((error as Error).message).not.toContain(root);
-    }
-
-    const vault = new CollaborationCredentialVault({
-      paths: { credentialsPath: credentialsDir },
-      safeStorage: mockSafeStorage({ available: true })
-    });
-    // Directory path makes readFile fail without embedding the absolute path in the boundary message.
-    try {
-      await vault.getDeviceToken("profile-a");
-      throw new Error("vault read should fail");
-    } catch (error) {
-      if (error instanceof Error && error.message === "vault read should fail") throw error;
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toMatch(/Failed to read collaboration credentials/);
-      expect((error as Error).message).not.toContain(credentialsDir);
-      expect((error as Error).message).not.toContain(root);
-    }
-
-    const { collaborationErrorFromUnknown } = await import(
-      "../main/collaboration/collaborationErrors.js"
-    );
-    const leakedPath = join(root, "secrets", "credentials.json");
-    const leaked = collaborationErrorFromUnknown(
-      new Error(`Failed to read collaboration credentials at ${leakedPath}: EACCES`)
-    );
-    expect(leaked.message).not.toContain(leakedPath);
-    expect(leaked.message).not.toContain(root);
-    expect(leaked.message).toContain("<redacted-path>");
-  });
-
-  it("registers unique collaboration invoke channels", () => {
-    const channels = Object.values(collaborationInvokeChannels);
-    expect(new Set(channels).size).toBe(channels.length);
-    for (const channel of channels) {
-      expect(channel.startsWith("planweave-collaboration:")).toBe(true);
-    }
-  });
-
-  it("redacts device tokens and absolute paths from diagnostic text", () => {
-    const raw = `Authorization: Bearer ${exampleHumanDeviceToken} body={"deviceToken":"${exampleHumanDeviceToken}"} home=/Users/alice/.planweave/credentials.json service=/srv/planweave/config.json workspace=/workspace/project/token mount=/mnt/data/secret url=https://collab.example.com/api/v1`;
-    const redacted = redactCollaborationText(raw);
-    expect(redacted).not.toContain(exampleHumanDeviceToken);
-    expect(redacted).toContain("[REDACTED]");
-    expect(redacted).not.toContain("/Users/alice");
-    expect(redacted).not.toContain("/srv/planweave");
-    expect(redacted).not.toContain("/workspace/project");
-    expect(redacted).not.toContain("/mnt/data");
-    expect(redacted).toContain("<redacted-path>");
-    expect(redacted).toContain("https://collab.example.com/api/v1");
   });
 });

@@ -259,7 +259,7 @@ describe("LocalCollaborationServerPanel", () => {
       "shadow-sm",
       "bg-background"
     );
-    expect(screen.getByTestId("local-collaboration-scope-section")).toHaveClass("border-t");
+    expect(screen.getByTestId("local-collaboration-scope-section")).not.toHaveClass("border-t");
     expect(screen.getByTestId("local-collaboration-scope-section")).not.toHaveClass("border-y");
     expect(screen.getByRole("heading", { name: "Workspace canvases" })).toHaveClass("text-base");
     await userEvent.click(screen.getByRole("button", { name: "Hide hosted canvas selection" }));

@@ -18,6 +18,10 @@ import {
   type DesktopUiSettings
 } from "../shared/desktopSettings";
 import {
+  credentialStorageSettingsInvokeChannels,
+  type CredentialStorageSettingsStatus
+} from "../shared/credentialStorageSettings";
+import {
   autoRunChangedChannel,
   desktopBridgeInvokeChannels,
   packageFileChangedChannel,
@@ -654,6 +658,33 @@ describe("preload bridge invocation", () => {
     expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopSettingsInvokeChannels.migrateLegacyDesktopSettings,
       '{"appearance":"dark"}'
+    );
+  });
+
+  it("exposes credential storage settings without sending credential material", async () => {
+    const status: CredentialStorageSettingsStatus = {
+      activeMode: "application",
+      configuredMode: "application",
+      restartRequired: false
+    };
+    electronMock.ipcRenderer.invoke.mockResolvedValue(status);
+
+    await import("../preload/preload");
+    const api = electronMock.exposed.get("planweaveCredentialStorageSettings") as {
+      getCredentialStorageSettings(): Promise<CredentialStorageSettingsStatus>;
+      configureCredentialStorage(input: {
+        mode: "system";
+      }): Promise<CredentialStorageSettingsStatus>;
+    };
+
+    await expect(api.getCredentialStorageSettings()).resolves.toBe(status);
+    await expect(api.configureCredentialStorage({ mode: "system" })).resolves.toBe(status);
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      credentialStorageSettingsInvokeChannels.getStatus
+    );
+    expect(electronMock.ipcRenderer.invoke).toHaveBeenCalledWith(
+      credentialStorageSettingsInvokeChannels.configure,
+      { mode: "system" }
     );
   });
 

@@ -63,6 +63,26 @@ export function collaborationConnectionErrorMessage(
   error: unknown
 ): string {
   const code = collaborationErrorCode(error);
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error
+        ? String((error as { message?: unknown }).message ?? "")
+        : "";
+  if (
+    code === "local_collaboration_selection_required" ||
+    code === "local_collaboration_profile_unavailable" ||
+    message.includes("local_collaboration_selection_required") ||
+    message.includes("local_collaboration_profile_unavailable")
+  ) {
+    return t("peopleLocalOwnerRestoreUnavailable");
+  }
+  if (
+    code === "collaboration_credential_missing" ||
+    message.includes("collaboration_credential_missing")
+  ) {
+    return t("peopleMissingCredential");
+  }
   if (code === "PRIVATE_NETWORK_UNREACHABLE") {
     return t("peoplePrivateNetworkUnreachable");
   }
@@ -75,5 +95,5 @@ export function collaborationConnectionErrorMessage(
   if (isCollaborationConnectionUnavailable(error)) {
     return t("peopleServerUnreachable");
   }
-  return collaborationErrorMessage(error);
+  return t("peopleConnectionUnexpectedError");
 }

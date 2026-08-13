@@ -44,10 +44,22 @@ export type LocalCollaborationScopeSelectionInput = z.infer<
 
 export const localCollaborationRegistrationInputSchema = z
   .object({
+    profileId: scopeIdentifierSchema
+      .refine(isLocalCollaborationProfileId, "local_collaboration_profile_required")
+      .optional(),
     ownerDisplayName: z.string().trim().min(1).max(120).optional(),
     selection: localCollaborationScopeSchema.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (input.profileId && input.selection) {
+      context.addIssue({
+        code: "custom",
+        message: "local_collaboration_registration_target_conflict",
+        path: ["profileId"]
+      });
+    }
+  });
 
 export type LocalCollaborationRegistrationInput = z.infer<
   typeof localCollaborationRegistrationInputSchema

@@ -164,15 +164,23 @@ export function createLocalCollaborationActivationCommand({
         const previousStatus = await service.getStatus();
         const previousSelection = coordinator.currentSelection();
         const selectionChanged = registrationInput.selection !== undefined;
+        if (
+          registrationInput.profileId &&
+          !coordinator.recognizesLocalProfile(registrationInput.profileId)
+        ) {
+          throw new Error("local_collaboration_profile_unavailable");
+        }
         let transitionStarted = !selectionChanged;
         try {
           if (registrationInput.selection) {
             await coordinator.setCurrentSelection(registrationInput.selection);
             transitionStarted = true;
           }
+          const profileIdToActivate =
+            registrationInput.profileId ?? previousStatus.activeProfileId;
           if (
-            previousStatus.activeProfileId &&
-            coordinator.recognizesLocalProfile(previousStatus.activeProfileId) &&
+            profileIdToActivate &&
+            coordinator.recognizesLocalProfile(profileIdToActivate) &&
             coordinator.status().state !== "running"
           ) {
             try {
@@ -186,7 +194,28 @@ export function createLocalCollaborationActivationCommand({
               throw error;
             }
           }
+          const requestedProfile = registrationInput.profileId
+            ? coordinator.localProfileForId(registrationInput.profileId)
+            : null;
+          if (registrationInput.profileId && !requestedProfile) {
+            throw new Error("local_collaboration_profile_unavailable");
+          }
+          const activeProfile =
+            requestedProfile ??
+            (previousStatus.activeProfileId
+              ? coordinator.localProfileForId(previousStatus.activeProfileId)
+              : null);
           if (options.activationRequired) {
+            if ((requestedProfile || !previousSelection) && activeProfile) {
+              return await activateLocalCollaborationProfile({
+                profile: activeProfile,
+                service,
+                registerProject: (actor) =>
+                  coordinator.registerLocalProfile(activeProfile.profileId, actor),
+                ownerDisplayName:
+                  registrationInput.ownerDisplayName ?? defaultLocalOwnerDisplayName
+              });
+            }
             return await activateLocalCollaborationSelection({
               coordinator,
               service,
@@ -194,9 +223,6 @@ export function createLocalCollaborationActivationCommand({
             });
           }
 
-          const activeProfile = previousStatus.activeProfileId
-            ? coordinator.localProfileForId(previousStatus.activeProfileId)
-            : null;
           const recoverableProfiles = previousStatus.activeProfileId
             ? []
             : previousStatus.profiles

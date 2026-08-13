@@ -5,6 +5,7 @@ import type {
 } from "@planweave-ai/runtime";
 import type { PlanWeaveCollaborationApi } from "../shared/collaboration";
 import type { PlanWeaveDesktopSettingsApi } from "../shared/desktopSettings";
+import type { PlanWeaveCredentialStorageSettingsApi } from "../shared/credentialStorageSettings";
 import type { PlanWeaveOperatorControlApi } from "../shared/operatorControl";
 
 export const bridge: DesktopBridgeApi | null =
@@ -12,6 +13,10 @@ export const bridge: DesktopBridgeApi | null =
 export const settingsBridge: PlanWeaveDesktopSettingsApi | null =
   typeof window !== "undefined" && "planweaveDesktopSettings" in window
     ? (window.planweaveDesktopSettings ?? null)
+    : null;
+export const credentialStorageSettingsBridge: PlanWeaveCredentialStorageSettingsApi | null =
+  typeof window !== "undefined" && "planweaveCredentialStorageSettings" in window
+    ? (window.planweaveCredentialStorageSettings ?? null)
     : null;
 export const collaborationBridge: PlanWeaveCollaborationApi | null =
   typeof window !== "undefined" && "planweaveCollaboration" in window

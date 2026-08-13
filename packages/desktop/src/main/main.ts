@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, safeStorage } from "electron";
 import { shutdownDesktopAutoRuns } from "@planweave-ai/runtime";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,8 +12,7 @@ import {
 } from "./mcpTunnel/mcpTunnelHandlers.js";
 import {
   registerCollaborationHandlers,
-  shutdownCollaborationService,
-  shutdownLocalCollaborationCoordinator
+  shutdownCollaborationHandlers
 } from "./collaboration/collaborationHandlers.js";
 import {
   registerOperatorControlHandlers,
@@ -31,6 +30,16 @@ import { runPackagedStartupSmoke } from "./smoke.js";
 import { startSingleInstanceLifecycle } from "./singleInstanceLifecycle.js";
 import { runDesktopAgentHostServiceMode } from "./desktopAgentHostServiceMode.js";
 import { createDesktopShutdownController } from "./appShutdown.js";
+import {
+  selectDesktopCredentialStorage,
+  type DesktopCredentialStorage
+} from "./credentialStorage/applicationCredentialStorage.js";
+import { CredentialStoragePreferenceStore } from "./credentialStorage/credentialStoragePreferenceStore.js";
+import { credentialStoragePaths } from "./credentialStorage/credentialStoragePaths.js";
+import { registerCredentialStorageSettingsHandlers } from "./credentialStorage/credentialStorageSettingsHandlers.js";
+import { migrateCredentialStorage } from "./credentialStorage/credentialStorageMigration.js";
+import { mcpTunnelConfigStorePaths } from "./mcpTunnel/tunnelClientStore.js";
+import type { CredentialStorageMode } from "../shared/credentialStorageSettings.js";
 
 const isDev = process.env.PLANWEAVE_DESKTOP_DEV_SERVER_URL !== undefined;
 const isSmoke = process.env.PLANWEAVE_DESKTOP_SMOKE === "1";
@@ -88,6 +97,29 @@ function startDesktopApplication(): void {
     app.setPath("userData", process.env.PLANWEAVE_DESKTOP_SMOKE_USER_DATA_DIR);
   }
 
+  const preferencePaths = credentialStoragePaths("application");
+  const credentialStoragePreferenceStore = new CredentialStoragePreferenceStore(
+    preferencePaths.preferenceFile
+  );
+  const activeCredentialStorageMode = credentialStoragePreferenceStore.readSync().mode;
+  const activeCredentialPaths = credentialStoragePaths(activeCredentialStorageMode);
+  const systemCredentialStorage: DesktopCredentialStorage = {
+    isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    encryptString: (value) => safeStorage.encryptString(value),
+    decryptString: (value) => safeStorage.decryptString(value)
+  };
+  const credentialStorage = selectDesktopCredentialStorage({
+    mode: activeCredentialStorageMode,
+    applicationKeyPath: activeCredentialPaths.applicationKeyFile,
+    systemStorage: systemCredentialStorage
+  });
+  const credentialStorageForMode = (mode: CredentialStorageMode): DesktopCredentialStorage =>
+    selectDesktopCredentialStorage({
+      mode,
+      applicationKeyPath: credentialStoragePaths(mode).applicationKeyFile,
+      systemStorage: systemCredentialStorage
+    });
+
   // Single Desktop main process per userData profile. Runtime locks still protect
   // independent writers, while this keeps Desktop handlers and windows primary-only.
   startSingleInstanceLifecycle({
@@ -104,9 +136,36 @@ function startDesktopApplication(): void {
       registerRuntimeStateWatchHandlers();
       registerWindowAppearanceHandlers();
       registerAppUpdateHandlers();
-      registerMcpTunnelHandlers();
-      registerCollaborationHandlers();
-      registerOperatorControlHandlers();
+      registerCredentialStorageSettingsHandlers({
+        store: credentialStoragePreferenceStore,
+        activeMode: activeCredentialStorageMode,
+        migration: {
+          migrate: (targetMode) =>
+            migrateCredentialStorage({
+              sourceMode: activeCredentialStorageMode,
+              targetMode,
+              sourcePaths: activeCredentialPaths,
+              targetPaths: credentialStoragePaths(targetMode),
+              sourceStorage: credentialStorage,
+              targetStorage: credentialStorageForMode(targetMode),
+              mcpTunnelPaths: mcpTunnelConfigStorePaths(app.getPath("userData"))
+            })
+        }
+      });
+      registerMcpTunnelHandlers({
+        credentialStorage,
+        credentialStorageMode: activeCredentialStorageMode
+      });
+      registerOperatorControlHandlers({
+        safeStorage: credentialStorage,
+        credentialsPath: activeCredentialPaths.operatorCredentialsFile
+      });
+      registerCollaborationHandlers({
+        safeStorage: credentialStorage,
+        credentialsPath: activeCredentialPaths.collaborationCredentialsFile,
+        invitationsPath: activeCredentialPaths.collaborationInvitationsFile,
+        coordinatorCredentialsPath: activeCredentialPaths.coordinatorCredentialsFile
+      });
       registerApplicationMenu({ checkForUpdates: checkForAppUpdate });
 
       app.whenReady().then(() => {
@@ -154,9 +213,10 @@ function startDesktopApplication(): void {
         },
         cleanupTasks: [
           stopMcpTunnelProcesses,
-          shutdownLocalCollaborationCoordinator,
-          shutdownCollaborationService,
-          shutdownOperatorControlService,
+          async () => {
+            await shutdownCollaborationHandlers();
+            await shutdownOperatorControlService();
+          },
           () => shutdownDesktopAutoRuns("PlanWeave Desktop is quitting.")
         ],
         reportError: (error) => {

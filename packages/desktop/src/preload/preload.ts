@@ -23,6 +23,8 @@ import type { AppUpdateState, PlanWeaveAppUpdateApi } from "../shared/appUpdate.
 import { appUpdateChangedChannel, appUpdateInvokeChannels } from "../shared/appUpdate.js";
 import type { PlanWeaveDesktopSettingsApi } from "../shared/desktopSettings.js";
 import { desktopSettingsInvokeChannels } from "../shared/desktopSettings.js";
+import type { PlanWeaveCredentialStorageSettingsApi } from "../shared/credentialStorageSettings.js";
+import { credentialStorageSettingsInvokeChannels } from "../shared/credentialStorageSettings.js";
 import {
   autoRunChangedChannel,
   packageFileChangedChannel,
@@ -175,6 +177,18 @@ const desktopSettingsApi: PlanWeaveDesktopSettingsApi = {
 };
 
 contextBridge.exposeInMainWorld("planweaveDesktopSettings", desktopSettingsApi);
+
+const credentialStorageSettingsApi: PlanWeaveCredentialStorageSettingsApi = {
+  getCredentialStorageSettings: async () =>
+    ipcRenderer.invoke(credentialStorageSettingsInvokeChannels.getStatus),
+  configureCredentialStorage: async (input) =>
+    ipcRenderer.invoke(credentialStorageSettingsInvokeChannels.configure, input)
+};
+
+contextBridge.exposeInMainWorld(
+  "planweaveCredentialStorageSettings",
+  credentialStorageSettingsApi
+);
 
 const windowApi: PlanWeaveWindowApi = {
   getWindowMaterialCapabilities: async () =>

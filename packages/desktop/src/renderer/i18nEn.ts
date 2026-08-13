@@ -461,6 +461,7 @@ export const enCatalog = {
   settingsConnectionsHint: "Manage remote devices and how they connect to PlanWeave Server.",
   settingsConnectionsOverview: "Overview",
   settingsConnectionsDevices: "My devices",
+  settingsConnectionsCredentials: "Credential storage",
   settingsConnectionsAdvanced: "Advanced connection",
   settingsConnectionsOverviewTitle: "Current status",
   settingsConnectionsServer: "Server",
@@ -471,6 +472,28 @@ export const enCatalog = {
   settingsConnectionsDevicesOnline: "{online} of {total} online",
   settingsConnectionsDevicesLoading: "Loading devices…",
   settingsConnectionsDevicesUnavailable: "Device status unavailable",
+  credentialStorageTitle: "Workspace credential storage",
+  credentialStorageHint:
+    "Choose how PlanWeave stores device tokens. Existing credentials are migrated without creating duplicate records.",
+  credentialStorageApplication: "PlanWeave app storage",
+  credentialStorageApplicationRecommended: "Recommended",
+  credentialStorageApplicationDescription:
+    "Persists credentials across app and computer restarts without system permission prompts. Credentials are authenticated-encrypted in PlanWeave's current-user app directory, but remain accessible to software running as that user.",
+  credentialStorageSystem: "System secure storage",
+  credentialStorageSystemDescription:
+    "Also persists credentials across restarts, with the encryption key protected separately by the operating system. The system may ask for permission when it is first accessed.",
+  credentialStorageSystemConfirmTitle: "Use system secure storage?",
+  credentialStorageSystemConfirmDescription:
+    "PlanWeave will migrate existing credentials before changing this setting. macOS may display a one-time Keychain permission prompt after you continue.",
+  credentialStorageSystemConfirmAction: "Use after restart",
+  credentialStorageSystemConfirmCancel: "Cancel",
+  credentialStorageActive: "Currently active",
+  credentialStorageRestartRequired:
+    "Credentials have been migrated. Restart PlanWeave to use the selected storage and restore connections automatically.",
+  credentialStorageLoading: "Loading credential storage settings…",
+  credentialStorageLoadFailed: "Credential storage settings could not be loaded.",
+  credentialStorageSaveFailed:
+    "Credentials could not be migrated, so the previous storage setting remains active.",
   settingsServer: "Server",
   settingsHosts: "Agent Hosts",
   settingsGeneralHint: "Project path, executor, appearance, language, and notification rules.",
@@ -961,11 +984,11 @@ export const enCatalog = {
     "Use this tunnel id in ChatGPT when adding PlanWeave through the Tunnel connection mode.",
   mcpRuntimeApiKey: "Runtime API key",
   mcpRuntimeApiKeyHint:
-    "Saved with Electron safeStorage after starting; requires Tunnels Read + Use.",
+    "Encrypted with the configured credential storage after starting; requires Tunnels Read + Use.",
   mcpRuntimeApiKeySavedHint: "A saved runtime API key will be used if this field is left blank.",
   mcpRuntimeApiKeySessionOnlyHint: "Stored only for this PlanWeave process. It will not be saved.",
   mcpRuntimeApiKeyStorageUnavailableHint:
-    "safeStorage is unavailable, so this key will only be used for this PlanWeave process and will not be saved.",
+    "Configured credential storage is unavailable, so this key will only be used for this PlanWeave process and will not be saved.",
   mcpRuntimeApiKeySavedPlaceholder: "Saved key",
   mcpTunnelAutoStart: "Start tunnel when PlanWeave opens",
   mcpTunnelAutoStartHint:
@@ -1271,9 +1294,9 @@ export const enCatalog = {
     "Revoke the {count} selected invitations? This action cannot be undone.",
   peopleInvitationCopyOnceTitle: "Complete invitation",
   peopleInvitationCopyOnceWarning:
-    "The complete invitation contains the Server, project, and bearer secret required to join, and is encrypted with the operating system keychain.",
+    "The complete invitation contains the Server, project, and bearer secret required to join, and is encrypted with the configured credential storage.",
   peopleInvitationSessionOnlyWarning:
-    "The operating system keychain is unavailable. This complete invitation is session-only and cannot be restored after restart. Copy it now.",
+    "Configured credential storage is unavailable. This complete invitation is session-only and cannot be restored after restart. Copy it now.",
   peopleInvitationCopy: "Copy token",
   peopleInvitationCopyHandoff: "Copy complete join details",
   peopleInvitationCopied: "Copied",
@@ -1350,13 +1373,21 @@ export const enCatalog = {
   peopleDefaultProfileName: "Collaboration",
   peopleNoProfileToConnect: "No collaboration profile yet. Join or bootstrap first.",
   peopleMissingCredential: "No device credential stored for this profile.",
+  peopleMissingLocalOwnerCredentialHint:
+    "This Workspace is hosted by this device; restore the local owner identity to reconnect without an invitation.",
+  peopleMissingRemoteCredentialHint:
+    "Paste a valid invitation to authorize this device again. The saved Workspace configuration is kept.",
+  peopleLocalOwnerRestoreUnavailable:
+    "The local owner identity could not be restored. Refresh the Workspace status and try again.",
+  peopleConnectionUnexpectedError:
+    "The connection operation failed. Refresh the status and try again.",
   peopleCredentialPresent: "Device credential available",
   peopleInvitationBearerTrustNote:
-    "Invitation tokens are bearer secrets: anyone with the token can join as a project member until it expires or is revoked. Device credentials stay in the main process (encrypted when safeStorage is available).",
+    "Invitation tokens are bearer secrets: anyone with the token can join as a project member until it expires or is revoked. Device credentials stay in the main process and use the configured encrypted storage.",
   peopleSetupCodeTrustNote:
     "Setup codes are one-time and Workspace-scoped. Desktop main redeems the code and stores the device credential; the code is cleared from this form immediately and never written to logs or URLs.",
   peopleSessionOnlyCredentialWarning:
-    "Electron safeStorage is unavailable. Your collaboration device credential is held only for this PlanWeave process and will not persist across restarts.",
+    "Configured credential storage is unavailable. Your collaboration device credential is held only for this PlanWeave process and will not persist across restarts.",
   peopleProjectSessionConnecting: "Project collaboration connecting…",
   peopleProjectSessionConnected: "Project collaboration connected",
   peopleProjectSessionError: "Project collaboration connection error",
@@ -1370,6 +1401,7 @@ export const enCatalog = {
   peopleWorkspaceIdentityError: "Workspace identity verification failed",
   peopleWorkspaceIdentityPending: "Configured · identity verification pending",
   peopleWorkspaceIdentityRetry: "Verify identity",
+  peopleWorkspaceRestoreLocalOwner: "Restore local owner",
   peopleWorkspaceSwitch: "Switch Workspace",
   peopleWorkspaceCancelSwitch: "Cancel switching",
   peopleWorkspacePicker: "Workspaces",

@@ -37,12 +37,21 @@ import { CollaborationInvitationHandoffCoordinator } from "./CollaborationInvita
 import { getOperatorControlService } from "../operatorControl/operatorControlHandlers.js";
 import { setLocalOperatorBackendPort } from "../operatorControl/localOperatorBackend.js";
 import { createCollaborationCoordinationQueue } from "./collaborationCoordinationQueue.js";
+import {
+  createCollaborationHandlerLifecycle,
+  type CollaborationHandlerLifecycle
+} from "./collaborationHandlerLifecycle.js";
 import { switchLocalCollaborationExposure } from "./localCollaborationExposureSwitch.js";
 import { assertRendererProfileNamespace } from "./collaborationProfileEndpoint.js";
 import { restorePersistedCollaborationSession } from "./persistedCollaborationSessionRecovery.js";
 
 let service: CollaborationService | null = null;
 let coordinator: LocalCollaborationCoordinatorControl | null = null;
+let handlerLifecycle: CollaborationHandlerLifecycle | null = null;
+
+export type CollaborationHandlerOptions = CollaborationServiceOptions & {
+  coordinatorCredentialsPath?: string;
+};
 
 function publishStatusToRenderers(status: CollaborationStatus): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -134,20 +143,25 @@ export function createCollaborationService(
 }
 
 export function registerCollaborationHandlers(
-  options: CollaborationServiceOptions = {}
+  options: CollaborationHandlerOptions = {}
 ): CollaborationService {
-  service = createDefaultService(options);
+  const { coordinatorCredentialsPath, ...serviceOptions } = options;
+  const lifecycle = createCollaborationHandlerLifecycle();
+  handlerLifecycle = lifecycle;
+  service = createDefaultService(serviceOptions);
   const active = service;
+  const credentialStorage = serviceOptions.safeStorage ?? {
+    isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    encryptString: (value: string) => safeStorage.encryptString(value),
+    decryptString: (value: Buffer) => safeStorage.decryptString(value)
+  };
   coordinator = new LocalCollaborationCoordinatorControl({
-    safeStorage: {
-      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
-      encryptString: (value) => safeStorage.encryptString(value),
-      decryptString: (value) => safeStorage.decryptString(value)
-    },
+    safeStorage: credentialStorage,
+    ...(coordinatorCredentialsPath ? { credentialsPath: coordinatorCredentialsPath } : {}),
     syncOperatorProfile: (input) => getOperatorControlService().ensureMainOwnedServerProfile(input)
   });
   const local = coordinator;
-  const localReady = local.restore();
+  const localReady = lifecycle.run(() => local.restore());
   void localReady.catch((error: unknown) => {
     console.error("Failed to restore the local collaboration service.", error);
   });
@@ -156,17 +170,16 @@ export function registerCollaborationHandlers(
     service: active,
     coordinatorReady: localReady
   });
-  const runCoordinationOperation = createCollaborationCoordinationQueue();
-  const persistedWorkspaceReady = localReady
-    .then(() =>
-      runCoordinationOperation(async () => {
-        await localActivation.reconcile();
-        await restorePersistedCollaborationSession(active);
-      })
-    )
-    .catch((error: unknown) => {
-      console.error("Failed to restore the persisted collaboration Workspace.", error);
-    });
+  const coordinationQueue = createCollaborationCoordinationQueue();
+  const runCoordinationOperation = <T>(operation: () => Promise<T>): Promise<T> =>
+    lifecycle.run(() => coordinationQueue(operation));
+  const persistedWorkspaceReady = runCoordinationOperation(async () => {
+    await localReady;
+    await localActivation.reconcile();
+    await restorePersistedCollaborationSession(active);
+  }).catch((error: unknown) => {
+    console.error("Failed to restore the persisted collaboration Workspace.", error);
+  });
   const suspendLocalSession = async (
     profileId = local.localProfile()?.profileId
   ): Promise<void> => {
@@ -191,10 +204,12 @@ export function registerCollaborationHandlers(
   });
   const invitationHandoff = new CollaborationInvitationHandoffCoordinator(active, local);
 
-  ipcMain.handle(collaborationInvokeChannels.getCollaborationStatus, async () => {
-    await persistedWorkspaceReady;
-    return active.getStatus();
-  });
+  ipcMain.handle(collaborationInvokeChannels.getCollaborationStatus, () =>
+    lifecycle.run(async () => {
+      await persistedWorkspaceReady;
+      return active.getStatus();
+    })
+  );
   ipcMain.handle(collaborationInvokeChannels.upsertCollaborationProfile, (_event, input: unknown) =>
     runCoordinationOperation(() => {
       assertRendererProfileNamespace(input);
@@ -281,10 +296,12 @@ export function registerCollaborationHandlers(
     collaborationInvokeChannels.validateDeploymentConnectivity,
     (_event, input: unknown) => deploymentActions.validateConnectivity(input)
   );
-  ipcMain.handle(collaborationInvokeChannels.getDesktopServerExposure, async () => {
-    await localReady;
-    return local.getExposureView();
-  });
+  ipcMain.handle(collaborationInvokeChannels.getDesktopServerExposure, () =>
+    lifecycle.run(async () => {
+      await localReady;
+      return local.getExposureView();
+    })
+  );
   ipcMain.handle(
     collaborationInvokeChannels.setDesktopServerExposureMode,
     (_event, input: unknown) =>
@@ -386,10 +403,12 @@ export function registerCollaborationHandlers(
       await local.clearCurrentSelection();
     })
   );
-  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, async () => {
-    await localReady;
-    return local.status();
-  });
+  ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationServerStatus, () =>
+    lifecycle.run(async () => {
+      await localReady;
+      return local.status();
+    })
+  );
   ipcMain.handle(collaborationInvokeChannels.getLocalCollaborationScopeCatalog, () =>
     local.getScopeCatalog()
   );
@@ -625,21 +644,17 @@ export function registerCollaborationHandlers(
   return active;
 }
 
-export async function shutdownCollaborationService(): Promise<void> {
-  if (!service) {
-    return;
-  }
-  const active = service;
-  service = null;
-  await active.shutdown();
-}
+export async function shutdownCollaborationHandlers(): Promise<void> {
+  const activeLifecycle = handlerLifecycle;
+  handlerLifecycle = null;
+  await activeLifecycle?.closeAndDrain();
 
-export async function shutdownLocalCollaborationCoordinator(): Promise<void> {
-  if (!coordinator) {
-    return;
-  }
-  const active = coordinator;
+  const activeService = service;
+  service = null;
+  await activeService?.shutdown();
+
+  const activeCoordinator = coordinator;
   coordinator = null;
   setLocalOperatorBackendPort(null);
-  await active.stop();
+  await activeCoordinator?.stop();
 }

@@ -11,6 +11,7 @@ import {
 } from "../hooks/useHostAdministrationController";
 import type { createTranslator } from "../i18n";
 import { SettingsServerSection } from "./SettingsServerSection";
+import { SettingsCredentialStorageSection } from "./SettingsCredentialStorageSection";
 
 let hostAdministrationContentPromise: Promise<typeof import("./HostAdministrationSection")> | null =
   null;
@@ -26,7 +27,7 @@ const HostAdministrationContent = lazy(() =>
   }))
 );
 
-type ConnectionsTab = "overview" | "devices" | "advanced";
+type ConnectionsTab = "overview" | "devices" | "credentials" | "advanced";
 
 type SettingsConnectionsSectionProps = {
   diagnosticsEnabled?: boolean;
@@ -154,7 +155,7 @@ function ConnectionsOverview({
         {t("settingsConnectionsOverviewTitle")}
       </h2>
 
-      <div className="divide-y divide-border/70 border-y border-border/70">
+      <div className="flex flex-col gap-2 rounded-xl bg-surface-subtle px-4">
         <ConnectionStatus
           icon={ServerIcon}
           label={t("settingsConnectionsServer")}
@@ -194,7 +195,12 @@ export function SettingsConnectionsSection({
   }, [onTabChange, tab]);
 
   const selectTab = (value: string) => {
-    if (value === "overview" || value === "devices" || value === "advanced") {
+    if (
+      value === "overview" ||
+      value === "devices" ||
+      value === "credentials" ||
+      value === "advanced"
+    ) {
       if (value === tab) return;
       setTab(value);
     }
@@ -218,6 +224,9 @@ export function SettingsConnectionsSection({
           </TabsTrigger>
           <TabsTrigger value="devices" data-testid="settings-connections-tab-devices">
             {t("settingsConnectionsDevices")}
+          </TabsTrigger>
+          <TabsTrigger value="credentials" data-testid="settings-connections-tab-credentials">
+            {t("settingsConnectionsCredentials")}
           </TabsTrigger>
           <TabsTrigger value="advanced" data-testid="settings-connections-tab-advanced">
             {t("settingsConnectionsAdvanced")}
@@ -243,6 +252,9 @@ export function SettingsConnectionsSection({
               t={t}
             />
           </Suspense>
+        </TabsContent>
+        <TabsContent value="credentials" className="pt-4">
+          <SettingsCredentialStorageSection t={t} />
         </TabsContent>
         <TabsContent value="advanced" className="pt-4">
           <SettingsServerSection showHeader={false} t={t} />

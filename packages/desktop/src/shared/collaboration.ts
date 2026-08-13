@@ -222,7 +222,7 @@ export type CollaborationStatus = {
   activeProfileId: string | null;
   credentialStorage: CollaborationCredentialStorage;
   /**
-   * Explicit warning when a session-only credential is held because safeStorage is unavailable.
+   * Explicit warning when a session-only credential is held because configured storage is unavailable.
    * Null when every credential is either missing or restorable from encrypted storage.
    */
   nonPersistenceWarning: string | null;
@@ -967,7 +967,7 @@ export type PlanWeaveCollaborationApi = {
 };
 
 export const COLLABORATION_SESSION_ONLY_WARNING =
-  "Electron safeStorage is unavailable, so the collaboration device credential is held only for this PlanWeave process and will not be saved.";
+  "Configured credential storage is unavailable, so the collaboration device credential is held only for this PlanWeave process and will not be saved.";
 
 export type {
   CollaborationActivityListQueryInput,

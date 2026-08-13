@@ -494,6 +494,70 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     expect(retryWorkspaceConnection).toHaveBeenCalledOnce();
   });
 
+  it("does not offer identity verification when the configured Workspace credential is missing", () => {
+    const status = statusWithWorkspaceIdentity("disconnected");
+    status.profiles = status.profiles.map((profile) => ({
+      ...profile,
+      hasDeviceCredential: false,
+      deviceCredentialPersistence: "missing",
+      deviceCredentialId: null,
+      humanPrincipalId: null
+    }));
+
+    render(
+      <CollaborationConnectForm
+        api={joinApi()}
+        status={status}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+
+    expect(screen.queryByTestId("people-workspace-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("people-workspace-credential-missing")).toHaveTextContent(
+      "No device credential stored for this profile"
+    );
+  });
+
+  it("restores a missing local-owner credential through local activation", async () => {
+    const user = userEvent.setup();
+    const status = statusWithWorkspaceIdentity("disconnected");
+    status.activeProfileId = "planweave-local-project-1";
+    status.profiles = status.profiles.map((profile) => ({
+      ...profile,
+      profileId: "planweave-local-project-1",
+      hasDeviceCredential: false,
+      deviceCredentialPersistence: "missing",
+      deviceCredentialId: null,
+      humanPrincipalId: null
+    }));
+    if (status.workspaceConnection.profile) {
+      status.workspaceConnection.profile.profileId = "planweave-local-project-1";
+    }
+    const registerLocalCollaborationCurrentProject = vi.fn().mockResolvedValue(undefined);
+    const retryWorkspaceConnection = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <CollaborationConnectForm
+        api={
+          {
+            registerLocalCollaborationCurrentProject,
+            retryWorkspaceConnection
+          } as unknown as PlanWeaveCollaborationApi
+        }
+        status={status}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+
+    await user.click(screen.getByTestId("people-workspace-restore-local-owner"));
+    expect(registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
+      profileId: "planweave-local-project-1"
+    });
+    expect(retryWorkspaceConnection).not.toHaveBeenCalled();
+  });
+
   it("shows Workspace identity verification failures without calling them disconnects", () => {
     render(
       <CollaborationConnectForm
@@ -773,7 +837,11 @@ describe("CollaborationConnectForm connection diagnostics", () => {
 
     await user.click(screen.getByTestId("people-connect-submit"));
 
-    await waitFor(() => expect(registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({}));
+    await waitFor(() =>
+      expect(registerLocalCollaborationCurrentProject).toHaveBeenCalledWith({
+        profileId: "planweave-local-server"
+      })
+    );
     expect(upsertCollaborationProfile).not.toHaveBeenCalled();
     expect(connectWorkspaceConnection).not.toHaveBeenCalled();
     expect(connectCollaborationSession).not.toHaveBeenCalled();

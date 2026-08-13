@@ -267,6 +267,7 @@ export function ProjectWorkspaceProvider({
   // Shared canvas command session must be available before any durable package write hooks.
   const collaborationSurface = useCollaborationSurface({
     canvasId: collaborationSurfaceCanvasIdForView(activeView, selectedCanvasId),
+    localProjectId: selectedProject?.projectId ?? null,
     t
   });
   const sharedCanvasCommands = useSharedCanvasCommands({

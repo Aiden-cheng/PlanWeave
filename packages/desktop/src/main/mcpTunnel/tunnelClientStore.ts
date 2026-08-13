@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
+import type { CredentialStorageMode } from "../../shared/credentialStorageSettings.js";
 import type { TunnelClientBinaryVerification } from "./tunnelClientBinary.js";
 
 export type TunnelClientConfig = {
@@ -8,6 +9,7 @@ export type TunnelClientConfig = {
   verification: TunnelClientBinaryVerification | null;
   tunnelId: string | null;
   encryptedRuntimeApiKey: string | null;
+  encryptedRuntimeApiKeys?: Partial<Record<CredentialStorageMode, string>>;
   autoStart: boolean;
 };
 
@@ -80,11 +82,23 @@ function normalizeTunnelClientConfig(parsed: unknown): TunnelClientConfig {
     return defaultTunnelClientConfig();
   }
   const record = parsed as Record<string, unknown>;
+  const encryptedRuntimeApiKeysRecord =
+    record.encryptedRuntimeApiKeys &&
+    typeof record.encryptedRuntimeApiKeys === "object" &&
+    !Array.isArray(record.encryptedRuntimeApiKeys)
+      ? (record.encryptedRuntimeApiKeys as Record<string, unknown>)
+      : {};
+  const encryptedRuntimeApiKeys: Partial<Record<CredentialStorageMode, string>> = {};
+  const applicationKey = readString(encryptedRuntimeApiKeysRecord.application);
+  const systemKey = readString(encryptedRuntimeApiKeysRecord.system);
+  if (applicationKey) encryptedRuntimeApiKeys.application = applicationKey;
+  if (systemKey) encryptedRuntimeApiKeys.system = systemKey;
   return {
     tunnelClientPath: readString(record.tunnelClientPath),
     verification: readVerification(record.verification),
     tunnelId: readString(record.tunnelId),
     encryptedRuntimeApiKey: readString(record.encryptedRuntimeApiKey),
+    ...(Object.keys(encryptedRuntimeApiKeys).length > 0 ? { encryptedRuntimeApiKeys } : {}),
     autoStart: record.autoStart === true
   };
 }

@@ -6,6 +6,7 @@ import type {
   OperatorCredentialPersistence,
   OperatorCredentialStorage
 } from "../../shared/operatorControl.js";
+import { decryptSafeStorageString } from "../safeStorageAccess.js";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
 
 export type OperatorSafeStoragePort = {
@@ -22,14 +23,14 @@ const persistedOperatorCredentialSchema = z
   })
   .strict();
 
-const operatorCredentialsDocumentSchema = z
+export const operatorCredentialsDocumentSchema = z
   .object({
     version: z.literal(1),
     credentials: z.record(z.string().trim().min(1).max(128), persistedOperatorCredentialSchema)
   })
   .strict();
 
-type OperatorCredentialsDocument = z.infer<typeof operatorCredentialsDocumentSchema>;
+export type OperatorCredentialsDocument = z.infer<typeof operatorCredentialsDocumentSchema>;
 type SessionCredential = { operatorToken: string; operatorId: string | null; updatedAt: string };
 
 export type OperatorCredentialVaultPaths = { credentialsPath: string };
@@ -77,7 +78,7 @@ async function writePrivateJson(path: string, value: unknown): Promise<void> {
   if ((written.mode & 0o777) !== 0o600) await chmod(path, 0o600);
 }
 
-/** Main-only operator bearer vault. Durable entries are safeStorage ciphertext, never plaintext. */
+/** Main-only operator bearer vault. Durable entries use configured-storage ciphertext, never plaintext. */
 export class OperatorCredentialVault {
   private readonly safeStorage: OperatorSafeStoragePort;
   private readonly sessionCredentials = new Map<string, SessionCredential>();
@@ -113,12 +114,12 @@ export class OperatorCredentialVault {
 
   private decrypt(value: string): string | null {
     if (!this.safeStorage.isEncryptionAvailable()) return null;
-    try {
-      const token = this.safeStorage.decryptString(Buffer.from(value, "base64"));
-      return operatorTokenSchema.safeParse(token).success ? token : null;
-    } catch {
-      return null;
-    }
+    const token = decryptSafeStorageString(
+      this.safeStorage,
+      Buffer.from(value, "base64"),
+      "operator credential"
+    );
+    return operatorTokenSchema.safeParse(token).success ? token : null;
   }
 
   private async load(): Promise<OperatorCredentialsDocument> {
@@ -177,7 +178,7 @@ export class OperatorCredentialVault {
     if (!this.safeStorage.isEncryptionAvailable()) return null;
     const document = await this.load();
     const record = document.credentials[profileId];
-    if (!record || !this.decrypt(record.encryptedOperatorToken)) return null;
+    if (!record) return null;
     return { operatorId: record.operatorId, updatedAt: record.updatedAt };
   }
 
@@ -193,13 +194,7 @@ export class OperatorCredentialVault {
     if (!this.safeStorage.isEncryptionAvailable()) return "missing";
     const document = await this.load();
     const record = document.credentials[profileId];
-    if (!record) return "missing";
-    if (!this.decrypt(record.encryptedOperatorToken)) {
-      delete document.credentials[profileId];
-      await this.persist(document);
-      return "missing";
-    }
-    return "persisted";
+    return record ? "persisted" : "missing";
   }
 
   async hasCredential(profileId: string): Promise<boolean> {

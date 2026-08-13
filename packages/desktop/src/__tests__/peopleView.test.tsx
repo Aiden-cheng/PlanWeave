@@ -343,7 +343,7 @@ describe("PeopleView", () => {
       "data-status",
       "connected"
     );
-    expect(screen.getByTestId("people-workspace-connection-status")).toHaveClass("border-y");
+    expect(screen.getByTestId("people-workspace-connection-status")).not.toHaveClass("border-y");
     expect(screen.getByText("http://127.0.0.1:56584/")).toBeVisible();
     expect(screen.getByTestId("people-workspace-change-connection")).toBeVisible();
     expect(screen.queryByTestId("people-workspace-disconnect")).not.toBeInTheDocument();

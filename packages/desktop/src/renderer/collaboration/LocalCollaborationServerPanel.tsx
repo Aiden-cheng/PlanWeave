@@ -285,8 +285,8 @@ export function LocalCollaborationServerPanel({
         <div
           className={
             appearance === "settings"
-              ? "border-b border-border/70 pb-5"
-              : "border-t border-border/70 px-1 py-5"
+              ? "pb-5"
+              : "px-1 py-5"
           }
         >
           {" "}
@@ -357,7 +357,7 @@ export function LocalCollaborationServerPanel({
       ) : null}
 
       <div
-        className={appearance === "settings" ? "pt-1" : "border-t border-border/70 px-1 py-5"}
+        className={appearance === "settings" ? "pt-1" : "px-1 py-5"}
         data-testid="local-collaboration-scope-section"
       >
         <button
@@ -405,8 +405,8 @@ export function LocalCollaborationServerPanel({
             id="local-collaboration-scope-catalog"
             className={
               appearance === "settings"
-                ? "mt-4 border-t border-border/60 pt-3"
-                : "mt-5 border-t border-border/70"
+                ? "mt-4"
+                : "mt-5"
             }
             data-testid="local-collaboration-scope-catalog"
           >
@@ -414,10 +414,10 @@ export function LocalCollaborationServerPanel({
               const projectCollapsed = !expandedProjectIds.has(project.projectId);
               const projectContentId = `local-collaboration-project-${projectIndex}`;
               return (
-                <div key={project.projectId} className="border-b border-border/70">
+                <div key={project.projectId} className="mb-2 rounded-xl bg-surface-subtle">
                   <button
                     type="button"
-                    className="flex w-full items-center gap-3 px-1 py-4 text-left outline-none transition-colors hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-4 text-left outline-none transition-colors hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     aria-expanded={!projectCollapsed}
                     aria-controls={projectContentId}
                     aria-label={t(
@@ -453,7 +453,7 @@ export function LocalCollaborationServerPanel({
                   {!projectCollapsed ? (
                     <div
                       id={projectContentId}
-                      className="divide-y divide-border/40 border-t border-border/50"
+                      className="flex flex-col gap-1 px-2 pb-2"
                     >
                       {project.canvases.map((canvas) => {
                         const scope = { projectId: project.projectId, canvasId: canvas.canvasId };
@@ -461,7 +461,7 @@ export function LocalCollaborationServerPanel({
                         return (
                           <label
                             key={canvas.canvasId}
-                            className="flex cursor-pointer items-center gap-3 py-3 pl-8 pr-1 hover:bg-muted/30"
+                            className="flex cursor-pointer items-center gap-3 rounded-lg py-3 pl-8 pr-2 hover:bg-muted/30"
                           >
                             <input
                               type="checkbox"
@@ -493,7 +493,7 @@ export function LocalCollaborationServerPanel({
               );
             })}
             {catalog && catalog.projects.length === 0 ? (
-              <p className="border-b border-border/70 py-8 text-center text-sm text-muted-foreground">
+              <p className="rounded-xl bg-surface-subtle py-8 text-center text-sm text-muted-foreground">
                 {t("localServerNoProjects")}
               </p>
             ) : null}
@@ -518,7 +518,7 @@ export function LocalCollaborationServerPanel({
 
         {running && currentCanvasIsSelected ? (
           <div
-            className="mt-5 border-t border-border/50 pt-4"
+            className="mt-5 rounded-lg bg-emerald-500/5 px-3 py-3"
             data-testid="local-collaboration-current-canvas-status"
           >
             <div>
@@ -537,7 +537,7 @@ export function LocalCollaborationServerPanel({
 
       {error ? (
         <div
-          className="flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/5 px-1 py-3 text-xs text-destructive"
+          className="flex items-center justify-between gap-3 rounded-lg bg-destructive/5 px-3 py-3 text-xs text-destructive"
           role="alert"
         >
           <span>{error.message}</span>

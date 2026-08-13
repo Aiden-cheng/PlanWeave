@@ -126,11 +126,22 @@ export function CollaborationConnectForm({
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
 
   const profiles = status?.profiles ?? [];
+  const workspaceConnection = status?.workspaceConnection ?? null;
   const activeProfile =
     profiles.find((profile) => profile.profileId === status?.activeProfileId) ??
     profiles[0] ??
     null;
-  const workspaceConnection = status?.workspaceConnection ?? null;
+  const workspaceIdentityProfile =
+    profiles.find((profile) => profile.profileId === workspaceConnection?.profile?.profileId) ??
+    activeProfile;
+  const workspaceCredentialMissing =
+    workspaceConnection?.profile !== null &&
+    workspaceConnection?.profile !== undefined &&
+    workspaceIdentityProfile?.hasDeviceCredential === false;
+  const localOwnerCredentialMissing =
+    workspaceCredentialMissing &&
+    workspaceIdentityProfile !== null &&
+    isLocalCollaborationProfileId(workspaceIdentityProfile.profileId);
   const workspaceConnected = workspaceConnection?.status === "connected";
   const showConnectionEditor =
     fixedMode !== undefined || !workspaceConnected || connectionEditorOpen;
@@ -224,7 +235,9 @@ export function CollaborationConnectForm({
           if (typeof api.registerLocalCollaborationCurrentProject !== "function") {
             throw new Error(t("peopleMissingCredential"));
           }
-          await api.registerLocalCollaborationCurrentProject({});
+          await api.registerLocalCollaborationCurrentProject({
+            profileId: activeProfile.profileId
+          });
           await onConnected?.();
           return;
         }
@@ -373,6 +386,29 @@ export function CollaborationConnectForm({
     }
   };
 
+  const restoreLocalOwner = async () => {
+    if (
+      !api ||
+      busy ||
+      !workspaceIdentityProfile ||
+      typeof api.registerLocalCollaborationCurrentProject !== "function"
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.registerLocalCollaborationCurrentProject({
+        profileId: workspaceIdentityProfile.profileId
+      });
+      await onConnected?.();
+    } catch (restoreError) {
+      setError(collaborationConnectionErrorMessage(t, restoreError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copyDiagnostics = async () => {
     if (!copyText || !diagnosticReport) return;
     try {
@@ -420,7 +456,7 @@ export function CollaborationConnectForm({
       <div className={`flex flex-col gap-6 ${showHeader ? "" : "pt-0"}`}>
         {showConnectionSummary ? (
           <div
-            className="flex flex-col gap-3 border-y border-border/70 py-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+            className="flex flex-col gap-3 rounded-xl bg-surface-subtle px-4 py-4 text-sm sm:flex-row sm:items-center sm:justify-between"
             data-testid="people-workspace-connection-status"
             data-status={workspaceConnection?.status ?? "local_only"}
             role="status"
@@ -465,8 +501,10 @@ export function CollaborationConnectForm({
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              {workspaceConnection?.status === "disconnected" ||
-              (workspaceConnection?.status === "error" && workspaceConnection.error?.retryable) ? (
+              {!workspaceCredentialMissing &&
+              (workspaceConnection?.status === "disconnected" ||
+                (workspaceConnection?.status === "error" &&
+                  workspaceConnection.error?.retryable)) ? (
                 <Button
                   type="button"
                   size="sm"
@@ -476,6 +514,22 @@ export function CollaborationConnectForm({
                   onClick={() => void retryWorkspace()}
                 >
                   {t("peopleWorkspaceIdentityRetry")}
+                </Button>
+              ) : null}
+              {localOwnerCredentialMissing ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="people-workspace-restore-local-owner"
+                  disabled={
+                    busy ||
+                    !api ||
+                    typeof api.registerLocalCollaborationCurrentProject !== "function"
+                  }
+                  onClick={() => void restoreLocalOwner()}
+                >
+                  {t("peopleWorkspaceRestoreLocalOwner")}
                 </Button>
               ) : null}
               {workspaceConnected && !fixedMode ? (
@@ -496,6 +550,20 @@ export function CollaborationConnectForm({
           </div>
         ) : null}
 
+        {workspaceCredentialMissing ? (
+          <p
+            className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-950 dark:text-amber-100"
+            data-testid="people-workspace-credential-missing"
+            role="status"
+          >
+            {t("peopleMissingCredential")} {t(
+              localOwnerCredentialMissing
+                ? "peopleMissingLocalOwnerCredentialHint"
+                : "peopleMissingRemoteCredentialHint"
+            )}
+          </p>
+        ) : null}
+
         {showConnectionEditor ? (
           <>
             {showConnectionSummary && workspacePickerItems.length > 0 ? (
@@ -508,14 +576,14 @@ export function CollaborationConnectForm({
                 <div className="pb-2 text-sm font-semibold text-text-strong">
                   {t("peopleWorkspacePicker")}
                 </div>
-                <div className="divide-y divide-border/60 border-y border-border/70">
+                <div className="flex flex-col gap-1 rounded-xl bg-surface-subtle p-1">
                   {workspacePickerItems.map((item) => (
                     <button
                       key={item.workspaceId}
                       type="button"
                       role="option"
                       data-testid={`people-workspace-picker-item-${item.workspaceId}`}
-                      className="flex w-full items-center justify-between gap-4 px-1 py-3 text-left hover:bg-muted/20"
+                      className="flex w-full items-center justify-between gap-4 rounded-lg px-3 py-3 text-left hover:bg-background/70"
                       disabled={busy || !api}
                       onClick={() => void selectWorkspace(item.workspaceId)}
                     >
@@ -713,7 +781,7 @@ export function CollaborationConnectForm({
             ) : null}
 
             {mode === "connect" ? (
-              <div className="border-y border-border/70 py-3 text-xs">
+              <div className="rounded-xl bg-surface-subtle px-4 py-3 text-xs">
                 {activeProfile || workspaceConnection?.profile ? (
                   <div data-testid="people-connect-active-profile">
                     <div className="font-medium text-text-strong">
@@ -729,9 +797,8 @@ export function CollaborationConnectForm({
                       <div className="text-muted-foreground">{workspaceConnection.workspaceId}</div>
                     ) : null}
                     <div className="text-muted-foreground">
-                      {activeProfile?.hasDeviceCredential ||
-                      workspaceConnection?.status === "connected" ||
-                      workspaceConnection?.status === "disconnected"
+                      {workspaceIdentityProfile?.hasDeviceCredential ||
+                      workspaceConnection?.status === "connected"
                         ? t("peopleCredentialPresent")
                         : t("peopleMissingCredential")}
                     </div>
@@ -761,7 +828,7 @@ export function CollaborationConnectForm({
                 )}
                 {diagnosticReport ? (
                   <details
-                    className="mt-3 border-t border-border/70 pt-3"
+                    className="mt-4"
                     data-testid="people-connection-diagnostics"
                   >
                     <summary className="cursor-pointer select-none font-medium text-text-strong">

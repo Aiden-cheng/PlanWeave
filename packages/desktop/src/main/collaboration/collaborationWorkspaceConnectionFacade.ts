@@ -156,6 +156,9 @@ export class CollaborationWorkspaceConnectionFacade {
         code: mapped.code,
         message: mapped.message
       });
+      if (mapped.code === "collaboration_credential_missing") {
+        return this.publishStatus();
+      }
       throw mapped;
     }
     return this.publishStatus();

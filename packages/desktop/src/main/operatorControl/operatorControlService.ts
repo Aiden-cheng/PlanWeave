@@ -65,7 +65,7 @@ const operatorCredentialMaterialInputSchema = operatorImportCredentialInputSchem
 });
 
 export const OPERATOR_SESSION_ONLY_WARNING =
-  "Operator credential is held for this session only because OS secure storage is unavailable.";
+  "Operator credential is held for this session only because configured credential storage is unavailable.";
 
 export type OperatorControlClientFactory = (
   options: OperatorControlClientOptions

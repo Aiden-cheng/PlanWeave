@@ -7,16 +7,20 @@ import {
 import { opaqueIdentifierSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
 import { z } from "zod";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
+import { decryptSafeStorageString } from "../safeStorageAccess.js";
 import type { CollaborationSafeStoragePort } from "./collaborationCredentialVault.js";
 
 const recordSchema = z.object({ encryptedInvitation: z.string().trim().min(1) }).strict();
-const documentSchema = z
+export const collaborationInvitationDocumentSchema = z
   .object({
     version: z.literal(1),
     invitations: z.record(opaqueIdentifierSchema, z.record(opaqueIdentifierSchema, recordSchema))
   })
   .strict();
-type InvitationDocument = z.infer<typeof documentSchema>;
+export type CollaborationInvitationDocument = z.infer<
+  typeof collaborationInvitationDocumentSchema
+>;
+type InvitationDocument = CollaborationInvitationDocument;
 
 function isMissingFileError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
@@ -57,7 +61,9 @@ export class CollaborationInvitationVault {
   private async load(): Promise<InvitationDocument> {
     if (this.document) return this.document;
     try {
-      this.document = documentSchema.parse(JSON.parse(await readFile(this.path, "utf8")));
+      this.document = collaborationInvitationDocumentSchema.parse(
+        JSON.parse(await readFile(this.path, "utf8"))
+      );
     } catch (error) {
       if (!isMissingFileError(error)) throw new Error("Invalid collaboration invitation vault.");
       this.document = { version: 1, invitations: {} };
@@ -66,7 +72,7 @@ export class CollaborationInvitationVault {
   }
 
   private async persist(document: InvitationDocument): Promise<void> {
-    const parsed = documentSchema.parse(document);
+    const parsed = collaborationInvitationDocumentSchema.parse(document);
     await writePrivateJson(this.path, parsed);
     this.document = parsed;
   }
@@ -105,12 +111,13 @@ export class CollaborationInvitationVault {
     const document = await this.load();
     const record = document.invitations[profileId]?.[invitationId];
     if (!record) return null;
+    const decrypted = decryptSafeStorageString(
+      this.options.safeStorage,
+      Buffer.from(record.encryptedInvitation, "base64"),
+      "collaboration invitation"
+    );
     try {
-      const invitation = humanCreateInvitationResponseSchema.parse(
-        JSON.parse(
-          this.options.safeStorage.decryptString(Buffer.from(record.encryptedInvitation, "base64"))
-        )
-      );
+      const invitation = humanCreateInvitationResponseSchema.parse(JSON.parse(decrypted));
       if (invitation.invitation.invitationId !== invitationId || this.isExpired(invitation)) {
         await this.delete(profileId, invitationId);
         return null;

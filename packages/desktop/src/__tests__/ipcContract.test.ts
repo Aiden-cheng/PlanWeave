@@ -2,6 +2,7 @@ import { cloneDesktopGraphEditResult, type GraphEditResult } from "@planweave-ai
 import { describe, expect, it } from "vitest";
 import { appUpdateChangedChannel, appUpdateInvokeChannels } from "../shared/appUpdate";
 import { desktopSettingsInvokeChannels } from "../shared/desktopSettings";
+import { credentialStorageSettingsInvokeChannels } from "../shared/credentialStorageSettings";
 import {
   autoRunChangedChannel,
   desktopBridgeInvokeChannels,
@@ -12,6 +13,7 @@ import {
   collaborationCurrentSelectionInputSchema,
   collaborationCanvasLiveSyncSignalChannel,
   collaborationInvokeChannels,
+  localCollaborationRegistrationInputSchema,
   collaborationObserverSignalChannel,
   collaborationPresenceSignalChannel,
   collaborationStatusChangedChannel
@@ -21,6 +23,23 @@ import { operatorControlInvokeChannels } from "../shared/operatorControl";
 import { windowAppearanceInvokeChannels } from "../shared/windowAppearance";
 
 describe("desktop IPC contract", () => {
+  it("accepts one explicit local profile as a registration target", () => {
+    expect(
+      localCollaborationRegistrationInputSchema.parse({
+        profileId: "planweave-local-project-1"
+      })
+    ).toEqual({ profileId: "planweave-local-project-1" });
+    expect(
+      localCollaborationRegistrationInputSchema.safeParse({ profileId: "remote-profile" }).success
+    ).toBe(false);
+    expect(
+      localCollaborationRegistrationInputSchema.safeParse({
+        profileId: "planweave-local-project-1",
+        selection: { projectId: "project-1", canvasId: "canvas-1" }
+      }).success
+    ).toBe(false);
+  });
+
   it("uses stable, unique invoke channel names", () => {
     const entries = Object.entries(desktopBridgeInvokeChannels);
     const channels = entries.map(([, channel]) => channel);
@@ -84,6 +103,18 @@ describe("desktop IPC contract", () => {
       "planweave-desktop-settings:migrateLegacyDesktopSettings"
     );
     for (const channel of Object.values(desktopSettingsInvokeChannels)) {
+      expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);
+    }
+  });
+
+  it("keeps credential storage settings channels unique and outside the runtime registry", () => {
+    const channels = Object.values(credentialStorageSettingsInvokeChannels);
+    expect(new Set(channels).size).toBe(channels.length);
+    expect(channels).toEqual([
+      "planweave-credential-storage:getStatus",
+      "planweave-credential-storage:configure"
+    ]);
+    for (const channel of channels) {
       expect(Object.values(desktopBridgeInvokeChannels)).not.toContain(channel);
     }
   });

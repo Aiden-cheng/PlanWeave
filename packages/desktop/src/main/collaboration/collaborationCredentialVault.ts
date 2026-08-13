@@ -11,6 +11,7 @@ import type {
   CollaborationCredentialStorage
 } from "../../shared/collaboration.js";
 import { desktopHomePaths } from "../planweaveHomePaths.js";
+import { decryptSafeStorageString } from "../safeStorageAccess.js";
 
 export type CollaborationSafeStoragePort = {
   isEncryptionAvailable(): boolean;
@@ -33,14 +34,17 @@ const persistedCredentialRecordSchema = z
   })
   .strict();
 
-const credentialsDocumentSchema = z
+export const collaborationCredentialsDocumentSchema = z
   .object({
     version: z.literal(1),
     credentials: z.record(opaqueIdentifierSchema, persistedCredentialRecordSchema)
   })
   .strict();
 
-type CredentialsDocument = z.infer<typeof credentialsDocumentSchema>;
+export type CollaborationCredentialsDocument = z.infer<
+  typeof collaborationCredentialsDocumentSchema
+>;
+type CredentialsDocument = CollaborationCredentialsDocument;
 
 type SessionCredential = {
   deviceToken: string;
@@ -95,7 +99,7 @@ async function writePrivateJson(path: string, value: unknown): Promise<void> {
 /**
  * Main-process vault for human device tokens.
  *
- * - When safeStorage encryption is available: encrypt and persist per profile.
+ * - When configured encryption is available: encrypt and persist per profile.
  * - When unavailable: keep token in process memory only (session-only).
  * - Never exposes plaintext/ciphertext/path to callers that cross into renderer.
  */
@@ -138,14 +142,13 @@ export class CollaborationCredentialVault {
     if (!this.safeStorage.isEncryptionAvailable()) {
       return null;
     }
-    try {
-      const plain = this.safeStorage.decryptString(Buffer.from(encryptedBase64, "base64")).trim();
-      const parsed = humanDeviceTokenSchema.safeParse(plain);
-      return parsed.success ? parsed.data : null;
-    } catch {
-      // Corrupt ciphertext or OS key rotation — treat as missing.
-      return null;
-    }
+    const plain = decryptSafeStorageString(
+      this.safeStorage,
+      Buffer.from(encryptedBase64, "base64"),
+      "collaboration credential"
+    ).trim();
+    const parsed = humanDeviceTokenSchema.safeParse(plain);
+    return parsed.success ? parsed.data : null;
   }
 
   private async load(): Promise<CredentialsDocument> {
@@ -164,7 +167,7 @@ export class CollaborationCredentialVault {
       throw new Error("Failed to read collaboration credentials.");
     }
     try {
-      this.document = credentialsDocumentSchema.parse(JSON.parse(raw));
+      this.document = collaborationCredentialsDocumentSchema.parse(JSON.parse(raw));
       this.loaded = true;
       return this.document;
     } catch {
@@ -173,7 +176,7 @@ export class CollaborationCredentialVault {
   }
 
   private async persist(document: CredentialsDocument): Promise<void> {
-    const parsed = credentialsDocumentSchema.parse(document);
+    const parsed = collaborationCredentialsDocumentSchema.parse(document);
     await writePrivateJson(this.paths.credentialsPath, parsed);
     this.document = parsed;
     this.loaded = true;
@@ -218,19 +221,12 @@ export class CollaborationCredentialVault {
         updatedAt: session.updatedAt
       };
     }
+    if (!this.safeStorage.isEncryptionAvailable()) {
+      return null;
+    }
     const document = await this.load();
     const record = document.credentials[profileId];
     if (!record) {
-      return null;
-    }
-    if (!this.safeStorage.isEncryptionAvailable()) {
-      // Ciphertext present but unusable — report missing.
-      return null;
-    }
-    const token = this.decrypt(record.encryptedDeviceToken);
-    if (!token) {
-      delete document.credentials[profileId];
-      await this.persist(document);
       return null;
     }
     return {
@@ -256,16 +252,7 @@ export class CollaborationCredentialVault {
     }
     const document = await this.load();
     const record = document.credentials[profileId];
-    if (!record) {
-      return "missing";
-    }
-    const token = this.decrypt(record.encryptedDeviceToken);
-    if (!token) {
-      delete document.credentials[profileId];
-      await this.persist(document);
-      return "missing";
-    }
-    return "persisted";
+    return record ? "persisted" : "missing";
   }
 
   async hasCredential(profileId: string): Promise<boolean> {

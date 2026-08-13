@@ -455,6 +455,7 @@ export const zhCnCatalog = {
   settingsConnectionsHint: "管理远程设备，以及它们连接 PlanWeave Server 的方式。",
   settingsConnectionsOverview: "概览",
   settingsConnectionsDevices: "我的设备",
+  settingsConnectionsCredentials: "凭据存储",
   settingsConnectionsAdvanced: "高级连接",
   settingsConnectionsOverviewTitle: "当前状态",
   settingsConnectionsServer: "Server",
@@ -465,6 +466,27 @@ export const zhCnCatalog = {
   settingsConnectionsDevicesOnline: "{online}/{total} 台在线",
   settingsConnectionsDevicesLoading: "正在加载设备…",
   settingsConnectionsDevicesUnavailable: "无法获取设备状态",
+  credentialStorageTitle: "Workspace 凭据存储",
+  credentialStorageHint:
+    "选择设备令牌的保存方式。已有凭据会自动迁移，不会生成重复记录。",
+  credentialStorageApplication: "PlanWeave 应用存储",
+  credentialStorageApplicationRecommended: "推荐",
+  credentialStorageApplicationDescription:
+    "应用或电脑重启后仍会保留连接凭据，不请求系统钥匙串权限。凭据经过认证加密，保存在 PlanWeave 当前用户目录；以该用户身份运行的软件仍可访问这些文件。",
+  credentialStorageSystem: "系统安全存储",
+  credentialStorageSystemDescription:
+    "同样会在重启后保留凭据，并由操作系统单独保护加密密钥；首次读取时，系统可能显示授权提示。",
+  credentialStorageSystemConfirmTitle: "要使用系统安全存储吗？",
+  credentialStorageSystemConfirmDescription:
+    "PlanWeave 会先迁移已有凭据，再切换此设置。继续后，macOS 可能显示一次钥匙串授权提示。",
+  credentialStorageSystemConfirmAction: "重启后使用",
+  credentialStorageSystemConfirmCancel: "取消",
+  credentialStorageActive: "当前使用",
+  credentialStorageRestartRequired:
+    "凭据已迁移。重启 PlanWeave 后将使用所选存储并自动恢复连接。",
+  credentialStorageLoading: "正在读取凭据存储设置…",
+  credentialStorageLoadFailed: "无法读取凭据存储设置。",
+  credentialStorageSaveFailed: "凭据迁移失败，仍保留原来的存储设置。",
   settingsServer: "Server",
   settingsHosts: "Agent Host",
   settingsGeneralHint: "项目路径、执行器、外观、语言和通知规则。",
@@ -901,11 +923,11 @@ export const zhCnCatalog = {
   mcpTunnelId: "Tunnel ID",
   mcpTunnelIdHint: "在 ChatGPT 通过 Tunnel 连接方式添加 PlanWeave 时使用这个 tunnel id。",
   mcpRuntimeApiKey: "Runtime API key",
-  mcpRuntimeApiKeyHint: "启动后通过 Electron safeStorage 加密保存；需要 Tunnels Read + Use 权限。",
+  mcpRuntimeApiKeyHint: "启动后通过已配置的凭据存储加密保存；需要 Tunnels Read + Use 权限。",
   mcpRuntimeApiKeySavedHint: "留空时会使用已保存的 runtime API key。",
   mcpRuntimeApiKeySessionOnlyHint: "仅保存在当前 PlanWeave 进程中，不会写入磁盘。",
   mcpRuntimeApiKeyStorageUnavailableHint:
-    "safeStorage 不可用，这个 key 只会用于当前 PlanWeave 进程，不会保存。",
+    "当前配置的凭据存储不可用，这个 key 只会用于当前 PlanWeave 进程，不会保存。",
   mcpRuntimeApiKeySavedPlaceholder: "已保存 key",
   mcpTunnelAutoStart: "打开 PlanWeave 时启动 tunnel",
   mcpTunnelAutoStartHint:
@@ -1193,9 +1215,9 @@ export const zhCnCatalog = {
   peopleRevokeSelectedInvitationsConfirm: "吊销所选的 {count} 个邀请？此操作无法撤销。",
   peopleInvitationCopyOnceTitle: "完整邀请",
   peopleInvitationCopyOnceWarning:
-    "完整邀请包含加入所需的服务器、项目和持有者密钥，并已使用系统钥匙串加密保存。",
+    "完整邀请包含加入所需的服务器、项目和持有者密钥，并已使用当前配置的凭据存储加密保存。",
   peopleInvitationSessionOnlyWarning:
-    "系统钥匙串当前不可用；完整邀请只保留在本次会话中，重启后无法恢复。请立即复制。",
+    "当前配置的凭据存储不可用；完整邀请只保留在本次会话中，重启后无法恢复。请立即复制。",
   peopleInvitationCopy: "复制令牌",
   peopleInvitationCopyHandoff: "复制完整加入信息",
   peopleInvitationCopied: "已复制",
@@ -1266,13 +1288,20 @@ export const zhCnCatalog = {
   peopleDefaultProfileName: "协作",
   peopleNoProfileToConnect: "尚无协作配置。请先加入或初始化。",
   peopleMissingCredential: "此配置没有已存储的设备凭证。",
+  peopleMissingLocalOwnerCredentialHint:
+    "此 Workspace 由本机托管，可直接恢复本机所有者身份，无需重新使用邀请。",
+  peopleMissingRemoteCredentialHint:
+    "请重新粘贴有效邀请以授权此设备；已保存的 Workspace 配置不会丢失。",
+  peopleLocalOwnerRestoreUnavailable:
+    "无法恢复这台设备的本机所有者身份，请刷新 Workspace 状态后重试。",
+  peopleConnectionUnexpectedError: "连接操作失败，请刷新状态后重试。",
   peopleCredentialPresent: "设备凭证可用",
   peopleInvitationBearerTrustNote:
-    "邀请令牌是持有者密钥：在过期或吊销前，任何持有令牌的人都能以成员身份加入。设备凭证保存在主进程（在 safeStorage 可用时加密）。",
+    "邀请令牌是持有者密钥：在过期或吊销前，任何持有令牌的人都能以成员身份加入。设备凭证保存在主进程，并使用当前配置的加密存储。",
   peopleSetupCodeTrustNote:
     "设置码为一次性且限定 Workspace。Desktop 主进程兑换设置码并保存设备凭证；表单会立即清空设置码，且不会写入日志或 URL。",
   peopleSessionOnlyCredentialWarning:
-    "Electron safeStorage 不可用。协作设备凭证仅保存在当前 PlanWeave 进程中，重启后不会保留。",
+    "当前配置的凭据存储不可用。协作设备凭证仅保存在当前 PlanWeave 进程中，重启后不会保留。",
   peopleProjectSessionConnecting: "正在连接项目协作…",
   peopleProjectSessionConnected: "项目协作已连接",
   peopleProjectSessionError: "项目协作连接错误",
@@ -1286,6 +1315,7 @@ export const zhCnCatalog = {
   peopleWorkspaceIdentityError: "Workspace 身份验证失败",
   peopleWorkspaceIdentityPending: "已配置，等待身份验证",
   peopleWorkspaceIdentityRetry: "验证身份",
+  peopleWorkspaceRestoreLocalOwner: "恢复本机所有者身份",
   peopleWorkspaceSwitch: "切换 Workspace",
   peopleWorkspaceCancelSwitch: "取消切换",
   peopleWorkspacePicker: "工作区",

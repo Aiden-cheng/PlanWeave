@@ -23,7 +23,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import type { OperatorSafeStoragePort } from "../operatorControl/operatorCredentialVault.js";
-import { OperatorCredentialVault } from "../operatorControl/operatorCredentialVault.js";
+import {
+  operatorCredentialVaultPaths,
+  OperatorCredentialVault
+} from "../operatorControl/operatorCredentialVault.js";
 import type { OperatorControlService } from "../operatorControl/operatorControlService.js";
 import {
   LOCAL_OPERATOR_BACKEND_READY_TIMEOUT_MS,
@@ -193,6 +196,7 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
 
   constructor(options: {
     safeStorage: OperatorSafeStoragePort;
+    credentialsPath?: string;
     projects?: ProjectCatalogPort;
     createController?: (
       createConfig: (profile: LoopbackServerProfile) => ServerConfig,
@@ -208,7 +212,12 @@ export class LocalCollaborationCoordinatorControl implements CollaborationCoordi
       input: Parameters<OperatorControlService["ensureMainOwnedServerProfile"]>[0]
     ) => Promise<void>;
   }) {
-    this.vault = new OperatorCredentialVault({ safeStorage: options.safeStorage });
+    this.vault = new OperatorCredentialVault({
+      safeStorage: options.safeStorage,
+      ...(options.credentialsPath
+        ? { paths: operatorCredentialVaultPaths(options.credentialsPath) }
+        : {})
+    });
     this.projects = options.projects ?? {
       listProjects,
       resolveAuthorityProjectId: async (projectRoot, canvasId) => {

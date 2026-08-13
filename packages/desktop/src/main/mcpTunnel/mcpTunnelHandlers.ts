@@ -21,6 +21,8 @@ import {
   readTunnelClientConfig,
   writeTunnelClientConfig
 } from "./tunnelClientStore.js";
+import type { DesktopCredentialStorage } from "../credentialStorage/applicationCredentialStorage.js";
+import type { CredentialStorageMode } from "../../shared/credentialStorageSettings.js";
 
 const localMcp = new LocalMcpServerManager();
 const tunnelClient = new TunnelClientProcessManager({ onStatusChange: () => void publishStatus() });
@@ -31,8 +33,15 @@ let tunnelId: string | null = null;
 let runtimeApiKey: string | null = null;
 let sessionRuntimeApiKey: string | null = null;
 let encryptedRuntimeApiKey: string | null = null;
+let encryptedRuntimeApiKeys: Partial<Record<CredentialStorageMode, string>> = {};
+let credentialStorageMode: CredentialStorageMode = "system";
 let tunnelAutoStart = false;
 let tunnelClientConfigLoaded = false;
+let credentialStorage: DesktopCredentialStorage = {
+  isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+  encryptString: (value) => safeStorage.encryptString(value),
+  decryptString: (value) => safeStorage.decryptString(value)
+};
 let downloadStatus: TunnelClientDownloadStatus = {
   phase: "idle",
   assetName: null,
@@ -48,7 +57,7 @@ function userDataDir(): string {
 }
 
 function runtimeApiKeyStorageAvailable(): boolean {
-  return safeStorage.isEncryptionAvailable();
+  return credentialStorage.isEncryptionAvailable();
 }
 
 function decryptRuntimeApiKey(value: string | null): string | null {
@@ -56,7 +65,7 @@ function decryptRuntimeApiKey(value: string | null): string | null {
     return null;
   }
   try {
-    const decrypted = safeStorage.decryptString(Buffer.from(value, "base64")).trim();
+    const decrypted = credentialStorage.decryptString(Buffer.from(value, "base64")).trim();
     return decrypted || null;
   } catch {
     return null;
@@ -69,10 +78,10 @@ function encryptRuntimeApiKey(value: string | null): string | null {
   }
   if (!runtimeApiKeyStorageAvailable()) {
     throw new Error(
-      "Electron safeStorage is unavailable, so the runtime API key cannot be persisted securely."
+      "Configured credential storage is unavailable, so the runtime API key cannot be persisted."
     );
   }
-  return safeStorage.encryptString(value).toString("base64");
+  return credentialStorage.encryptString(value).toString("base64");
 }
 
 function hasRestorableRuntimeApiKey(): boolean {
@@ -103,8 +112,18 @@ async function loadTunnelClientConfig(): Promise<void> {
   }
   const config = await readTunnelClientConfig(mcpTunnelConfigStorePaths(userDataDir()));
   tunnelId = config.tunnelId;
-  encryptedRuntimeApiKey = config.encryptedRuntimeApiKey;
+  encryptedRuntimeApiKeys = config.encryptedRuntimeApiKeys ?? {};
+  encryptedRuntimeApiKey =
+    encryptedRuntimeApiKeys[credentialStorageMode] ??
+    (credentialStorageMode === "system" ? config.encryptedRuntimeApiKey : null);
   runtimeApiKey = decryptRuntimeApiKey(encryptedRuntimeApiKey);
+  if (
+    runtimeApiKey &&
+    encryptedRuntimeApiKey &&
+    !encryptedRuntimeApiKeys[credentialStorageMode]
+  ) {
+    encryptedRuntimeApiKeys[credentialStorageMode] = encryptedRuntimeApiKey;
+  }
   tunnelAutoStart = config.autoStart;
   tunnelClientConfigLoaded = true;
   if (envTunnelClientPath) {
@@ -123,15 +142,30 @@ async function loadTunnelClientConfig(): Promise<void> {
 }
 
 async function persistTunnelClientConfig(): Promise<void> {
+  const paths = mcpTunnelConfigStorePaths(userDataDir());
+  const persisted = await readTunnelClientConfig(paths);
+  encryptedRuntimeApiKeys = {
+    ...(persisted.encryptedRuntimeApiKeys ?? {}),
+    ...encryptedRuntimeApiKeys
+  };
+  if (encryptedRuntimeApiKey) {
+    encryptedRuntimeApiKeys[credentialStorageMode] = encryptedRuntimeApiKey;
+  } else if (credentialStorageMode === "system") {
+    delete encryptedRuntimeApiKeys.system;
+  }
   await writeTunnelClientConfig(
     {
       tunnelClientPath,
       verification: tunnelClientVerification,
       tunnelId,
-      encryptedRuntimeApiKey,
+      encryptedRuntimeApiKey:
+        credentialStorageMode === "system"
+          ? encryptedRuntimeApiKey
+          : encryptedRuntimeApiKeys.system ?? persisted.encryptedRuntimeApiKey,
+      encryptedRuntimeApiKeys,
       autoStart: tunnelAutoStart
     },
-    mcpTunnelConfigStorePaths(userDataDir())
+    paths
   );
 }
 
@@ -320,7 +354,12 @@ export async function stopMcpTunnelProcesses(): Promise<void> {
   await publishStatus();
 }
 
-export function registerMcpTunnelHandlers(): void {
+export function registerMcpTunnelHandlers(options: {
+  credentialStorage?: DesktopCredentialStorage;
+  credentialStorageMode?: CredentialStorageMode;
+} = {}): void {
+  if (options.credentialStorage) credentialStorage = options.credentialStorage;
+  if (options.credentialStorageMode) credentialStorageMode = options.credentialStorageMode;
   ipcMain.handle(mcpTunnelInvokeChannels.getMcpTunnelStatus, () => getMcpTunnelStatus());
   ipcMain.handle(mcpTunnelInvokeChannels.downloadTunnelClient, () => downloadTunnelClient());
   ipcMain.handle(mcpTunnelInvokeChannels.setTunnelClientPath, (_event, path: string | null) =>

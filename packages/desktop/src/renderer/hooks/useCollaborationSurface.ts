@@ -23,6 +23,8 @@ import { isCollaborationSessionConnected } from "../collaboration/sessionState";
 export type UseCollaborationSurfaceArgs = {
   /** Active local canvas id (filters assignment pages when set). */
   canvasId?: string | null;
+  /** Active local package project id, used to prevent cross-project Workspace reads. */
+  localProjectId?: string | null;
   api?: PlanWeaveCollaborationApi | null;
   t: ReturnType<typeof createTranslator>;
 };
@@ -49,6 +51,29 @@ export function canUseLocalOwnerDirectWrites(
     lifecycle?.state === "stopped" ||
     (lifecycle?.state === "error" && lifecycle.reason !== "stop_failed")
   );
+}
+
+export function resolveCollaborationSurfaceReadBinding(input: {
+  sessionConnected: boolean;
+  profileId: string | null;
+  profileProjectId: string | null;
+  localProjectId: string | null;
+  canvasId: string | null;
+}): { profileId: string | null; projectId: string | null; canvasId: string | null } {
+  if (!input.sessionConnected || !input.profileId || !input.profileProjectId) {
+    return { profileId: null, projectId: null, canvasId: null };
+  }
+  if (
+    input.canvasId !== null &&
+    (!input.localProjectId || input.localProjectId !== input.profileProjectId)
+  ) {
+    return { profileId: null, projectId: null, canvasId: null };
+  }
+  return {
+    profileId: input.profileId,
+    projectId: input.profileProjectId,
+    canvasId: input.canvasId
+  };
 }
 
 /**
@@ -98,15 +123,20 @@ export function useCollaborationSurface(
     };
   }, [activeProfileIsLocal, activeProfileRevision, api]);
 
-  const profileId = sessionConnected ? (activeProfile?.profileId ?? null) : null;
-  const projectId = sessionConnected ? (activeProfile?.projectId ?? null) : null;
+  const readBinding = resolveCollaborationSurfaceReadBinding({
+    sessionConnected,
+    profileId: activeProfile?.profileId ?? null,
+    profileProjectId: activeProfile?.projectId ?? null,
+    localProjectId: args.localProjectId ?? null,
+    canvasId: args.canvasId ?? null
+  });
 
   // Shell is the sole owner of active project/canvas binding on the shared hub.
   const { snapshot, viewModel, controller } = useCollaborationReadModels({
     api,
-    profileId,
-    projectId,
-    canvasId: args.canvasId ?? null,
+    profileId: readBinding.profileId,
+    projectId: readBinding.projectId,
+    canvasId: readBinding.canvasId,
     manageActiveProject: true
   });
 
