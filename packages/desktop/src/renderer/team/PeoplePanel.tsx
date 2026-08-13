@@ -265,7 +265,7 @@ export function PeoplePanel({
             data-testid="people-panel-disconnected"
           >
             <p className="text-xs text-muted-foreground" role="status">
-              {t("peopleWorkspaceDisconnected")}
+              {t("peopleProjectSessionDisconnected")}
             </p>
             <Button
               type="button"
@@ -320,14 +320,14 @@ export function PeoplePanel({
         : mode === "offline"
           ? t("peopleOffline")
           : t("peopleError");
-  const workspaceStatusText =
+  const projectSessionStatusText =
     presence.sessionPhase === "connected"
-      ? t("peopleWorkspaceConnected")
+      ? t("peopleProjectSessionConnected")
       : presence.sessionPhase === "connecting"
-        ? t("peopleWorkspaceConnecting")
+        ? t("peopleProjectSessionConnecting")
         : presence.sessionPhase === "error"
-          ? t("peopleWorkspaceError")
-          : t("peopleWorkspaceDisconnected");
+          ? t("peopleProjectSessionError")
+          : t("peopleProjectSessionDisconnected");
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="people-panel" data-mode={mode}>
       <div
@@ -356,7 +356,7 @@ export function PeoplePanel({
                       : "bg-muted-foreground/50"
                 }`}
               />
-              {workspaceStatusText}
+              {projectSessionStatusText}
             </span>
           </div>
         </div>

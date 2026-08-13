@@ -431,6 +431,92 @@ describe("CollaborationConnectForm connection diagnostics", () => {
     updatedAt: "2030-01-01T00:00:03.000Z"
   };
 
+  function statusWithWorkspaceIdentity(
+    status: CollaborationStatus["workspaceConnection"]["status"],
+    error: CollaborationStatus["workspaceConnection"]["error"] = null
+  ): CollaborationStatus {
+    return {
+      ...diagnosticStatus,
+      workspaceConnection: {
+        schemaVersion: "workspace-setup/v1",
+        status,
+        profile: {
+          schemaVersion: "workspace-identity/v1",
+          profileId: "profile-windows",
+          displayName: "Apollo Studio",
+          serverBaseUrl: "https://owner-device.example.ts.net/",
+          workspaceId: "workspace-1",
+          allowInsecureTransport: false
+        },
+        workspaceId: "workspace-1",
+        workspaceDisplayName: "Apollo Studio",
+        connectedAt:
+          status === "connected" || status === "reconnecting" ? "2030-01-01T00:00:00.000Z" : null,
+        error
+      }
+    };
+  }
+
+  it.each([
+    ["connected", "Identity verified"],
+    ["disconnected", "Configured · identity verification pending"],
+    ["connecting", "Verifying Workspace identity…"],
+    ["reconnecting", "Re-verifying Workspace identity…"]
+  ] as const)("presents %s as a Workspace identity state", (connectionStatus, expectedLabel) => {
+    render(
+      <CollaborationConnectForm
+        api={joinApi()}
+        status={statusWithWorkspaceIdentity(connectionStatus)}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+
+    expect(screen.getByTestId("people-workspace-current-name")).toHaveTextContent("Apollo Studio");
+    expect(screen.getByTestId("people-workspace-identity-status")).toHaveTextContent(expectedLabel);
+    expect(screen.queryByText("Workspace disconnected")).not.toBeInTheDocument();
+  });
+
+  it("allows a configured Workspace identity to be verified explicitly", async () => {
+    const user = userEvent.setup();
+    const retryWorkspaceConnection = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <CollaborationConnectForm
+        api={{ retryWorkspaceConnection } as unknown as PlanWeaveCollaborationApi}
+        status={statusWithWorkspaceIdentity("disconnected")}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+
+    await user.click(screen.getByTestId("people-workspace-retry"));
+    expect(retryWorkspaceConnection).toHaveBeenCalledOnce();
+  });
+
+  it("shows Workspace identity verification failures without calling them disconnects", () => {
+    render(
+      <CollaborationConnectForm
+        api={joinApi()}
+        status={statusWithWorkspaceIdentity("error", {
+          code: "WORKSPACE_UNAUTHORIZED",
+          message: "The device credential was rejected.",
+          retryable: false
+        })}
+        t={createTranslator("en")}
+        fixedMode="connect"
+      />
+    );
+
+    expect(screen.getByTestId("people-workspace-identity-status")).toHaveTextContent(
+      "Workspace identity verification failed"
+    );
+    expect(screen.getByTestId("people-workspace-connection-error")).toHaveTextContent(
+      "The device credential was rejected."
+    );
+    expect(screen.queryByText("Workspace disconnected")).not.toBeInTheDocument();
+  });
+
   it.each([
     {
       topology: "private_https" as const,

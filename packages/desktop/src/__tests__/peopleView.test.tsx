@@ -79,7 +79,14 @@ describe("PeopleView", () => {
       workspaceConnection: {
         schemaVersion: "workspace-setup/v1",
         status: "connected",
-        profile: null,
+        profile: {
+          schemaVersion: "workspace-identity/v1",
+          profileId: "profile-1",
+          displayName: "Team",
+          serverBaseUrl: "http://127.0.0.1:56584/",
+          workspaceId: "workspace-1",
+          allowInsecureTransport: true
+        },
         workspaceId: "workspace-1",
         workspaceDisplayName: "Team",
         connectedAt: "2030-01-01T00:00:00.000Z",
@@ -261,7 +268,14 @@ describe("PeopleView", () => {
       workspaceConnection: {
         schemaVersion: "workspace-setup/v1",
         status: "connected",
-        profile: null,
+        profile: {
+          schemaVersion: "workspace-identity/v1",
+          profileId: "profile-1",
+          displayName: "Team",
+          serverBaseUrl: "http://127.0.0.1:56584/",
+          workspaceId: "workspace-1",
+          allowInsecureTransport: true
+        },
         workspaceId: "workspace-1",
         workspaceDisplayName: "Team",
         connectedAt: "2030-01-01T00:00:00.000Z",

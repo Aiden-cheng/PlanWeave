@@ -105,6 +105,16 @@ describe("desktop renderer i18n", () => {
     expect(en("defaultTaskAcceptance")).toBe("Task is implemented.");
   });
 
+  it("distinguishes project collaboration from the Workspace management connection", () => {
+    const zh = createTranslator("zh-CN");
+    const en = createTranslator("en");
+
+    expect(zh("peopleProjectSessionConnected")).toBe("项目协作已连接");
+    expect(zh("peopleWorkspaceIdentityPending")).toBe("已配置，等待身份验证");
+    expect(en("peopleProjectSessionConnected")).toBe("Project collaboration connected");
+    expect(en("peopleWorkspaceIdentityPending")).toBe("Configured · identity verification pending");
+  });
+
   it("resolves file manager labels from renderer platform data", () => {
     expect(detectRendererPlatform({ platform: "MacIntel", userAgent: "Mac OS X" })).toBe("darwin");
     expect(detectRendererPlatform({ platform: "Win32", userAgent: "Windows NT" })).toBe("win32");

@@ -60,24 +60,24 @@ function newProfileId(): string {
   return `profile-${Date.now()}`;
 }
 
-function workspaceStatusLabel(
+function workspaceIdentityStatusLabel(
   connection: ActiveWorkspaceConnectionView | null | undefined,
   t: ReturnType<typeof createTranslator>
 ): string {
-  if (!connection) return t("peopleWorkspaceLocalOnly");
+  if (!connection) return t("peopleWorkspaceIdentityMissingHint");
   switch (connection.status) {
     case "local_only":
-      return t("peopleWorkspaceLocalOnly");
+      return t("peopleWorkspaceIdentityMissingHint");
     case "connecting":
-      return t("peopleWorkspaceConnecting");
+      return t("peopleWorkspaceIdentityVerifying");
     case "connected":
-      return t("peopleWorkspaceConnected");
+      return t("peopleWorkspaceIdentityVerified");
     case "reconnecting":
-      return t("peopleWorkspaceReconnecting");
+      return t("peopleWorkspaceIdentityReverifying");
     case "error":
-      return t("peopleWorkspaceError");
+      return t("peopleWorkspaceIdentityError");
     case "disconnected":
-      return t("peopleWorkspaceDisconnected");
+      return t("peopleWorkspaceIdentityPending");
     default:
       return connection.status;
   }
@@ -134,8 +134,7 @@ export function CollaborationConnectForm({
   const workspaceConnected = workspaceConnection?.status === "connected";
   const showConnectionEditor =
     fixedMode !== undefined || !workspaceConnected || connectionEditorOpen;
-  const workspaceServerBaseUrl =
-    workspaceConnection?.profile?.serverBaseUrl ?? activeProfile?.serverBaseUrl ?? null;
+  const workspaceServerBaseUrl = workspaceConnection?.profile?.serverBaseUrl ?? null;
   const workspacePickerItems: WorkspacePickerItem[] = status?.workspacePicker?.items ?? [];
   const diagnosticReport =
     status && diagnosticsEnabled ? buildCollaborationDiagnosticReport(status) : null;
@@ -259,7 +258,7 @@ export function CollaborationConnectForm({
         await api.connectCollaborationSession({ profileId: activeProfile.profileId });
         if (workspaceConnectError) {
           setInfo(
-            `${t("peopleWorkspaceError")}: ${collaborationConnectionErrorMessage(t, workspaceConnectError)}`
+            `${t("peopleWorkspaceIdentityError")}: ${collaborationConnectionErrorMessage(t, workspaceConnectError)}`
           );
         }
         await onConnected?.();
@@ -438,11 +437,17 @@ export function CollaborationConnectForm({
                 }`}
               />
               <div className="min-w-0">
-                <div className="font-semibold text-text-strong">
-                  {workspaceStatusLabel(workspaceConnection, t)}
+                <div
+                  className="font-semibold text-text-strong"
+                  data-testid="people-workspace-current-name"
+                >
+                  {workspaceConnection?.workspaceDisplayName ?? t("peopleWorkspaceIdentityMissing")}
                 </div>
-                <div className="mt-0.5 truncate text-sm text-text-muted">
-                  {workspaceConnection?.workspaceDisplayName ?? t("peopleWorkspaceLocalOnlyHint")}
+                <div
+                  className="mt-0.5 truncate text-sm text-text-muted"
+                  data-testid="people-workspace-identity-status"
+                >
+                  {workspaceIdentityStatusLabel(workspaceConnection, t)}
                 </div>
                 {workspaceServerBaseUrl ? (
                   <div className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -460,7 +465,8 @@ export function CollaborationConnectForm({
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              {workspaceConnection?.status === "error" && workspaceConnection.error?.retryable ? (
+              {workspaceConnection?.status === "disconnected" ||
+              (workspaceConnection?.status === "error" && workspaceConnection.error?.retryable) ? (
                 <Button
                   type="button"
                   size="sm"
@@ -469,7 +475,7 @@ export function CollaborationConnectForm({
                   disabled={busy || !api}
                   onClick={() => void retryWorkspace()}
                 >
-                  {t("peopleWorkspaceRetry")}
+                  {t("peopleWorkspaceIdentityRetry")}
                 </Button>
               ) : null}
               {workspaceConnected && !fixedMode ? (
@@ -482,8 +488,8 @@ export function CollaborationConnectForm({
                   onClick={toggleConnectionEditor}
                 >
                   {connectionEditorOpen
-                    ? t("peopleWorkspaceHideConnection")
-                    : t("peopleWorkspaceChangeConnection")}
+                    ? t("peopleWorkspaceCancelSwitch")
+                    : t("peopleWorkspaceSwitch")}
                 </Button>
               ) : null}
             </div>

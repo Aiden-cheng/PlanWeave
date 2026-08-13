@@ -154,7 +154,7 @@ describe("PeoplePanel", () => {
     expect(screen.getByTestId("people-presence-summary")).toHaveTextContent("2 members");
     expect(screen.getByTestId("people-presence-summary")).not.toHaveTextContent("host");
     expect(screen.getByTestId("people-workspace-summary")).toHaveTextContent(
-      "Connected to Workspace"
+      "Project collaboration connected"
     );
     expect(screen.getAllByTestId("people-member-devices-toggle")).toHaveLength(2);
     expect(screen.getByText("Login devices (1)")).toBeVisible();
