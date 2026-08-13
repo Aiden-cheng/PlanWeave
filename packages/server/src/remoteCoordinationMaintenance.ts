@@ -5,11 +5,13 @@ export class RemoteCoordinationMaintenance {
 
   constructor(
     private readonly reconcile: () => Promise<unknown>,
-    private readonly intervalMs: number
+    private readonly intervalMs: number,
+    private readonly maintain?: () => void
   ) {}
 
   start(): void {
     if (this.timer) return;
+    this.maintain?.();
     this.timer = setInterval(() => {
       void this.run().catch((error: unknown) => {
         this.failure = error;
@@ -27,7 +29,9 @@ export class RemoteCoordinationMaintenance {
 
   private async run(): Promise<void> {
     if (this.running) return this.running;
-    this.running = this.reconcile().then(() => undefined);
+    this.running = this.reconcile().then(() => {
+      this.maintain?.();
+    });
     try {
       await this.running;
     } catch (error) {

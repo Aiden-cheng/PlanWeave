@@ -37,7 +37,7 @@ describe("SQLite exposure lease store", () => {
     const database = await openServerDatabase(":memory:", 5_000);
     databases.push(database);
     applyMigrations(database);
-    expect(latestCentralSchemaVersion).toBe(48);
+    expect(latestCentralSchemaVersion).toBe(49);
 
     const store = new SqliteExposureLeaseStore(database);
     expect(store.load()).toBeNull();

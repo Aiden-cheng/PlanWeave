@@ -21,6 +21,7 @@ import { remoteAttemptCancellationMigration } from "./remoteAttemptCancellation.
 import { stockHostFleetMigration } from "./stockHostFleet.js";
 import { hostCredentialLifecycleMigration } from "./hostCredentialLifecycle.js";
 import { hostInstallationIdentityMigration } from "./hostInstallationIdentity.js";
+import { remoteOperationRetentionMigration } from "./remoteOperationRetention.js";
 import type { Migration, MigrationModule } from "./types.js";
 
 const identityModule: MigrationModule = { name: "identity", migrations: identityMigrations };
@@ -54,7 +55,8 @@ export const migrationModules: readonly MigrationModule[] = [
   { name: "remote-attempt-cancellation", migrations: [remoteAttemptCancellationMigration] },
   { name: "stock-host-fleet", migrations: [stockHostFleetMigration] },
   { name: "host-credential-lifecycle", migrations: [hostCredentialLifecycleMigration] },
-  { name: "host-installation-identity", migrations: [hostInstallationIdentityMigration] }
+  { name: "host-installation-identity", migrations: [hostInstallationIdentityMigration] },
+  { name: "remote-operation-retention", migrations: [remoteOperationRetentionMigration] }
 ];
 
 const flattened = migrationModules.flatMap((module) => module.migrations);

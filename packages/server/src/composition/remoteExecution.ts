@@ -25,6 +25,7 @@ import {
   RuntimeInputArtifactMaterializer
 } from "../runtimeArtifactAdapter.js";
 import type { HumanIdentityRepository } from "../identity/index.js";
+import { RemoteOperationRetention } from "../remoteOperationRetention.js";
 
 export function createRemoteCoordinationOptions(input: {
   config: ServerConfig;
@@ -262,9 +263,11 @@ export function createRemoteExecutionComposition(input: {
       });
     },
     createMaintenance() {
+      const retention = new RemoteOperationRetention(input.database, input.clock);
       return new RemoteCoordinationMaintenance(
         () => input.coordination.reconcile(),
-        input.config.limits.heartbeatIntervalMs
+        input.config.limits.heartbeatIntervalMs,
+        () => retention.compactBatch()
       );
     }
   };

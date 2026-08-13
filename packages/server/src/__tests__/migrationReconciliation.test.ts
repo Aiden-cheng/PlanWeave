@@ -168,9 +168,10 @@ describe("collaboration migration reconciliation", () => {
       { name: "remote-attempt-cancellation", versions: [45] },
       { name: "stock-host-fleet", versions: [46] },
       { name: "host-credential-lifecycle", versions: [47] },
-      { name: "host-installation-identity", versions: [48] }
+      { name: "host-installation-identity", versions: [48] },
+      { name: "remote-operation-retention", versions: [49] }
     ]);
-    expect(latestCentralSchemaVersion).toBe(48);
+    expect(latestCentralSchemaVersion).toBe(49);
   });
 
   it("maps a representative v26 project to one stable Workspace and package registry key", async () => {
