@@ -11,6 +11,8 @@ export {
 export {
   TailscaleCliAdapter,
   TAILSCALE_MINIMUM_STABLE_MINOR,
+  type TailscaleCliAdapterOptions,
+  type TailscaleExecFileOptions,
   type TailscaleExecFileResult,
   type TailscaleExecFileRunner
 } from "./tailscaleCliAdapter.js";

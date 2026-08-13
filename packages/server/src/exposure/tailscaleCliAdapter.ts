@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { win32 as windowsPath } from "node:path";
 import { z } from "zod";
 import { tailscaleExposureFailure } from "./errors.js";
 import type {
@@ -18,11 +19,18 @@ const execOptions = {
 };
 
 export type TailscaleExecFileResult = { stdout: string; stderr: string };
+export type TailscaleExecFileOptions = typeof execOptions & { forceCliMode?: boolean };
 export type TailscaleExecFileRunner = (
   file: string,
   args: readonly string[],
-  options: typeof execOptions
+  options: TailscaleExecFileOptions
 ) => Promise<TailscaleExecFileResult>;
+
+export type TailscaleCliAdapterOptions = {
+  executable?: string;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+};
 
 const versionSchema = z
   .object({
@@ -58,17 +66,64 @@ export const TAILSCALE_MINIMUM_STABLE_MINOR = 52;
 function defaultExecFileRunner(
   file: string,
   args: readonly string[],
-  options: typeof execOptions
+  options: TailscaleExecFileOptions
 ): Promise<TailscaleExecFileResult> {
+  const { forceCliMode, ...childOptions } = options;
   return new Promise((resolve, reject) => {
-    execFile(file, [...args], options, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
+    execFile(
+      file,
+      [...args],
+      forceCliMode
+        ? {
+            ...childOptions,
+            env: { ...process.env, TAILSCALE_BE_CLI: "1" }
+          }
+        : childOptions,
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
       }
-      resolve({ stdout, stderr });
-    });
+    );
   });
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.length > 0))];
+}
+
+function windowsProgramFiles(env: NodeJS.ProcessEnv): string | null {
+  return env.ProgramW6432 ?? env.ProgramFiles ?? env.PROGRAMFILES ?? null;
+}
+
+function executableCandidates(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): readonly string[] {
+  if (platform === "darwin") {
+    return [
+      "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+      "/usr/local/bin/tailscale",
+      "tailscale"
+    ];
+  }
+  if (platform === "win32") {
+    const programFiles = windowsProgramFiles(env);
+    return unique([
+      "tailscale.exe",
+      programFiles ? windowsPath.join(programFiles, "Tailscale", "tailscale.exe") : ""
+    ]);
+  }
+  if (platform === "linux") {
+    return ["tailscale", "/usr/bin/tailscale", "/usr/local/bin/tailscale"];
+  }
+  return ["tailscale"];
+}
+
+function isMissingExecutable(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
 }
 
 function sha256(value: string): string {
@@ -155,63 +210,60 @@ function safeCommandCause(error: unknown): Error {
 }
 
 export class TailscaleCliAdapter implements TailscaleControlPort {
+  private readonly candidates: readonly string[];
+  private readonly commandOptions: TailscaleExecFileOptions;
+  private resolvedExecutable: string | null = null;
+
   constructor(
     private readonly run: TailscaleExecFileRunner = defaultExecFileRunner,
-    private readonly executable = "tailscale"
-  ) {}
+    options: string | TailscaleCliAdapterOptions = {}
+  ) {
+    const normalized = typeof options === "string" ? { executable: options } : options;
+    const platform = normalized.platform ?? process.platform;
+    this.candidates = normalized.executable
+      ? [normalized.executable]
+      : executableCandidates(platform, normalized.env ?? process.env);
+    this.commandOptions = { ...execOptions, forceCliMode: platform === "darwin" };
+  }
+
+  private async execute(args: readonly string[]): Promise<TailscaleExecFileResult> {
+    const candidates = this.resolvedExecutable
+      ? unique([this.resolvedExecutable, ...this.candidates])
+      : this.candidates;
+    for (const executable of candidates) {
+      try {
+        const result = await this.run(executable, args, this.commandOptions);
+        this.resolvedExecutable = executable;
+        return result;
+      } catch (error) {
+        if (isMissingExecutable(error)) {
+          if (this.resolvedExecutable === executable) this.resolvedExecutable = null;
+          continue;
+        }
+        throw tailscaleExposureFailure("TAILSCALE_COMMAND_FAILED", safeCommandCause(error));
+      }
+    }
+    throw tailscaleExposureFailure("TAILSCALE_NOT_INSTALLED");
+  }
 
   async inspectNode(): Promise<TailscaleNodeState> {
-    let versionOutput: TailscaleExecFileResult;
-    try {
-      versionOutput = await this.run(this.executable, ["version", "--json"], execOptions);
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        throw tailscaleExposureFailure("TAILSCALE_NOT_INSTALLED");
-      }
-      throw tailscaleExposureFailure("TAILSCALE_COMMAND_FAILED", safeCommandCause(error));
-    }
+    const versionOutput = await this.execute(["version", "--json"]);
     const version = parseVersion(versionOutput.stdout);
-    try {
-      const status = await this.run(
-        this.executable,
-        ["status", "--json", "--peers=false"],
-        execOptions
-      );
-      return parseNodeStatus(status.stdout, version);
-    } catch (error) {
-      if (error instanceof Error && error.name === "TailscaleExposureError") throw error;
-      throw tailscaleExposureFailure("TAILSCALE_COMMAND_FAILED", safeCommandCause(error));
-    }
+    const status = await this.execute(["status", "--json", "--peers=false"]);
+    return parseNodeStatus(status.stdout, version);
   }
 
   async inspectServe(): Promise<TailscaleServeState> {
-    try {
-      const result = await this.run(this.executable, ["serve", "status", "--json"], execOptions);
-      return parseServeState(result.stdout);
-    } catch (error) {
-      if (error instanceof Error && error.name === "TailscaleExposureError") throw error;
-      throw tailscaleExposureFailure("TAILSCALE_COMMAND_FAILED", safeCommandCause(error));
-    }
+    const result = await this.execute(["serve", "status", "--json"]);
+    return parseServeState(result.stdout);
   }
 
   async ensurePrivateHttps(input: PrivateHttpsRequest): Promise<TailscaleServeState> {
-    try {
-      await this.run(
-        this.executable,
-        ["serve", "--bg", "--https=443", input.backendOrigin],
-        execOptions
-      );
-    } catch (error) {
-      throw tailscaleExposureFailure("TAILSCALE_COMMAND_FAILED", safeCommandCause(error));
-    }
+    await this.execute(["serve", "--bg", "--https=443", input.backendOrigin]);
     return this.inspectServe();
   }
 
   async releasePrivateHttps(_lease: TailscaleServeLease): Promise<void> {
-    try {
-      await this.run(this.executable, ["serve", "--https=443", "--set-path=/", "off"], execOptions);
-    } catch (error) {
-      throw tailscaleExposureFailure("TAILSCALE_COMMAND_FAILED", safeCommandCause(error));
-    }
+    await this.execute(["serve", "--https=443", "--set-path=/", "off"]);
   }
 }

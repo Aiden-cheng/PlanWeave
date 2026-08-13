@@ -30,6 +30,11 @@ const serveConfig = {
 
 type Call = { file: string; args: readonly string[]; options: unknown };
 
+const missingExecutable = () =>
+  Object.assign(new Error("missing tailscale executable"), {
+    code: "ENOENT"
+  });
+
 function queuedRunner(outputs: Array<{ stdout?: unknown; error?: unknown }>): {
   run: TailscaleExecFileRunner;
   calls: Call[];
@@ -48,17 +53,122 @@ function queuedRunner(outputs: Array<{ stdout?: unknown; error?: unknown }>): {
   return { run, calls };
 }
 
+function testAdapter(run: TailscaleExecFileRunner): TailscaleCliAdapter {
+  return new TailscaleCliAdapter(run, { executable: "tailscale", platform: "linux", env: {} });
+}
+
 function errorCode(error: unknown): string | undefined {
   return error instanceof TailscaleExposureError ? error.code : undefined;
 }
 
 describe("TailscaleCliAdapter", () => {
+  it("finds the bundled macOS CLI outside PATH and forces CLI mode", async () => {
+    const fake = queuedRunner([
+      { stdout: { majorMinorPatch: "1.102.1" } },
+      { stdout: healthyStatus }
+    ]);
+    const adapter = new TailscaleCliAdapter(fake.run, {
+      platform: "darwin",
+      env: {}
+    });
+
+    await expect(adapter.inspectNode()).resolves.toMatchObject({ version: "1.102.1" });
+    expect(fake.calls).toEqual([
+      expect.objectContaining({
+        file: "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        args: ["version", "--json"],
+        options: expect.objectContaining({ forceCliMode: true })
+      }),
+      expect.objectContaining({
+        file: "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        args: ["status", "--json", "--peers=false"],
+        options: expect.objectContaining({ forceCliMode: true })
+      })
+    ]);
+  });
+
+  it("falls back to the installed macOS CLI integration when the app bundle is absent", async () => {
+    const fake = queuedRunner([
+      { error: missingExecutable() },
+      { stdout: { majorMinorPatch: "1.102.1" } },
+      { stdout: healthyStatus }
+    ]);
+    const adapter = new TailscaleCliAdapter(fake.run, {
+      platform: "darwin",
+      env: {}
+    });
+
+    await expect(adapter.inspectNode()).resolves.toMatchObject({ version: "1.102.1" });
+    expect(fake.calls.map((call) => call.file)).toEqual([
+      "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+      "/usr/local/bin/tailscale",
+      "/usr/local/bin/tailscale"
+    ]);
+  });
+
+  it("finds Windows Tailscale after a GUI process inherits a stale PATH", async () => {
+    const fake = queuedRunner([
+      { error: missingExecutable() },
+      { stdout: { majorMinorPatch: "1.102.1" } },
+      { stdout: healthyStatus }
+    ]);
+    const adapter = new TailscaleCliAdapter(fake.run, {
+      platform: "win32",
+      env: { ProgramFiles: "C:\\Program Files" }
+    });
+
+    await expect(adapter.inspectNode()).resolves.toMatchObject({ version: "1.102.1" });
+    expect(fake.calls.map((call) => call.file)).toEqual([
+      "tailscale.exe",
+      "C:\\Program Files\\Tailscale\\tailscale.exe",
+      "C:\\Program Files\\Tailscale\\tailscale.exe"
+    ]);
+    expect(fake.calls[0]?.options).toEqual(expect.objectContaining({ forceCliMode: false }));
+  });
+
+  it("falls back to the standard Linux package path", async () => {
+    const fake = queuedRunner([
+      { error: missingExecutable() },
+      { stdout: { majorMinorPatch: "1.102.1" } },
+      { stdout: healthyStatus }
+    ]);
+    const adapter = new TailscaleCliAdapter(fake.run, {
+      platform: "linux",
+      env: {}
+    });
+
+    await expect(adapter.inspectNode()).resolves.toMatchObject({ version: "1.102.1" });
+    expect(fake.calls.map((call) => call.file)).toEqual([
+      "tailscale",
+      "/usr/bin/tailscale",
+      "/usr/bin/tailscale"
+    ]);
+  });
+
+  it("does not hide an installed candidate failure behind another executable", async () => {
+    const fake = queuedRunner([
+      {
+        error: Object.assign(new Error("Tailscale command failed"), { code: "EPERM" })
+      },
+      { stdout: { majorMinorPatch: "1.102.1" } }
+    ]);
+    const adapter = new TailscaleCliAdapter(fake.run, {
+      platform: "darwin",
+      env: {}
+    });
+
+    await expect(adapter.inspectNode()).rejects.toMatchObject({ code: "TAILSCALE_COMMAND_FAILED" });
+    expect(fake.calls.map((call) => call.file)).toEqual([
+      "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+    ]);
+  });
+
   it("uses fixed structured argv and returns a redacted node identity", async () => {
     const fake = queuedRunner([
       { stdout: { majorMinorPatch: "1.52.0", Extra: "accepted" } },
       { stdout: { ...healthyStatus, Services: { metadata: true } } }
     ]);
-    const adapter = new TailscaleCliAdapter(fake.run);
+    const adapter = testAdapter(fake.run);
 
     await expect(adapter.inspectNode()).resolves.toEqual({
       version: "1.52.0",
@@ -73,7 +183,8 @@ describe("TailscaleCliAdapter", () => {
           encoding: "utf8",
           timeout: 5_000,
           maxBuffer: 1024 * 1024,
-          windowsHide: true
+          windowsHide: true,
+          forceCliMode: false
         }
       },
       {
@@ -83,7 +194,8 @@ describe("TailscaleCliAdapter", () => {
           encoding: "utf8",
           timeout: 5_000,
           maxBuffer: 1024 * 1024,
-          windowsHide: true
+          windowsHide: true,
+          forceCliMode: false
         }
       }
     ]);
@@ -96,7 +208,7 @@ describe("TailscaleCliAdapter", () => {
     [{ BackendState: "NeedsMachineAuth" }, "TAILSCALE_MACHINE_AUTH_REQUIRED"]
   ])("fails closed for node state %#", async (status, code) => {
     const fake = queuedRunner([{ stdout: { majorMinorPatch: "1.80.1" } }, { stdout: status }]);
-    await expect(new TailscaleCliAdapter(fake.run).inspectNode()).rejects.toSatisfy(
+    await expect(testAdapter(fake.run).inspectNode()).rejects.toSatisfy(
       (error: unknown) => errorCode(error) === code
     );
   });
@@ -114,7 +226,7 @@ describe("TailscaleCliAdapter", () => {
         }
       }
     ]);
-    await expect(new TailscaleCliAdapter(noMagicDns.run).inspectNode()).rejects.toMatchObject({
+    await expect(testAdapter(noMagicDns.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_MAGIC_DNS_UNAVAILABLE"
     });
 
@@ -122,7 +234,7 @@ describe("TailscaleCliAdapter", () => {
       { stdout: { majorMinorPatch: "1.80.1" } },
       { stdout: { ...healthyStatus, CertDomains: [] } }
     ]);
-    await expect(new TailscaleCliAdapter(noCertificate.run).inspectNode()).rejects.toMatchObject({
+    await expect(testAdapter(noCertificate.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_HTTPS_UNAVAILABLE"
     });
 
@@ -130,9 +242,7 @@ describe("TailscaleCliAdapter", () => {
       { stdout: { majorMinorPatch: "1.102.1" } },
       { stdout: { ...healthyStatus, CertDomains: null } }
     ]);
-    await expect(
-      new TailscaleCliAdapter(nullCertificateDomains.run).inspectNode()
-    ).rejects.toMatchObject({
+    await expect(testAdapter(nullCertificateDomains.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_HTTPS_UNAVAILABLE"
     });
   });
@@ -149,7 +259,7 @@ describe("TailscaleCliAdapter", () => {
       { stdout: { majorMinorPatch: version } },
       { stdout: healthyStatus }
     ]);
-    await expect(new TailscaleCliAdapter(fake.run).inspectNode()).resolves.toMatchObject({
+    await expect(testAdapter(fake.run).inspectNode()).resolves.toMatchObject({
       version
     });
   });
@@ -163,7 +273,7 @@ describe("TailscaleCliAdapter", () => {
     "dev"
   ])("rejects unsupported version %s", async (version) => {
     const fake = queuedRunner([{ stdout: { majorMinorPatch: version } }]);
-    await expect(new TailscaleCliAdapter(fake.run).inspectNode()).rejects.toMatchObject({
+    await expect(testAdapter(fake.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_VERSION_UNSUPPORTED"
     });
     expect(fake.calls).toHaveLength(1);
@@ -171,7 +281,7 @@ describe("TailscaleCliAdapter", () => {
 
   it("rejects the non-contract uppercase version key", async () => {
     const fake = queuedRunner([{ stdout: { MajorMinorPatch: "1.98.9" } }]);
-    await expect(new TailscaleCliAdapter(fake.run).inspectNode()).rejects.toMatchObject({
+    await expect(testAdapter(fake.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_JSON_INVALID"
     });
     expect(fake.calls).toHaveLength(1);
@@ -185,7 +295,7 @@ describe("TailscaleCliAdapter", () => {
         })
       }
     ]);
-    await expect(new TailscaleCliAdapter(missing.run).inspectNode()).rejects.toMatchObject({
+    await expect(testAdapter(missing.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_NOT_INSTALLED",
       message: "Tailscale CLI is not installed."
     });
@@ -198,7 +308,9 @@ describe("TailscaleCliAdapter", () => {
         )
       }
     ]);
-    const error = await new TailscaleCliAdapter(failed.run).inspectNode().catch((caught) => caught);
+    const error = await testAdapter(failed.run)
+      .inspectNode()
+      .catch((caught) => caught);
     expect(error).toMatchObject({ code: "TAILSCALE_COMMAND_FAILED" });
     expect(String(error)).not.toMatch(/secret-token|login\.example|Users\/alice/);
     expect(String(error.cause)).toBe("Error: tailscale_cli_failure:EPERM");
@@ -206,19 +318,19 @@ describe("TailscaleCliAdapter", () => {
 
   it("rejects malformed or structurally incomplete JSON without text fallback", async () => {
     const malformed = queuedRunner([{ stdout: "not-json: NeedsLogin" }]);
-    await expect(new TailscaleCliAdapter(malformed.run).inspectNode()).rejects.toMatchObject({
+    await expect(testAdapter(malformed.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_JSON_INVALID"
     });
 
     const incomplete = queuedRunner([{ stdout: { Long: "1.80.1" } }]);
-    await expect(new TailscaleCliAdapter(incomplete.run).inspectNode()).rejects.toMatchObject({
+    await expect(testAdapter(incomplete.run).inspectNode()).rejects.toMatchObject({
       code: "TAILSCALE_JSON_INVALID"
     });
   });
 
   it("accepts null Serve status and structured configs with unknown fields", async () => {
     const none = queuedRunner([{ stdout: null }]);
-    await expect(new TailscaleCliAdapter(none.run).inspectServe()).resolves.toEqual({
+    await expect(testAdapter(none.run).inspectServe()).resolves.toEqual({
       config: null
     });
 
@@ -251,14 +363,14 @@ describe("TailscaleCliAdapter", () => {
       UnknownMetadata: { revision: 4 }
     };
     const configured = queuedRunner([{ stdout: opaque }]);
-    await expect(new TailscaleCliAdapter(configured.run).inspectServe()).resolves.toEqual({
+    await expect(testAdapter(configured.run).inspectServe()).resolves.toEqual({
       config: { raw: opaque }
     });
   });
 
   it("uses only the fixed create and exact release commands", async () => {
     const fake = queuedRunner([{ stdout: "" }, { stdout: serveConfig }, { stdout: "" }]);
-    const adapter = new TailscaleCliAdapter(fake.run);
+    const adapter = testAdapter(fake.run);
     await adapter.ensurePrivateHttps({
       advertisedOrigin: "https://planweave.example.ts.net",
       backendOrigin: "http://127.0.0.1:7443"
