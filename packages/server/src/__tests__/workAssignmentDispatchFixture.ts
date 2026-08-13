@@ -280,7 +280,7 @@ export async function setup(
       });
     },
     rebuildCoordination(checkpoints?: RemoteCoordinatorCheckpointPort) {
-      // New coordinator instance drops in-memory hostSelectionByOperation (process restart).
+      // A new coordinator simulates process restart; Host selection must recover from the durable operation snapshot.
       coordination = buildCoordination(checkpoints);
       return coordination;
     },

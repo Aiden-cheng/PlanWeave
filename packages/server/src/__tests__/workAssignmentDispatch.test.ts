@@ -866,6 +866,11 @@ describe("assignment × dispatch integration (HC-002#B-003)", () => {
       selection: "exact",
       assignmentRevision: 1
     });
+
+    fixture.server.database
+      .prepare("UPDATE remote_operations SET host_selection_json=NULL WHERE id=?")
+      .run(partial.id);
+    expect(restarted.coordinator.getAuthorizedHostSelection(partial.id)).toBeUndefined();
   });
 });
 

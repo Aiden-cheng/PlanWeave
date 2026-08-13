@@ -158,11 +158,6 @@ function buildEnvelope(
 }
 
 export class RemoteBlockCoordinator {
-  /**
-   * Per-operation Host selection authorized at dispatch begin.
-   * Assignment and dispatch remain separate operations: reassignment does not rewrite this map.
-   */
-  private readonly hostSelectionByOperation = new Map<string, DispatchHostSelectionSnapshot>();
   private actionsCoordinator: RemoteBlockActionCoordinator | undefined;
 
   constructor(private readonly options: RemoteBlockCoordinatorOptions) {}
@@ -208,12 +203,7 @@ export class RemoteBlockCoordinator {
    * Same-attempt reenter never re-derives from a later assignment; retry_new_attempt does.
    */
   getAuthorizedHostSelection(operationId: string): DispatchHostSelectionSnapshot | undefined {
-    const durable = this.options.operations.get(operationId)?.hostSelection;
-    if (durable) {
-      this.hostSelectionByOperation.set(operationId, durable);
-      return durable;
-    }
-    return this.hostSelectionByOperation.get(operationId);
+    return this.options.operations.get(operationId)?.hostSelection;
   }
 
   async dispatch(request: RemoteEndpointDispatchRequest): Promise<RemoteDispatchOutcome> {
@@ -1018,9 +1008,8 @@ export class RemoteBlockCoordinator {
     operation: RemoteOperation,
     candidate: RemoteBlockDispatchCandidate
   ): string | undefined {
-    const durable = operation.hostSelection ?? this.hostSelectionByOperation.get(operation.id);
+    const durable = operation.hostSelection;
     if (durable) {
-      this.hostSelectionByOperation.set(operation.id, durable);
       return durable.preferredHostId;
     }
     if (!this.options.assignmentGate) {
@@ -1046,9 +1035,13 @@ export class RemoteBlockCoordinator {
         : {})
     });
     const persisted = this.options.operations.persistHostSelection(operation.id, snapshot);
-    const authorized = persisted.hostSelection ?? snapshot;
-    this.hostSelectionByOperation.set(operation.id, authorized);
-    return authorized.preferredHostId;
+    if (!persisted.hostSelection) {
+      return this.recordInconsistency(
+        persisted,
+        "Host selection was not persisted for an actionable remote operation."
+      );
+    }
+    return persisted.hostSelection.preferredHostId;
   }
 
   private snapshotEndpoint(
