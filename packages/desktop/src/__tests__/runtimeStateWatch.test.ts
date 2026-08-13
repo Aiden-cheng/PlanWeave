@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +58,30 @@ const fsMock = vi.hoisted(() => {
   };
 });
 
+const fsPromisesMock = vi.hoisted(() => {
+  const state = {
+    activeReadFiles: 0,
+    failStat: false,
+    maxActiveReadFiles: 0,
+    readFileCalls: 0,
+    readFileHook: null as null | ((path: string) => Buffer | Promise<Buffer> | undefined),
+    readFileResultHook: null as null | ((path: string) => void),
+    statResultHook: null as null | ((path: string) => void)
+  };
+  return {
+    state,
+    reset() {
+      state.activeReadFiles = 0;
+      state.failStat = false;
+      state.maxActiveReadFiles = 0;
+      state.readFileCalls = 0;
+      state.readFileHook = null;
+      state.readFileResultHook = null;
+      state.statResultHook = null;
+    }
+  };
+});
+
 const runtimeMock = vi.hoisted(() => {
   const state = {
     workspace: null as TestWorkspace | null
@@ -85,11 +109,52 @@ vi.mock("node:fs", async () => {
   };
 });
 
+vi.mock("node:fs/promises", async () => {
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  return {
+    ...actual,
+    readFile: async (path: Parameters<typeof actual.readFile>[0]) => {
+      const normalizedPath = String(path);
+      fsPromisesMock.state.readFileCalls += 1;
+      fsPromisesMock.state.activeReadFiles += 1;
+      fsPromisesMock.state.maxActiveReadFiles = Math.max(
+        fsPromisesMock.state.maxActiveReadFiles,
+        fsPromisesMock.state.activeReadFiles
+      );
+      try {
+        const hooked = fsPromisesMock.state.readFileHook?.(normalizedPath);
+        const result = hooked === undefined ? await actual.readFile(path) : await hooked;
+        fsPromisesMock.state.readFileResultHook?.(normalizedPath);
+        return result;
+      } finally {
+        fsPromisesMock.state.activeReadFiles -= 1;
+      }
+    },
+    stat: async (path: Parameters<typeof actual.stat>[0]) => {
+      const normalizedPath = String(path);
+      if (fsPromisesMock.state.failStat) {
+        throw new Error("simulated stat failure");
+      }
+      const result = await actual.stat(path);
+      fsPromisesMock.state.statResultHook?.(normalizedPath);
+      return result;
+    }
+  };
+});
+
 vi.mock("@planweave-ai/runtime", () => ({
   resolveTaskCanvasWorkspace: runtimeMock.resolveTaskCanvasWorkspace
 }));
 
 const tempRoots: string[] = [];
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 async function createWorkspace(): Promise<TestWorkspace> {
   const rootPath = await mkdtemp(join(tmpdir(), "planweave-runtime-state-watch-"));
@@ -146,15 +211,49 @@ async function flushDebounce(): Promise<void> {
   }
 }
 
+async function flushMicrotasks(): Promise<void> {
+  for (let index = 0; index < 10; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+async function advanceUntilStateStat(ms: number, stateFile: string): Promise<void> {
+  const completed = createDeferred<void>();
+  fsPromisesMock.state.statResultHook = (path) => {
+    if (path === stateFile) {
+      completed.resolve();
+    }
+  };
+  await vi.advanceTimersByTimeAsync(ms);
+  await completed.promise;
+  fsPromisesMock.state.statResultHook = null;
+  await flushMicrotasks();
+}
+
+async function advanceUntilFingerprint(ms: number, stateFile: string): Promise<void> {
+  const completed = createDeferred<void>();
+  let contentRead = false;
+  fsPromisesMock.state.readFileResultHook = (path) => {
+    if (path === stateFile) {
+      contentRead = true;
+    }
+  };
+  fsPromisesMock.state.statResultHook = (path) => {
+    if (path === stateFile && contentRead) {
+      completed.resolve();
+    }
+  };
+  await vi.advanceTimersByTimeAsync(ms);
+  await completed.promise;
+  fsPromisesMock.state.readFileResultHook = null;
+  fsPromisesMock.state.statResultHook = null;
+  await flushMicrotasks();
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-async function waitForPollAndDebounce(): Promise<void> {
-  await wait(1250);
-  await wait(250);
 }
 
 describe("runtime state watcher", () => {
@@ -165,6 +264,7 @@ describe("runtime state watcher", () => {
     electronMock.ipcMain.handle.mockClear();
     fsMock.watchers.length = 0;
     fsMock.watch.mockClear();
+    fsPromisesMock.reset();
     runtimeMock.state.workspace = null;
     runtimeMock.resolveTaskCanvasWorkspace.mockClear();
   });
@@ -240,8 +340,7 @@ describe("runtime state watcher", () => {
     expect(webContents.send).not.toHaveBeenCalled();
   });
 
-  it("polling fallback detects same-size state file edits", async () => {
-    vi.useRealTimers();
+  it("polling fallback detects metadata changes without hashing unchanged ticks", async () => {
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     fsMock.watch.mockImplementationOnce(() => {
@@ -249,10 +348,17 @@ describe("runtime state watcher", () => {
     });
 
     await registerAndWatch(webContents, workspace);
-    const before = await stat(workspace.stateFile);
-    await writeFile(workspace.stateFile, JSON.stringify({ version: 2, tasks: {} }), "utf8");
-    await utimes(workspace.stateFile, before.atime, before.mtime);
-    await waitForPollAndDebounce();
+    fsPromisesMock.state.readFileCalls = 0;
+    await advanceUntilStateStat(1000, workspace.stateFile);
+    expect(fsPromisesMock.state.readFileCalls).toBe(0);
+
+    await writeFile(
+      workspace.stateFile,
+      JSON.stringify({ version: 2, tasks: { "T-001": "completed" } }),
+      "utf8"
+    );
+    await advanceUntilStateStat(1000, workspace.stateFile);
+    await advanceUntilFingerprint(150, workspace.stateFile);
 
     expect(webContents.send).toHaveBeenCalledWith(
       runtimeStateChangedChannel,
@@ -262,5 +368,214 @@ describe("runtime state watcher", () => {
         stateFile: workspace.stateFile
       })
     );
+    expect(fsPromisesMock.state.readFileCalls).toBe(1);
+  });
+
+  it("polling hash sweep detects same-size same-mtime edits", async () => {
+    const workspace = await createWorkspace();
+    const webContents = createWebContents();
+    const pinned = new Date("2020-01-01T00:00:00.000Z");
+    await utimes(workspace.stateFile, pinned, pinned);
+    fsMock.watch.mockImplementationOnce(() => {
+      throw new Error("native watch unsupported");
+    });
+
+    await registerAndWatch(webContents, workspace);
+    const original = await readFile(workspace.stateFile);
+    const replacement = Buffer.alloc(original.length, 0x20);
+    await writeFile(workspace.stateFile, replacement);
+    await utimes(workspace.stateFile, pinned, pinned);
+
+    await vi.advanceTimersByTimeAsync(29_000);
+    await flushMicrotasks();
+    expect(webContents.send).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await advanceUntilFingerprint(150, workspace.stateFile);
+    expect(webContents.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps slow fingerprint reads single-flight across polling sweeps", async () => {
+    const workspace = await createWorkspace();
+    const webContents = createWebContents();
+    const heldRead = createDeferred<Buffer>();
+    const readStarted = createDeferred<void>();
+    fsMock.watch.mockImplementationOnce(() => {
+      throw new Error("native watch unsupported");
+    });
+
+    await registerAndWatch(webContents, workspace);
+    fsPromisesMock.state.readFileCalls = 0;
+    fsPromisesMock.state.maxActiveReadFiles = 0;
+    fsPromisesMock.state.readFileHook = (path) => {
+      if (path === workspace.stateFile) {
+        readStarted.resolve();
+        return heldRead.promise;
+      }
+    };
+
+    await vi.advanceTimersByTimeAsync(30_150);
+    await readStarted.promise;
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flushMicrotasks();
+
+    expect(fsPromisesMock.state.readFileCalls).toBe(1);
+    expect(fsPromisesMock.state.maxActiveReadFiles).toBe(1);
+    heldRead.resolve(Buffer.from("stale"));
+    fsPromisesMock.state.readFileHook = null;
+    await flushMicrotasks();
+  });
+
+  it("does not publish an in-flight fingerprint after unwatch", async () => {
+    const workspace = await createWorkspace();
+    const webContents = createWebContents();
+    const replacement = Buffer.from(JSON.stringify({ version: 2, tasks: {} }));
+    const heldRead = createDeferred<Buffer>();
+    const readStarted = createDeferred<void>();
+
+    await registerAndWatch(webContents, workspace);
+    await writeFile(workspace.stateFile, replacement);
+    fsPromisesMock.state.readFileHook = (path) => {
+      if (path === workspace.stateFile) {
+        readStarted.resolve();
+        return heldRead.promise;
+      }
+    };
+    fsMock.watchers[0]?.callback("change", "state.json");
+    await vi.advanceTimersByTimeAsync(150);
+    await readStarted.promise;
+
+    await unwatch(webContents, workspace);
+    heldRead.resolve(replacement);
+    fsPromisesMock.state.readFileHook = null;
+    await flushMicrotasks();
+
+    expect(webContents.send).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps fingerprint retry deadlines under a native event storm and resets after recovery", async () => {
+    const workspace = await createWorkspace();
+    const webContents = createWebContents();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await registerAndWatch(webContents, workspace);
+      await writeFile(
+        workspace.stateFile,
+        JSON.stringify({ version: 2, tasks: { "T-001": "completed" } }),
+        "utf8"
+      );
+      fsPromisesMock.state.readFileCalls = 0;
+      fsPromisesMock.state.readFileHook = (path) => {
+        if (path === workspace.stateFile) {
+          throw new Error("simulated fingerprint failure");
+        }
+      };
+
+      fsMock.watchers[0]?.callback("change", "state.json");
+      await vi.advanceTimersByTimeAsync(150);
+      await flushMicrotasks();
+      expect(fsPromisesMock.state.readFileCalls).toBe(1);
+
+      for (let index = 0; index < 9; index += 1) {
+        fsMock.watchers[0]?.callback("change", "state.json");
+        await vi.advanceTimersByTimeAsync(100);
+        await flushMicrotasks();
+      }
+      await vi.advanceTimersByTimeAsync(99);
+      await flushMicrotasks();
+      expect(fsPromisesMock.state.readFileCalls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await flushMicrotasks();
+      expect(fsPromisesMock.state.readFileCalls).toBe(2);
+
+      fsPromisesMock.state.readFileHook = null;
+      for (let index = 0; index < 19; index += 1) {
+        fsMock.watchers[0]?.callback("change", "state.json");
+        await vi.advanceTimersByTimeAsync(100);
+        await flushMicrotasks();
+      }
+      await vi.advanceTimersByTimeAsync(99);
+      await flushMicrotasks();
+      expect(fsPromisesMock.state.readFileCalls).toBe(2);
+
+      await advanceUntilFingerprint(1, workspace.stateFile);
+      expect(webContents.send).toHaveBeenCalledTimes(1);
+
+      await writeFile(
+        workspace.stateFile,
+        JSON.stringify({ version: 3, tasks: { "T-001": "completed", "T-002": "ready" } }),
+        "utf8"
+      );
+      fsPromisesMock.state.readFileHook = (path) => {
+        if (path === workspace.stateFile) {
+          throw new Error("simulated fingerprint failure after recovery");
+        }
+      };
+      const callsBeforeRecoveredFailure = fsPromisesMock.state.readFileCalls;
+      fsMock.watchers[0]?.callback("change", "state.json");
+      await vi.advanceTimersByTimeAsync(150);
+      await flushMicrotasks();
+      expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 1);
+
+      for (let index = 0; index < 9; index += 1) {
+        fsMock.watchers[0]?.callback("change", "state.json");
+        await vi.advanceTimersByTimeAsync(100);
+        await flushMicrotasks();
+      }
+      await vi.advanceTimersByTimeAsync(99);
+      await flushMicrotasks();
+      expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      await flushMicrotasks();
+      expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 2);
+      expect(webContents.send).toHaveBeenCalledTimes(1);
+    } finally {
+      fsPromisesMock.state.readFileHook = null;
+      await unwatch(webContents, workspace);
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("backs off repeated polling failures and resumes fast probes after recovery", async () => {
+    const workspace = await createWorkspace();
+    const webContents = createWebContents();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fsMock.watch.mockImplementationOnce(() => {
+      throw new Error("native watch unsupported");
+    });
+
+    try {
+      await registerAndWatch(webContents, workspace);
+      warnSpy.mockClear();
+      fsPromisesMock.state.failStat = true;
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushMicrotasks();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushMicrotasks();
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushMicrotasks();
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+
+      fsPromisesMock.state.failStat = false;
+      await advanceUntilStateStat(1000, workspace.stateFile);
+      await writeFile(
+        workspace.stateFile,
+        JSON.stringify({ version: 3, tasks: { recovered: true } }),
+        "utf8"
+      );
+      await advanceUntilStateStat(1000, workspace.stateFile);
+      await advanceUntilFingerprint(150, workspace.stateFile);
+
+      expect(webContents.send).toHaveBeenCalledTimes(1);
+    } finally {
+      fsPromisesMock.state.failStat = false;
+      warnSpy.mockRestore();
+    }
   });
 });
