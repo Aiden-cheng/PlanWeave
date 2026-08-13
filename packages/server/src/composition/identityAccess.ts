@@ -1,0 +1,429 @@
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import {
+  createRemoteBlockArtifactSource,
+  createRemoteBlockRuntimePort,
+  manifestSchema,
+  resolveProjectCanvasWorkspace
+} from "@planweave-ai/runtime";
+import { canonicalRemoteRuntimePort } from "../canonicalRemoteRuntimePort.js";
+import type { ServerConfig } from "../config.js";
+import { createTrustedRuntimeRegistry } from "../runtimeProjectRegistry.js";
+import type { SqliteDatabase } from "../sqlite.js";
+import { createManifestWorkItemPort } from "../work/workItemFacts.js";
+import { WorkspaceIdentityRepository } from "../identity/workspaceRepository.js";
+import { ProjectAccessRepository } from "../projectAccessRepository.js";
+import { PackageSnapshotRepository } from "../packageSnapshotRepository.js";
+import type { RegistryHttpService } from "../registryHttp.js";
+import { HumanIdentityRepository, HumanMembershipService } from "../identity/index.js";
+import { SetupCodeService } from "../identity/setupCodeService.js";
+import { provisionConfiguredOperatorSessions } from "../identity/operatorSessionProvisioning.js";
+import { OperatorTokenRegistry } from "../operatorAuth.js";
+import type { AuthorizationChangeSignal } from "../authorizationChangeSignal.js";
+import type { ActivityJournalComposition } from "./activityComments.js";
+import {
+  readAclRegistryMigration,
+  repairAclRegistryMigration,
+  retryAclRegistryMigration
+} from "../migrations.js";
+
+export type TrustedRuntimeRegistry = Awaited<ReturnType<typeof createTrustedRuntimeRegistry>>;
+
+export async function createRuntimeRegistryComposition(input: {
+  trustedProjects: ServerConfig["trustedProjects"];
+  ownerTrustedProjects?: ServerConfig["trustedProjects"];
+}) {
+  const runtimeRegistry = await createTrustedRuntimeRegistry(input.trustedProjects);
+  let ownerRuntimeRegistry = runtimeRegistry;
+  try {
+    if (input.ownerTrustedProjects) {
+      ownerRuntimeRegistry = await createTrustedRuntimeRegistry(input.ownerTrustedProjects);
+    }
+  } catch (error) {
+    runtimeRegistry.close();
+    throw error;
+  }
+  return {
+    runtimeRegistry,
+    ownerRuntimeRegistry,
+    close() {
+      const errors: unknown[] = [];
+      if (ownerRuntimeRegistry !== runtimeRegistry) {
+        try {
+          ownerRuntimeRegistry.close();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      try {
+        runtimeRegistry.close();
+      } catch (error) {
+        errors.push(error);
+      }
+      if (errors.length > 0) throw new AggregateError(errors, "runtime_registry_cleanup_failed");
+    }
+  };
+}
+
+export function createIdentityAccessComposition(input: {
+  database: SqliteDatabase;
+  config: ServerConfig;
+  clock: () => Date;
+  runtimeRegistry: TrustedRuntimeRegistry;
+  ownerRuntimeRegistry: TrustedRuntimeRegistry;
+  onAuthorizationChange: ConstructorParameters<typeof ProjectAccessRepository>[2];
+}) {
+  const workspaceIdentity = new WorkspaceIdentityRepository(input.database);
+  const projectAccess = new ProjectAccessRepository(
+    input.database,
+    input.clock,
+    input.onAuthorizationChange
+  );
+  for (const workspaceId of new Set(
+    input.ownerRuntimeRegistry.expansions.map((scope) => scope.workspaceId)
+  )) {
+    workspaceIdentity.ensureConfiguredWorkspace(workspaceId);
+  }
+  input.runtimeRegistry.setScopedPackageResolver((scope) => {
+    if (!workspaceIdentity.workspaceExists(scope.workspaceId)) return undefined;
+    const canvas = projectAccess.registry.canvasInternal(
+      scope.workspaceId,
+      scope.projectId,
+      scope.canvasId
+    );
+    if (!canvas || canvas.revokedAt !== null || !canvas.packageDir) return undefined;
+    const manifest = manifestSchema.parse(
+      JSON.parse(readFileSync(join(canvas.packageDir, "manifest.json"), "utf8"))
+    );
+    return createManifestWorkItemPort(manifest, scope.canvasId);
+  });
+  input.runtimeRegistry.registry.setScopedResolver(async (locator) => {
+    if (!workspaceIdentity.workspaceExists(locator.workspaceId)) {
+      throw new Error("remote_runtime_workspace_unresolved");
+    }
+    const project = projectAccess.registry.projectInternal(locator.workspaceId, locator.projectId);
+    const canvas = projectAccess.registry.canvasInternal(
+      locator.workspaceId,
+      locator.projectId,
+      locator.canvasId
+    );
+    if (
+      !project ||
+      project.revokedAt !== null ||
+      !project.projectRoot ||
+      !canvas ||
+      canvas.revokedAt !== null ||
+      !canvas.packageDir
+    ) {
+      throw new Error("remote_runtime_scope_unavailable");
+    }
+    const workspace = await resolveProjectCanvasWorkspace(project.projectRoot, locator.canvasId);
+    if (resolve(workspace.packageDir) !== resolve(canvas.packageDir)) {
+      throw new Error("remote_runtime_registry_path_mismatch");
+    }
+    return {
+      runtime: canonicalRemoteRuntimePort(
+        createRemoteBlockRuntimePort({ projectRoot: workspace }),
+        locator.workspaceId
+      ),
+      artifacts: createRemoteBlockArtifactSource({ projectRoot: workspace }),
+      release() {}
+    };
+  });
+
+  const canvasesByProjectScope = new Map<
+    string,
+    {
+      workspaceId: string;
+      projectId: string;
+      projectRoot: string;
+      canvases: TrustedRuntimeRegistry["expansions"];
+    }
+  >();
+  for (const expansion of input.runtimeRegistry.expansions) {
+    const projectScopeKey = `${expansion.workspaceId}\0${expansion.projectId}`;
+    const current = canvasesByProjectScope.get(projectScopeKey);
+    if (current) current.canvases = [...current.canvases, expansion];
+    else {
+      canvasesByProjectScope.set(projectScopeKey, {
+        workspaceId: expansion.workspaceId,
+        projectId: expansion.projectId,
+        projectRoot: expansion.projectRoot,
+        canvases: [expansion]
+      });
+    }
+  }
+  for (const project of canvasesByProjectScope.values()) {
+    const { workspaceId, projectId } = project;
+    workspaceIdentity.ensureConfiguredWorkspace(workspaceId);
+    prepareAclRegistryMigrationForStartup({
+      database: input.database,
+      workspaceId,
+      projectId,
+      sourceKind: "trusted_project"
+    });
+    const existingProject = projectAccess.registry.projectInternal(workspaceId, projectId);
+    if (existingProject?.projectRoot === null) {
+      projectAccess.bindProjectPath(workspaceId, projectId, project.projectRoot);
+    }
+    projectAccess.registerProjectInternal({
+      workspaceId,
+      projectId,
+      projectRoot: project.projectRoot,
+      visibility: existingProject?.visibility ?? "private"
+    });
+    for (const canvas of project.canvases) {
+      prepareAclRegistryMigrationForStartup({
+        database: input.database,
+        workspaceId,
+        projectId,
+        canvasId: canvas.canvasId,
+        sourceKind: "trusted_canvas"
+      });
+      const existingCanvas = projectAccess.registry.canvasInternal(
+        workspaceId,
+        projectId,
+        canvas.canvasId
+      );
+      projectAccess.registerCanvasInternal({
+        workspaceId,
+        projectId,
+        canvasId: canvas.canvasId,
+        packageDir: canvas.packageDir,
+        visibility: existingCanvas?.visibility ?? "private"
+      });
+      projectAccess.markCanvasCutover(workspaceId, projectId, canvas.canvasId);
+    }
+    projectAccess.reconcileRuntimeCanvases(
+      workspaceId,
+      projectId,
+      project.canvases.map((canvas) => canvas.canvasId)
+    );
+    projectAccess.finalizeProjectCutover(workspaceId, projectId);
+  }
+  for (const projectId of new Set(
+    input.runtimeRegistry.expansions.map((scope) => scope.projectId)
+  )) {
+    const workspaceId = uniqueConfiguredWorkspaceId(input.runtimeRegistry, projectId);
+    if (workspaceId) workspaceIdentity.ensureLegacyProjectAdapter(projectId, workspaceId);
+  }
+
+  const packageSnapshots = new PackageSnapshotRepository(
+    input.database,
+    projectAccess,
+    input.config.dataDirectory,
+    input.clock
+  );
+  const registryService = createRegistryService(
+    input.runtimeRegistry,
+    projectAccess,
+    packageSnapshots
+  );
+  return { workspaceIdentity, projectAccess, registryService };
+}
+
+export function createIdentityServices(input: {
+  database: SqliteDatabase;
+  config: ServerConfig;
+  clock: () => Date;
+  runtimeRegistry: TrustedRuntimeRegistry;
+  ownerRuntimeRegistry: TrustedRuntimeRegistry;
+  workspaceIdentity: WorkspaceIdentityRepository;
+  projectAccess: ProjectAccessRepository;
+  authorizationChanges: AuthorizationChangeSignal;
+  activity: ActivityJournalComposition;
+  onHumanIdentityCreated(identity: HumanIdentityRepository): void;
+}) {
+  const setupCodes = new SetupCodeService({
+    database: input.database,
+    serverBaseUrl: input.config.transport.advertisedOrigin.endsWith("/")
+      ? input.config.transport.advertisedOrigin
+      : `${input.config.transport.advertisedOrigin}/`,
+    allowInsecureTransport: input.config.insecurePolicy.allowInsecureTransport,
+    clock: input.clock,
+    operatorSessionTtlMs: input.config.operatorSessionTtlMs,
+    onWorkspaceDeviceMembershipCreated: ({ workspaceId, humanPrincipalId, role }) => {
+      const projectIds = new Set<string>();
+      for (const scope of input.runtimeRegistry.expansions) {
+        if (scope.workspaceId !== workspaceId || projectIds.has(scope.projectId)) continue;
+        projectIds.add(scope.projectId);
+        input.projectAccess.synchronizeHumanMembershipOwnerInCallerTransaction({
+          workspaceId,
+          projectId: scope.projectId,
+          humanPrincipalId,
+          transition: "member_joined",
+          membershipRole: role
+        });
+      }
+    }
+  });
+  const authorization = new OperatorTokenRegistry(
+    input.database,
+    input.config.operatorCredentials,
+    input.clock
+  );
+  provisionConfiguredOperatorSessions({
+    database: input.database,
+    credentials: input.config.operatorCredentials,
+    trustedProjectIds: [
+      ...new Set(input.runtimeRegistry.expansions.map((canvas) => canvas.projectId))
+    ],
+    serverAdminAnchorWorkspaceId:
+      input.runtimeRegistry.expansions[0]?.workspaceId ??
+      input.ownerRuntimeRegistry.expansions[0]?.workspaceId,
+    workspaceForProject: (projectId) => {
+      const scopes = input.runtimeRegistry.expansions.filter(
+        (expansion) => expansion.projectId === projectId
+      );
+      const workspaceIds = [...new Set(scopes.map((scope) => scope.workspaceId))];
+      return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
+    },
+    operatorSessionTtlMs: input.config.operatorSessionTtlMs,
+    clock: input.clock
+  });
+  const humanIdentity = new HumanIdentityRepository(input.database, input.clock, {
+    onMembershipTransitionInTransaction: ({ type, membership, principal }) => {
+      const workspaceId = input.workspaceIdentity.workspaceForLegacyProject(membership.projectId);
+      if (!workspaceId) throw new Error("workspace_not_found");
+      input.projectAccess.synchronizeHumanMembershipOwnerInCallerTransaction({
+        workspaceId,
+        projectId: membership.projectId,
+        humanPrincipalId: principal.humanPrincipalId,
+        transition: type,
+        membershipRole: membership.role
+      });
+      input.activity.activityProjection.projectMembershipEventInCallerTransaction({
+        projectId: membership.projectId,
+        type,
+        membershipId: membership.membershipId,
+        transitionRevision: membership.revision,
+        humanPrincipalId: membership.humanPrincipalId,
+        displayName: principal.displayName,
+        membershipRole: membership.role,
+        occurredAt: membership.updatedAt
+      });
+    },
+    onInvitationTransitionInTransaction: ({ invitation }) => {
+      const workspaceId = input.workspaceIdentity.workspaceForLegacyProject(invitation.projectId);
+      if (!workspaceId) throw new Error("human_observer_workspace_scope_unresolved");
+      input.activity.humanObserverJournal.appendInCallerTransaction(
+        { workspaceId, projectId: invitation.projectId },
+        { kind: "invitation" },
+        invitation.consumedAt ?? invitation.revokedAt ?? invitation.createdAt
+      );
+    },
+    onAuthorizationChangeAfterCommit: (change) => input.authorizationChanges.publish(change)
+  });
+  input.onHumanIdentityCreated(humanIdentity);
+  const humanMembership = new HumanMembershipService({
+    repository: humanIdentity,
+    projectAuthority: input.runtimeRegistry,
+    workspaceForProject: (projectId) =>
+      input.workspaceIdentity.ensureWorkspaceForLegacyProject(projectId),
+    clock: input.clock
+  });
+  return { setupCodes, authorization, humanIdentity, humanMembership };
+}
+
+function createRegistryService(
+  runtimeRegistry: TrustedRuntimeRegistry,
+  projectAccess: ProjectAccessRepository,
+  packageSnapshots: PackageSnapshotRepository
+): RegistryHttpService {
+  const assertCanvasScope = (scope: {
+    workspaceId: string;
+    projectId: string;
+    canvasId: string;
+  }) => {
+    if (!runtimeRegistry.hasScope(scope)) throw new Error("registry_canvas_not_found");
+  };
+  return {
+    listProjects(input) {
+      const items = projectAccess.listAuthorizedProjects({
+        workspaceId: input.workspaceId,
+        actor: input.actor,
+        limit: input.limit,
+        offset: input.cursor
+      });
+      return {
+        items,
+        nextCursor: items.length === input.limit ? input.cursor + input.limit : null
+      };
+    },
+    listCanvases(input) {
+      const authorized: ReturnType<ProjectAccessRepository["listAuthorizedCanvases"]> = [];
+      const pageSize = 100;
+      for (let offset = 0; ; offset += pageSize) {
+        const page = projectAccess.listAuthorizedCanvases({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actor: input.actor,
+          limit: pageSize,
+          offset
+        });
+        authorized.push(...page);
+        if (page.length < pageSize) break;
+      }
+      const visible = authorized.filter((canvas) =>
+        runtimeRegistry.hasScope({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          canvasId: canvas.registry.canvasId
+        })
+      );
+      const items = visible.slice(input.cursor, input.cursor + input.limit);
+      return {
+        items,
+        nextCursor:
+          input.cursor + items.length < visible.length ? input.cursor + items.length : null
+      };
+    },
+    readSnapshot(input) {
+      assertCanvasScope(input);
+      return packageSnapshots.read(input);
+    },
+    createSnapshot(input) {
+      assertCanvasScope(input);
+      return packageSnapshots.create(input);
+    },
+    restoreSnapshot(input) {
+      assertCanvasScope(input);
+      return packageSnapshots.restore(input);
+    }
+  };
+}
+
+function prepareAclRegistryMigrationForStartup(input: {
+  database: SqliteDatabase;
+  workspaceId: string;
+  projectId: string;
+  canvasId?: string;
+  sourceKind: "trusted_project" | "trusted_canvas";
+}): void {
+  const scope = {
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    ...(input.canvasId === undefined ? {} : { canvasId: input.canvasId }),
+    sourceKind: input.sourceKind
+  } as const;
+  const migration = readAclRegistryMigration(input.database, scope);
+  if (!migration || migration.status === "completed") return;
+  if (migration.status === "interrupted" || migration.status === "repair_required") {
+    repairAclRegistryMigration(input.database, scope);
+  }
+  retryAclRegistryMigration(input.database, scope);
+}
+
+function uniqueConfiguredWorkspaceId(
+  runtimeRegistry: TrustedRuntimeRegistry,
+  projectId: string
+): string | undefined {
+  const workspaceIds = [
+    ...new Set(
+      runtimeRegistry.expansions
+        .filter((scope) => scope.projectId === projectId)
+        .map((scope) => scope.workspaceId)
+    )
+  ];
+  return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
+}

@@ -16,6 +16,9 @@ const cleanupSpies = vi.hoisted(() => ({
   }),
   retentionStart: vi.fn(async () => {}),
   retentionClose: vi.fn(async () => {}),
+  retentionStartFailure: { enabled: false },
+  retentionCloseFailure: { enabled: false },
+  lifecycleClose: vi.fn(),
   runtimeRegistryClose: vi.fn(),
   canvasPresenceClose: vi.fn(),
   canvasLiveSyncClose: vi.fn(),
@@ -79,8 +82,42 @@ vi.mock("../comments/index.js", async () => {
   return {
     ...actual,
     ActivityRetentionMaintenance: class {
-      start = cleanupSpies.retentionStart;
-      close = cleanupSpies.retentionClose;
+      async start() {
+        await cleanupSpies.retentionStart();
+        if (cleanupSpies.retentionStartFailure.enabled) {
+          throw new Error("activity_retention_start_failed");
+        }
+      }
+      async close() {
+        await cleanupSpies.retentionClose();
+        if (cleanupSpies.retentionCloseFailure.enabled) {
+          throw new Error("activity_retention_close_failed");
+        }
+      }
+    }
+  };
+});
+
+vi.mock("../distributedCoordination.js", async () => {
+  const actual = await vi.importActual<typeof import("../distributedCoordination.js")>(
+    "../distributedCoordination.js"
+  );
+  return {
+    ...actual,
+    async startRemoteBlockCoordinationServer(
+      ...args: Parameters<typeof actual.startRemoteBlockCoordinationServer>
+    ) {
+      const lifecycle = await actual.startRemoteBlockCoordinationServer(...args);
+      return {
+        ...lifecycle,
+        server: {
+          ...lifecycle.server,
+          close() {
+            cleanupSpies.lifecycleClose();
+            lifecycle.server.close();
+          }
+        }
+      };
     }
   };
 });
@@ -140,10 +177,13 @@ afterEach(async () => {
   cleanupSpies.webSocketClose.mockClear();
   cleanupSpies.retentionStart.mockClear();
   cleanupSpies.retentionClose.mockClear();
+  cleanupSpies.lifecycleClose.mockClear();
   cleanupSpies.runtimeRegistryClose.mockClear();
   cleanupSpies.canvasPresenceClose.mockClear();
   cleanupSpies.canvasLiveSyncClose.mockClear();
   cleanupSpies.canvasCaptureFailure.enabled = false;
+  cleanupSpies.retentionStartFailure.enabled = false;
+  cleanupSpies.retentionCloseFailure.enabled = false;
   vi.useRealTimers();
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
@@ -160,6 +200,58 @@ function remoteManifest(): PlanPackageManifest {
 }
 
 describe("distributed server composition cleanup", () => {
+  it("closes retention and storage when retention startup fails", async () => {
+    const workspace = await createTestWorkspace(remoteManifest());
+    directories.push(workspace.home, workspace.root);
+    const config = parseServerConfig({
+      version: "server-config/v1",
+      bind: { host: "127.0.0.1", port: 7_443 },
+      publicUrl: "http://127.0.0.1:7443",
+      allowInsecureDevelopment: true,
+      dataDirectory: join(workspace.root, "retention-start-failure-server-data"),
+      trustedProjects: [
+        {
+          workspaceId: legacyWorkspaceIdForProject(workspace.init.workspace.id),
+          projectId: workspace.init.workspace.id,
+          canvasId: "default",
+          projectRoot: workspace.root
+        }
+      ],
+      operatorCredentials: [
+        {
+          operatorId: "admin",
+          tokenSha256: hashOperatorToken(`pw_operator_${"D".repeat(43)}`),
+          projectIds: [],
+          serverAdmin: true
+        }
+      ]
+    });
+    cleanupSpies.retentionStartFailure.enabled = true;
+    cleanupSpies.retentionCloseFailure.enabled = true;
+
+    const startup = createDistributedServerComposition({
+      httpServer: createServer(),
+      config
+    });
+    await expect(startup).rejects.toMatchObject({
+      message: "distributed_server_startup_and_cleanup_failed",
+      errors: [
+        expect.objectContaining({ message: "activity_retention_start_failed" }),
+        expect.objectContaining({ message: "activity_retention_close_failed" })
+      ]
+    });
+    expect(cleanupSpies.retentionStart).toHaveBeenCalledOnce();
+    expect(cleanupSpies.retentionClose).toHaveBeenCalledOnce();
+    expect(cleanupSpies.lifecycleClose).toHaveBeenCalledOnce();
+    expect(cleanupSpies.runtimeRegistryClose).toHaveBeenCalledOnce();
+    expect(cleanupSpies.retentionClose.mock.invocationCallOrder[0]).toBeLessThan(
+      cleanupSpies.lifecycleClose.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+    expect(cleanupSpies.lifecycleClose.mock.invocationCallOrder[0]).toBeLessThan(
+      cleanupSpies.runtimeRegistryClose.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+  });
+
   it("releases partial Canvas transports when initial content capture fails", async () => {
     const database = await openServerDatabase(":memory:", 5_000);
     applyMigrations(database);
