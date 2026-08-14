@@ -22,6 +22,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-suite-classification:
+    name: Test suite classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check test suite classification
+        run: node scripts/check-test-suite-classification.mjs
+
   node-22-13-compatibility:
     name: Node.js 22.13 compatibility
     runs-on: ubuntu-latest
@@ -80,6 +92,7 @@ jobs:
 
   ubuntu-gate:
     name: Ubuntu build, lint, and unit tests
+    needs: test-suite-classification
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
@@ -133,7 +146,7 @@ jobs:
 
       - name: Report slowest unit tests
         if: always() && steps.unit-tests.outcome != 'skipped'
-        run: node scripts/report-slowest-tests.mjs reports/unit.xml "Unit tests"
+        run: node scripts/report-slowest-tests.mjs reports/unit.xml "Unit tests" "${{ steps.unit-tests.outcome }}"
 
       - name: Redact failed Ubuntu test reports
         id: redact-unit
@@ -151,6 +164,7 @@ jobs:
 
   integration-tests:
     name: Integration tests (${{ matrix.label }})
+    needs: test-suite-classification
     runs-on: ubuntu-latest
     # Distributed realProcess suites need more wall time and serial workers than CLI/core shards.
     timeout-minutes: ${{ matrix.job_timeout_minutes }}
@@ -208,7 +222,7 @@ jobs:
 
       - name: Report slowest integration tests
         if: always() && steps.integration-tests.outcome != 'skipped'
-        run: node scripts/report-slowest-tests.mjs reports/integration-${{ matrix.shard }}.xml "Integration (${{ matrix.label }})"
+        run: node scripts/report-slowest-tests.mjs reports/integration-${{ matrix.shard }}.xml "Integration (${{ matrix.label }})" "${{ steps.integration-tests.outcome }}"
 
       - name: Redact failed integration test report
         id: redact-integration
@@ -226,6 +240,7 @@ jobs:
 
   performance-tests:
     name: Block Run Index performance regression
+    needs: test-suite-classification
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -261,7 +276,7 @@ jobs:
 
       - name: Report slowest performance tests
         if: always() && steps.performance-tests.outcome != 'skipped'
-        run: node scripts/report-slowest-tests.mjs reports/performance.xml "Performance regression"
+        run: node scripts/report-slowest-tests.mjs reports/performance.xml "Performance regression" "${{ steps.performance-tests.outcome }}"
 
       - name: Redact failed performance test report
         id: redact-performance
@@ -279,6 +294,7 @@ jobs:
 
   platform-tests:
     name: Platform tests (${{ matrix.os }})
+    needs: test-suite-classification
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -320,7 +336,7 @@ jobs:
 
       - name: Report slowest platform tests
         if: always() && steps.platform-tests.outcome != 'skipped'
-        run: node scripts/report-slowest-tests.mjs reports/platform.xml "Platform (${{ matrix.os }})"
+        run: node scripts/report-slowest-tests.mjs reports/platform.xml "Platform (${{ matrix.os }})" "${{ steps.platform-tests.outcome }}"
 
       - name: Redact failed platform test report
         id: redact-platform
@@ -338,6 +354,7 @@ jobs:
 
   windows-wsl-integration:
     name: Windows WSL execution-host integration
+    needs: test-suite-classification
     runs-on: windows-2025
     timeout-minutes: 30
     env:
@@ -433,9 +450,6 @@ jobs:
 
       - name: Build protocol packages
         run: pnpm --filter @planweave-ai/agent-host-protocol build && pnpm --filter @planweave-ai/collaboration-protocol build
-
-      - name: Check test suite classification
-        run: pnpm check:test-suites
 
       - name: Run WSL execution-host integration test
         timeout-minutes: 10

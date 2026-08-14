@@ -64,19 +64,44 @@ export function formatSlowTestSummary(label, suites, limit = defaultLimit) {
   ].join("\n");
 }
 
-async function main(args) {
-  const [reportPath, label] = args;
-  if (!reportPath || !label) {
-    throw new Error("Usage: report-slowest-tests.mjs <junit-report> <label>");
-  }
-  const report = await readFile(resolve(reportPath), "utf8");
-  const summary = formatSlowTestSummary(label, parseJUnitSuites(report));
+function missingReportSummary(label, testOutcome) {
+  return [
+    `## Slowest test files: ${label}`,
+    "",
+    `No JUnit report was generated because the test step ended with ${markdownCode(testOutcome)} before the reporter wrote the file.`
+  ].join("\n");
+}
+
+function isMissingFileError(error) {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+async function writeSummary(summary) {
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (summaryPath) {
     await appendFile(summaryPath, `${summary}\n`, "utf8");
   } else {
     process.stdout.write(`${summary}\n`);
   }
+}
+
+async function main(args) {
+  const [reportPath, label, testOutcome] = args;
+  if (!reportPath || !label) {
+    throw new Error("Usage: report-slowest-tests.mjs <junit-report> <label> [test-step-outcome]");
+  }
+  let report;
+  try {
+    report = await readFile(resolve(reportPath), "utf8");
+  } catch (error) {
+    if (testOutcome && testOutcome !== "success" && isMissingFileError(error)) {
+      await writeSummary(missingReportSummary(label, testOutcome));
+      return;
+    }
+    throw error;
+  }
+  const summary = formatSlowTestSummary(label, parseJUnitSuites(report));
+  await writeSummary(summary);
 }
 
 const invokedPath = process.argv[1];

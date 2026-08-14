@@ -67,4 +67,42 @@ describe("CI slow test summary", () => {
     expect(summary).toContain("`file-2.test.ts`");
     expect(summary).not.toContain("`file-1.test.ts`");
   });
+
+  it("reports a missing JUnit file without replacing an existing test failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-slowest-tests-missing-"));
+    temporaryRoots.push(root);
+    const summaryPath = join(root, "summary.md");
+
+    await execFileAsync(
+      process.execPath,
+      [
+        resolve("scripts/report-slowest-tests.mjs"),
+        join(root, "missing.xml"),
+        "Integration core",
+        "failure"
+      ],
+      {
+        cwd: process.cwd(),
+        env: { GITHUB_STEP_SUMMARY: summaryPath }
+      }
+    );
+
+    const summary = await readFile(summaryPath, "utf8");
+    expect(summary).toContain("## Slowest test files: Integration core");
+    expect(summary).toContain("test step ended with `failure`");
+  });
+
+  it("still fails when a successful test step does not produce its required JUnit file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "planweave-slowest-tests-required-"));
+    temporaryRoots.push(root);
+
+    await expect(
+      execFileAsync(process.execPath, [
+        resolve("scripts/report-slowest-tests.mjs"),
+        join(root, "missing.xml"),
+        "Unit tests",
+        "success"
+      ])
+    ).rejects.toMatchObject({ code: 1 });
+  });
 });

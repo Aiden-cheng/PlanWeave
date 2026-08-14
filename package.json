@@ -40,14 +40,15 @@
     "publish:npm": "pnpm -r --filter @planweave-ai/agent-host-protocol --filter @planweave-ai/collaboration-protocol --filter @planweave-ai/runtime --filter @planweave-ai/mcp --filter @planweave-ai/server --filter @planweave-ai/agent-host --filter @planweave-ai/cli publish --access public --no-git-checks",
     "sync:versions": "node scripts/sync-version-metadata.mjs",
     "check:test-suites": "node scripts/check-test-suite-classification.mjs",
+    "verify:push": "pnpm biome:check && pnpm check:test-suites && pnpm build && pnpm lint && pnpm test",
     "test": "pnpm check:test-suites && vitest run --config vitest.unit.config.ts --maxWorkers 2 && vitest run --config vitest.integration-cli.config.ts --maxWorkers 2 && vitest run --config vitest.integration-core.config.ts --maxWorkers 2 && vitest run --config vitest.integration-distributed.config.ts --maxWorkers 1 && vitest run --config vitest.performance.config.ts --maxWorkers 1 && vitest run --config vitest.platform.config.ts --maxWorkers 2",
-    "test:integration": "pnpm check:test-suites && vitest run --config vitest.integration.config.ts",
-    "test:integration:cli": "pnpm check:test-suites && vitest run --config vitest.integration-cli.config.ts",
-    "test:integration:core": "pnpm check:test-suites && vitest run --config vitest.integration-core.config.ts",
-    "test:integration:distributed": "pnpm check:test-suites && vitest run --config vitest.integration-distributed.config.ts",
-    "test:performance": "pnpm check:test-suites && vitest run --config vitest.performance.config.ts",
-    "test:platform": "pnpm check:test-suites && vitest run --config vitest.platform.config.ts",
-    "test:unit": "pnpm check:test-suites && vitest run --config vitest.unit.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:cli": "vitest run --config vitest.integration-cli.config.ts",
+    "test:integration:core": "vitest run --config vitest.integration-core.config.ts",
+    "test:integration:distributed": "vitest run --config vitest.integration-distributed.config.ts",
+    "test:performance": "vitest run --config vitest.performance.config.ts",
+    "test:platform": "vitest run --config vitest.platform.config.ts",
+    "test:unit": "vitest run --config vitest.unit.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
