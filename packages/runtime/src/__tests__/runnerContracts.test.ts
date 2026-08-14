@@ -37,6 +37,7 @@ import {
 import { adaptLegacyDesktopRunnerEvents } from "../desktop/legacyRunnerEventAdapter.js";
 import {
   redactAcpProtocolPayload,
+  redactRunnerEventText,
   redactRunnerEventPayload
 } from "../autoRun/runnerEventRedaction.js";
 
@@ -286,6 +287,51 @@ describe("runner identity and capability contracts", () => {
 });
 
 describe("runner event redaction and UTF-8 limits", () => {
+  it("preserves ordinary Basic prose while redacting Basic credentials", () => {
+    for (const content of [
+      "Basic PlanWeave Example",
+      "Basic PlanWeave",
+      "basic experience overview",
+      "The basic workflow is clear",
+      "basic abcdefgh overview"
+    ]) {
+      expect(redactRunnerEventText(content)).toEqual({
+        text: content,
+        classes: [],
+        replaced: 0
+      });
+    }
+    expect(redactRunnerEventText("Basic dXNlcjpwYXNz")).toEqual({
+      text: "[REDACTED:CREDENTIAL]",
+      classes: ["credential"],
+      replaced: 1
+    });
+  });
+
+  it("preserves ordinary Bearer prose while redacting Bearer credentials", () => {
+    for (const content of [
+      "Bearer responsibilities overview",
+      "Bearer abcdefgh overview",
+      "Bearer plan-weave overview"
+    ]) {
+      expect(redactRunnerEventText(content)).toEqual({
+        text: content,
+        classes: [],
+        replaced: 0
+      });
+    }
+    expect(redactRunnerEventText("Bearer abc.def.ghi")).toEqual({
+      text: "[REDACTED:CREDENTIAL]",
+      classes: ["credential"],
+      replaced: 1
+    });
+    expect(redactRunnerEventText("Bearer abcdefghijklmnopqrstuvwx")).toEqual({
+      text: "[REDACTED:CREDENTIAL]",
+      classes: ["credential"],
+      replaced: 1
+    });
+  });
+
   it("derives the encoded JSONL record limit from the shared line contract", () => {
     expect(RUNNER_EVENT_MAX_ENCODED_BYTES).toBe(
       RUNNER_EVENT_MAX_LINE_BYTES + Buffer.byteLength("\n")
@@ -294,6 +340,7 @@ describe("runner event redaction and UTF-8 limits", () => {
 
   it.each([
     ["Authorization: Basic dXNlcjpwYXNz", ["dXNlcjpwYXNz"]],
+    ["Authorization: Bearer abcdefgh", ["abcdefgh"]],
     ["Authorization: Bearer abc.def.ghi", ["abc.def.ghi"]],
     ["api_key=alpha beta", ["alpha", "beta"]],
     ['password: "hunter two"', ["hunter", "two"]],
