@@ -64,6 +64,7 @@ const fsPromisesMock = vi.hoisted(() => {
     failStat: false,
     maxActiveReadFiles: 0,
     readFileCalls: 0,
+    readFileCallHook: null as null | ((path: string) => void),
     readFileHook: null as null | ((path: string) => Buffer | Promise<Buffer> | undefined),
     readFileResultHook: null as null | ((path: string) => void),
     statResultHook: null as null | ((path: string) => void)
@@ -75,6 +76,7 @@ const fsPromisesMock = vi.hoisted(() => {
       state.failStat = false;
       state.maxActiveReadFiles = 0;
       state.readFileCalls = 0;
+      state.readFileCallHook = null;
       state.readFileHook = null;
       state.readFileResultHook = null;
       state.statResultHook = null;
@@ -116,6 +118,7 @@ vi.mock("node:fs/promises", async () => {
     readFile: async (path: Parameters<typeof actual.readFile>[0]) => {
       const normalizedPath = String(path);
       fsPromisesMock.state.readFileCalls += 1;
+      fsPromisesMock.state.readFileCallHook?.(normalizedPath);
       fsPromisesMock.state.activeReadFiles += 1;
       fsPromisesMock.state.maxActiveReadFiles = Math.max(
         fsPromisesMock.state.maxActiveReadFiles,
@@ -147,6 +150,10 @@ vi.mock("@planweave-ai/runtime", () => ({
 }));
 
 const tempRoots: string[] = [];
+const activeWatches: Array<{
+  webContents: TestWebContents;
+  workspace: TestWorkspace;
+}> = [];
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -193,6 +200,7 @@ async function registerAndWatch(
     { sender: webContents },
     { projectRoot: workspace.rootPath, canvasId: "canvas-a" }
   );
+  activeWatches.push({ webContents, workspace });
 }
 
 async function unwatch(webContents: TestWebContents, workspace: TestWorkspace): Promise<void> {
@@ -202,6 +210,12 @@ async function unwatch(webContents: TestWebContents, workspace: TestWorkspace): 
     { sender: webContents },
     { projectRoot: workspace.rootPath, canvasId: "canvas-a" }
   );
+  const activeWatchIndex = activeWatches.findIndex(
+    (activeWatch) => activeWatch.webContents === webContents && activeWatch.workspace === workspace
+  );
+  if (activeWatchIndex >= 0) {
+    activeWatches.splice(activeWatchIndex, 1);
+  }
 }
 
 async function flushDebounce(): Promise<void> {
@@ -250,6 +264,23 @@ async function advanceUntilFingerprint(ms: number, stateFile: string): Promise<v
   await flushMicrotasks();
 }
 
+async function advanceUntilReadFileCall(
+  ms: number,
+  stateFile: string,
+  expectedCalls: number
+): Promise<void> {
+  const started = createDeferred<void>();
+  fsPromisesMock.state.readFileCallHook = (path) => {
+    if (path === stateFile && fsPromisesMock.state.readFileCalls >= expectedCalls) {
+      started.resolve();
+    }
+  };
+  await vi.advanceTimersByTimeAsync(ms);
+  await started.promise;
+  fsPromisesMock.state.readFileCallHook = null;
+  await flushMicrotasks();
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -270,6 +301,9 @@ describe("runtime state watcher", () => {
   });
 
   afterEach(async () => {
+    for (const { webContents, workspace } of activeWatches.splice(0)) {
+      await unwatch(webContents, workspace);
+    }
     vi.useRealTimers();
     await Promise.all(
       tempRoots.splice(0).map((rootPath) => rm(rootPath, { recursive: true, force: true }))
@@ -474,8 +508,7 @@ describe("runtime state watcher", () => {
       };
 
       fsMock.watchers[0]?.callback("change", "state.json");
-      await vi.advanceTimersByTimeAsync(150);
-      await flushMicrotasks();
+      await advanceUntilReadFileCall(150, workspace.stateFile, 1);
       expect(fsPromisesMock.state.readFileCalls).toBe(1);
 
       for (let index = 0; index < 9; index += 1) {
@@ -487,8 +520,7 @@ describe("runtime state watcher", () => {
       await flushMicrotasks();
       expect(fsPromisesMock.state.readFileCalls).toBe(1);
 
-      await vi.advanceTimersByTimeAsync(1);
-      await flushMicrotasks();
+      await advanceUntilReadFileCall(1, workspace.stateFile, 2);
       expect(fsPromisesMock.state.readFileCalls).toBe(2);
 
       fsPromisesMock.state.readFileHook = null;
@@ -516,8 +548,7 @@ describe("runtime state watcher", () => {
       };
       const callsBeforeRecoveredFailure = fsPromisesMock.state.readFileCalls;
       fsMock.watchers[0]?.callback("change", "state.json");
-      await vi.advanceTimersByTimeAsync(150);
-      await flushMicrotasks();
+      await advanceUntilReadFileCall(150, workspace.stateFile, callsBeforeRecoveredFailure + 1);
       expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 1);
 
       for (let index = 0; index < 9; index += 1) {
@@ -528,8 +559,7 @@ describe("runtime state watcher", () => {
       await vi.advanceTimersByTimeAsync(99);
       await flushMicrotasks();
       expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 1);
-      await vi.advanceTimersByTimeAsync(1);
-      await flushMicrotasks();
+      await advanceUntilReadFileCall(1, workspace.stateFile, callsBeforeRecoveredFailure + 2);
       expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 2);
       expect(webContents.send).toHaveBeenCalledTimes(1);
     } finally {
