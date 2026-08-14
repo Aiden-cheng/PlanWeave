@@ -3,14 +3,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { packageFileChangedChannel } from "../shared/ipcChannels";
 import {
-  advanceAndFlush,
+  advanceWatchTime,
+  advanceWatchTimeAndSettle,
   cleanupPackageWatchTestResources,
   createDeferred,
   createWebContents,
   createWorkspace,
   emitNativeWatcherErrors,
   flushDebounce,
-  flushMicrotasks,
+  getWatchRuntimeTestDriver,
   getPackageWatchMocks,
   registerAndWatch,
   resetPackageWatchTestState,
@@ -22,15 +23,11 @@ const { fsMock, fsPromisesMock } = getPackageWatchMocks();
 describe("package file watcher: controller identity", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.useFakeTimers({
-      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"]
-    });
     resetPackageWatchTestState();
   });
 
   afterEach(async () => {
     await cleanupPackageWatchTestResources();
-    vi.useRealTimers();
   });
 
   it("does not let a closed controller publish or install its pending poller into a replacement", async () => {
@@ -45,13 +42,13 @@ describe("package file watcher: controller identity", () => {
     const deferredStat = createDeferred<void>();
     fsPromisesMock.state.holdStatPromise = deferredStat.promise;
     emitNativeWatcherErrors(nativeA, new Error("controller A native failure"));
-    await flushMicrotasks();
+    advanceWatchTime(0);
 
     await unwatch(subscriberA, workspace);
     for (const watcher of nativeA) {
       expect(watcher.close).toHaveBeenCalledTimes(1);
     }
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
 
     const subscriberB = createWebContents(2);
     await registerAndWatch(subscriberB, workspace);
@@ -59,7 +56,7 @@ describe("package file watcher: controller identity", () => {
     const activeBackendCount = () =>
       [nativeA, nativeB].filter((watchers) =>
         watchers.some((watcher) => watcher.close.mock.calls.length === 0)
-      ).length + (vi.getTimerCount() > 0 ? 1 : 0);
+      ).length + (getWatchRuntimeTestDriver().pendingTimerCount() > 0 ? 1 : 0);
     expect(nativeB.length).toBeGreaterThan(0);
     for (const watcher of nativeB) {
       expect(watcher.close).not.toHaveBeenCalled();
@@ -71,7 +68,7 @@ describe("package file watcher: controller identity", () => {
     for (const handler of lateErrorHandlersA) {
       handler(new Error("controller A late native failure"));
     }
-    await flushDebounce();
+    advanceWatchTime(150);
     expect(subscriberB.send).not.toHaveBeenCalled();
 
     await writeFile(
@@ -81,18 +78,18 @@ describe("package file watcher: controller identity", () => {
     );
     deferredStat.resolve();
     fsPromisesMock.state.holdStatPromise = null;
-    await flushMicrotasks();
+    await getWatchRuntimeTestDriver().drain();
 
     // A's completed polling adapter is closed instead of replacing B's active native adapter.
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
     for (const watcher of nativeB) {
       expect(watcher.close).not.toHaveBeenCalled();
     }
     expect(activeBackendCount()).toBe(1);
-    await advanceAndFlush(30_000);
+    await advanceWatchTimeAndSettle(30_000);
     await flushDebounce();
     expect(subscriberB.send).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
 
     nativeB[0]?.callback("change", "manifest.json");
     await flushDebounce();
@@ -113,7 +110,7 @@ describe("package file watcher: controller identity", () => {
     }
     expect(subscriberA.removeListener).toHaveBeenCalledTimes(1);
     expect(subscriberB.removeListener).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
     expect(activeBackendCount()).toBe(0);
   });
 });

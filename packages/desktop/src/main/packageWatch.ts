@@ -7,6 +7,7 @@ import type { PackageWatchBackendHandle } from "./packageWatchBackend.js";
 import { startNativePackageWatchBackend } from "./packageWatchNativeBackend.js";
 import { startPollingPackageWatchBackend } from "./packageWatchPollingBackend.js";
 import { dedupePackageWatchPaths } from "./packageWatchPaths.js";
+import { systemWatchScheduler, type WatchScheduler, type WatchTimer } from "./watchRuntime.js";
 
 type PackageWatchSubscriber = {
   webContents: WebContents;
@@ -17,8 +18,13 @@ type PackageWatch = {
   backend: PackageWatchBackendHandle;
   subscribers: Map<number, PackageWatchSubscriber>;
   changedPaths: Set<string>;
-  timer: NodeJS.Timeout | null;
+  timer: WatchTimer | null;
+  scheduledTasks: Set<WatchTimer>;
   closed: boolean;
+};
+
+type PackageWatchHandlerOptions = {
+  scheduler?: WatchScheduler;
 };
 
 const packageWatches = new Map<string, PackageWatch>();
@@ -33,13 +39,14 @@ function watchKey(projectRoot: string, canvasId?: string | null): string {
 async function startPackageWatchBackend(
   workspace: Awaited<ReturnType<typeof resolveTaskCanvasWorkspace>>,
   recordChange: (path: string) => void,
+  scheduler: WatchScheduler,
   onError?: (error: unknown) => void
 ): Promise<PackageWatchBackendHandle> {
   const native = startNativePackageWatchBackend(workspace, recordChange, onError);
   if (native) {
     return native;
   }
-  return await startPollingPackageWatchBackend(workspace, recordChange, onError);
+  return await startPollingPackageWatchBackend(workspace, recordChange, onError, scheduler);
 }
 
 function addPendingPackageWatchSubscriber(key: string, webContents: WebContents): void {
@@ -78,15 +85,20 @@ function closePackageWatch(activeWatch: PackageWatch): void {
   activeWatch.subscribers.clear();
   activeWatch.backend.close();
   if (activeWatch.timer) {
-    clearTimeout(activeWatch.timer);
+    activeWatch.timer.cancel();
     activeWatch.timer = null;
   }
+  for (const task of activeWatch.scheduledTasks) {
+    task.cancel();
+  }
+  activeWatch.scheduledTasks.clear();
 }
 
 async function getOrCreatePackageWatch(
   key: string,
   projectRoot: string,
-  canvasId: string | null | undefined
+  canvasId: string | null | undefined,
+  scheduler: WatchScheduler
 ): Promise<PackageWatch> {
   const activeWatch = packageWatches.get(key);
   if (activeWatch) {
@@ -115,11 +127,10 @@ async function getOrCreatePackageWatch(
       }
       controller.changedPaths.add(path);
       if (controller.timer) {
-        clearTimeout(controller.timer);
+        controller.timer.cancel();
       }
-      controller.timer = setTimeout(
-        () => flushPackageFileChange(projectRoot, canvasId),
-        packageWatchDebounceMs
+      controller.timer = scheduler.schedule(packageWatchDebounceMs, () =>
+        flushPackageFileChange(projectRoot, canvasId, scheduler)
       );
     };
 
@@ -145,26 +156,33 @@ async function getOrCreatePackageWatch(
       // Polling errors stay on the polling path (no native recovery). Backend logs via console.warn;
       // the controller does not re-failover or surface a consumer-facing error DTO.
 
-      void startPollingPackageWatchBackend(workspace, guardedRecord).then((newHandle) => {
+      const failoverTask = scheduler.schedule(0, async () => {
+        const newHandle = await startPollingPackageWatchBackend(
+          workspace,
+          guardedRecord,
+          undefined,
+          scheduler
+        );
         if (!isActiveController() || !controller || failoverGen !== activeGeneration) {
           newHandle.close();
           return;
         }
         controller.backend = newHandle;
         // Surface backend switch so consumers see polling kind on the next event.
-        setTimeout(() => {
+        const publishTask = scheduler.schedule(0, () => {
           if (isActiveController() && controller && failoverGen === activeGeneration) {
             controller.changedPaths.add("package/manifest.json");
             if (controller.timer) {
-              clearTimeout(controller.timer);
+              controller.timer.cancel();
             }
-            controller.timer = setTimeout(
-              () => flushPackageFileChange(projectRoot, canvasId),
-              packageWatchDebounceMs
+            controller.timer = scheduler.schedule(packageWatchDebounceMs, () =>
+              flushPackageFileChange(projectRoot, canvasId, scheduler)
             );
           }
-        }, 0);
+        });
+        controller.scheduledTasks.add(publishTask);
       });
+      controller.scheduledTasks.add(failoverTask);
     }
 
     const onBackendError = (_error: unknown) => {
@@ -174,12 +192,18 @@ async function getOrCreatePackageWatch(
       performFailover();
     };
 
-    const backend = await startPackageWatchBackend(workspace, recordChange, onBackendError);
+    const backend = await startPackageWatchBackend(
+      workspace,
+      recordChange,
+      scheduler,
+      onBackendError
+    );
     controller = {
       backend,
       subscribers: new Map(),
       changedPaths: new Set(),
       timer: null,
+      scheduledTasks: new Set(),
       closed: false
     };
 
@@ -198,7 +222,11 @@ async function getOrCreatePackageWatch(
   }
 }
 
-function flushPackageFileChange(projectRoot: string, canvasId?: string | null): void {
+function flushPackageFileChange(
+  projectRoot: string,
+  canvasId: string | null | undefined,
+  scheduler: WatchScheduler
+): void {
   const activeWatch = packageWatches.get(watchKey(projectRoot, canvasId));
   if (!activeWatch || activeWatch.closed) {
     return;
@@ -215,7 +243,7 @@ function flushPackageFileChange(projectRoot: string, canvasId?: string | null): 
     paths,
     changedPathCount: paths.length,
     backendKind: activeWatch.backend.kind,
-    triggeredAt: new Date().toISOString()
+    triggeredAt: new Date(scheduler.nowMs()).toISOString()
   };
   for (const subscriber of activeWatch.subscribers.values()) {
     if (!subscriber.webContents.isDestroyed()) {
@@ -227,13 +255,14 @@ function flushPackageFileChange(projectRoot: string, canvasId?: string | null): 
 async function startPackageWatch(
   projectRoot: string,
   canvasId: string | null | undefined,
-  webContents: WebContents
+  webContents: WebContents,
+  scheduler: WatchScheduler
 ): Promise<void> {
   const key = watchKey(projectRoot, canvasId);
   addPendingPackageWatchSubscriber(key, webContents);
   let activeWatch: PackageWatch;
   try {
-    activeWatch = await getOrCreatePackageWatch(key, projectRoot, canvasId);
+    activeWatch = await getOrCreatePackageWatch(key, projectRoot, canvasId, scheduler);
   } catch (caught) {
     removePendingPackageWatchSubscriber(key, webContents.id);
     throw caught;
@@ -287,11 +316,12 @@ function stopPackageWatch(
   packageWatches.delete(key);
 }
 
-export function registerPackageWatchHandlers(): void {
+export function registerPackageWatchHandlers(options: PackageWatchHandlerOptions = {}): void {
+  const scheduler = options.scheduler ?? systemWatchScheduler;
   ipcMain.handle(
     desktopBridgeInvokeChannels.watchPackageFiles,
     (event, ref: DesktopCanvasReference) =>
-      startPackageWatch(ref.projectRoot, ref.canvasId, event.sender)
+      startPackageWatch(ref.projectRoot, ref.canvasId, event.sender, scheduler)
   );
   ipcMain.handle(
     desktopBridgeInvokeChannels.unwatchPackageFiles,

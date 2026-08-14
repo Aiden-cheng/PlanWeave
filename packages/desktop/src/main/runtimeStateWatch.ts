@@ -7,6 +7,12 @@ import { resolveTaskCanvasWorkspace } from "@planweave-ai/runtime";
 import type { DesktopCanvasReference, DesktopRuntimeStateChangeEvent } from "@planweave-ai/runtime";
 import type { WebContents } from "electron";
 import { desktopBridgeInvokeChannels, runtimeStateChangedChannel } from "../shared/ipcChannels.js";
+import {
+  PollingWatchLane,
+  systemWatchScheduler,
+  type WatchScheduler,
+  type WatchTimer
+} from "./watchRuntime.js";
 
 type RuntimeStateFingerprint = {
   mtimeMs: number;
@@ -19,8 +25,8 @@ type RuntimeStateMetadata = Omit<RuntimeStateFingerprint, "hash">;
 type RuntimeStateWatchBackend = {
   kind: "native" | "polling";
   watcher: FSWatcher | null;
-  pollTimer: NodeJS.Timeout | null;
-  hashSweepTimer: NodeJS.Timeout | null;
+  pollLane: PollingWatchLane | null;
+  hashSweepTimer: WatchTimer | null;
   lastFingerprint: RuntimeStateFingerprint | null;
   lastObservedMetadata: RuntimeStateMetadata | null;
   closed: boolean;
@@ -35,12 +41,17 @@ type RuntimeStateWatch = {
   backend: RuntimeStateWatchBackend;
   subscribers: Map<number, RuntimeStateWatchSubscriber>;
   stateFile: string;
-  timer: NodeJS.Timeout | null;
+  timer: WatchTimer | null;
+  scheduler: WatchScheduler;
   flushInFlight: boolean;
   flushRequested: boolean;
   flushFailureBackoffMs: number;
   flushRetryNotBeforeMs: number;
   closed: boolean;
+};
+
+type RuntimeStateWatchHandlerOptions = {
+  scheduler?: WatchScheduler;
 };
 
 const runtimeStateWatches = new Map<string, RuntimeStateWatch>();
@@ -154,7 +165,7 @@ function startNativeRuntimeStateWatchBackend(
     return {
       kind: "native",
       watcher,
-      pollTimer: null,
+      pollLane: null,
       hashSweepTimer: null,
       lastFingerprint,
       lastObservedMetadata: lastFingerprint,
@@ -171,72 +182,60 @@ function startNativeRuntimeStateWatchBackend(
 async function startPollingRuntimeStateWatchBackend(
   stateFile: string,
   lastFingerprint: RuntimeStateFingerprint | null,
-  recordChange: () => void
+  recordChange: () => void,
+  scheduler: WatchScheduler
 ): Promise<RuntimeStateWatchBackend> {
   const backend: RuntimeStateWatchBackend = {
     kind: "polling",
     watcher: null,
-    pollTimer: null,
+    pollLane: null,
     hashSweepTimer: null,
     lastFingerprint,
     lastObservedMetadata: lastFingerprint,
     closed: false
   };
-  let pollInFlight = false;
-  let pollFailureBackoffMs = 0;
-
-  const schedulePoll = (delayMs: number) => {
-    if (backend.closed) {
-      return;
-    }
-    backend.pollTimer = setTimeout(() => {
-      backend.pollTimer = null;
-      void poll();
-    }, delayMs);
-  };
-  const poll = async () => {
-    if (backend.closed || pollInFlight) {
-      return;
-    }
-    pollInFlight = true;
-    try {
+  const pollLane = new PollingWatchLane({
+    scheduler,
+    intervalMs: runtimeStateWatchPollIntervalMs,
+    backoffBaseMs: runtimeStateWatchPollIntervalMs,
+    backoffMaxMs: runtimeStateWatchFailureBackoffMaxMs,
+    run: async (isCurrent) => {
       const nextMetadata = await metadataStateFile(stateFile);
-      if (backend.closed) {
+      if (!isCurrent()) {
         return;
       }
       const changed = !sameMetadata(backend.lastObservedMetadata, nextMetadata);
       backend.lastObservedMetadata = nextMetadata;
-      pollFailureBackoffMs = 0;
       if (changed) {
         recordChange();
       }
-    } catch (caught) {
-      if (!backend.closed) {
-        warnPollingSnapshotFailure(stateFile, caught);
-        pollFailureBackoffMs = nextFailureBackoffMs(pollFailureBackoffMs);
-      }
-    } finally {
-      pollInFlight = false;
-      schedulePoll(pollFailureBackoffMs || runtimeStateWatchPollIntervalMs);
-    }
-  };
-  schedulePoll(runtimeStateWatchPollIntervalMs);
-  backend.hashSweepTimer = setInterval(() => {
+    },
+    onError: (error) => warnPollingSnapshotFailure(stateFile, error)
+  });
+  backend.pollLane = pollLane;
+  pollLane.start();
+  backend.hashSweepTimer = scheduler.repeat(runtimeStateWatchHashSweepIntervalMs, () => {
     if (!backend.closed) {
       recordChange();
     }
-  }, runtimeStateWatchHashSweepIntervalMs);
+  });
   return backend;
 }
 
 async function startRuntimeStateWatchBackend(
   stateFile: string,
-  recordChange: () => void
+  recordChange: () => void,
+  scheduler: WatchScheduler
 ): Promise<RuntimeStateWatchBackend> {
   const lastFingerprint = await fingerprintStateFile(stateFile);
   return (
     startNativeRuntimeStateWatchBackend(stateFile, lastFingerprint, recordChange) ??
-    (await startPollingRuntimeStateWatchBackend(stateFile, lastFingerprint, recordChange))
+    (await startPollingRuntimeStateWatchBackend(
+      stateFile,
+      lastFingerprint,
+      recordChange,
+      scheduler
+    ))
   );
 }
 
@@ -277,14 +276,12 @@ function closeRuntimeStateWatch(activeWatch: RuntimeStateWatch): void {
   }
   activeWatch.subscribers.clear();
   activeWatch.backend.watcher?.close();
-  if (activeWatch.backend.pollTimer) {
-    clearTimeout(activeWatch.backend.pollTimer);
-  }
+  activeWatch.backend.pollLane?.close();
   if (activeWatch.backend.hashSweepTimer) {
-    clearInterval(activeWatch.backend.hashSweepTimer);
+    activeWatch.backend.hashSweepTimer.cancel();
   }
   if (activeWatch.timer) {
-    clearTimeout(activeWatch.timer);
+    activeWatch.timer.cancel();
   }
 }
 
@@ -297,7 +294,7 @@ function scheduleRuntimeStateFlush(
   if (activeWatch.closed) {
     return;
   }
-  const now = Date.now();
+  const now = activeWatch.scheduler.nowMs();
   const scheduledAt =
     activeWatch.flushRetryNotBeforeMs > 0
       ? Math.max(now, activeWatch.flushRetryNotBeforeMs)
@@ -306,13 +303,10 @@ function scheduleRuntimeStateFlush(
     if (activeWatch.flushRetryNotBeforeMs > 0) {
       return;
     }
-    clearTimeout(activeWatch.timer);
+    activeWatch.timer.cancel();
   }
-  activeWatch.timer = setTimeout(
-    () => {
-      void flushRuntimeStateChange(projectRoot, canvasId);
-    },
-    Math.max(0, scheduledAt - now)
+  activeWatch.timer = activeWatch.scheduler.schedule(Math.max(0, scheduledAt - now), () =>
+    flushRuntimeStateChange(projectRoot, canvasId)
   );
 }
 
@@ -350,7 +344,7 @@ async function flushRuntimeStateChange(
       projectRoot,
       canvasId: canvasId ?? null,
       stateFile: activeWatch.stateFile,
-      changedAt: new Date().toISOString()
+      changedAt: new Date(activeWatch.scheduler.nowMs()).toISOString()
     };
     for (const subscriber of activeWatch.subscribers.values()) {
       if (!subscriber.webContents.isDestroyed()) {
@@ -360,7 +354,8 @@ async function flushRuntimeStateChange(
   } catch (caught) {
     if (!activeWatch.closed && runtimeStateWatches.get(key) === activeWatch) {
       activeWatch.flushFailureBackoffMs = nextFailureBackoffMs(activeWatch.flushFailureBackoffMs);
-      activeWatch.flushRetryNotBeforeMs = Date.now() + activeWatch.flushFailureBackoffMs;
+      activeWatch.flushRetryNotBeforeMs =
+        activeWatch.scheduler.nowMs() + activeWatch.flushFailureBackoffMs;
       console.warn(
         `PlanWeave runtime state watch flush failed for '${activeWatch.stateFile}': ${caught instanceof Error ? caught.message : String(caught)}`
       );
@@ -382,7 +377,8 @@ async function flushRuntimeStateChange(
 async function getOrCreateRuntimeStateWatch(
   key: string,
   projectRoot: string,
-  canvasId: string | null | undefined
+  canvasId: string | null | undefined,
+  scheduler: WatchScheduler
 ): Promise<RuntimeStateWatch> {
   const activeWatch = runtimeStateWatches.get(key);
   if (activeWatch) {
@@ -408,12 +404,17 @@ async function getOrCreateRuntimeStateWatch(
       }
       scheduleRuntimeStateFlush(currentWatch, projectRoot, canvasId, runtimeStateWatchDebounceMs);
     };
-    const backend = await startRuntimeStateWatchBackend(workspace.stateFile, recordChange);
+    const backend = await startRuntimeStateWatchBackend(
+      workspace.stateFile,
+      recordChange,
+      scheduler
+    );
     const createdWatch: RuntimeStateWatch = {
       backend,
       subscribers: new Map(),
       stateFile: workspace.stateFile,
       timer: null,
+      scheduler,
       flushInFlight: false,
       flushRequested: false,
       flushFailureBackoffMs: 0,
@@ -438,13 +439,14 @@ async function getOrCreateRuntimeStateWatch(
 async function startRuntimeStateWatch(
   projectRoot: string,
   canvasId: string | null | undefined,
-  webContents: WebContents
+  webContents: WebContents,
+  scheduler: WatchScheduler
 ): Promise<void> {
   const key = watchKey(projectRoot, canvasId);
   addPendingRuntimeStateWatchSubscriber(key, webContents);
   let activeWatch: RuntimeStateWatch;
   try {
-    activeWatch = await getOrCreateRuntimeStateWatch(key, projectRoot, canvasId);
+    activeWatch = await getOrCreateRuntimeStateWatch(key, projectRoot, canvasId, scheduler);
   } catch (caught) {
     removePendingRuntimeStateWatchSubscriber(key, webContents.id);
     throw caught;
@@ -495,11 +497,14 @@ function stopRuntimeStateWatch(
   runtimeStateWatches.delete(key);
 }
 
-export function registerRuntimeStateWatchHandlers(): void {
+export function registerRuntimeStateWatchHandlers(
+  options: RuntimeStateWatchHandlerOptions = {}
+): void {
+  const scheduler = options.scheduler ?? systemWatchScheduler;
   ipcMain.handle(
     desktopBridgeInvokeChannels.watchRuntimeState,
     (event, ref: DesktopCanvasReference) =>
-      startRuntimeStateWatch(ref.projectRoot, ref.canvasId, event.sender)
+      startRuntimeStateWatch(ref.projectRoot, ref.canvasId, event.sender, scheduler)
   );
   ipcMain.handle(
     desktopBridgeInvokeChannels.unwatchRuntimeState,

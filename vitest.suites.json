@@ -241,6 +241,7 @@
         "useCurrentCanvasAccess.test.tsx",
         "useWorkspaceAccessScope.test.tsx",
         "verticalResizeHandle.test.tsx",
+        "watchRuntime.test.ts",
         "windowAppearanceHandlers.test.ts",
         "windowChrome.test.ts",
         "windowExternalLinks.test.ts",

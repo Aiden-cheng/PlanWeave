@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, vi } from "vitest";
 import { desktopBridgeInvokeChannels } from "../../shared/ipcChannels";
+import { WatchRuntimeTestDriver } from "./watchRuntimeTestDriver.js";
 
 export type RegisteredHandler = (
   event: { sender: TestWebContents },
@@ -117,6 +118,7 @@ const activeRegistrations: Array<{
   webContents: TestWebContents;
   workspace: TestWorkspace;
 }> = [];
+const watchRuntimeDriver = new WatchRuntimeTestDriver();
 
 function createFakeWatcher(
   watchers: FakeFsWatcher[],
@@ -308,7 +310,7 @@ export async function registerAndWatch(
 ): Promise<void> {
   runtimeMock.state.workspace = workspace;
   const { registerPackageWatchHandlers } = await import("../../main/packageWatch");
-  registerPackageWatchHandlers();
+  registerPackageWatchHandlers({ scheduler: watchRuntimeDriver });
   const handler = electronMock.handlers.get(desktopBridgeInvokeChannels.watchPackageFiles);
   expect(handler).toBeDefined();
   await handler?.(
@@ -345,39 +347,28 @@ export async function unwatch(
 }
 
 export async function flushDebounce(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(150);
+  await watchRuntimeDriver.advanceByAndDrain(150);
 }
 
-export function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+export function advanceWatchTime(ms: number): void {
+  watchRuntimeDriver.advanceBy(ms);
 }
 
 export async function waitForPollAndDebounce(): Promise<void> {
-  await wait(1600);
-  await wait(250);
+  await watchRuntimeDriver.advanceByAndDrain(1600);
+  await watchRuntimeDriver.advanceByAndDrain(250);
 }
 
-export async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 8; i += 1) {
-    await Promise.resolve();
-  }
-  for (let i = 0; i < 16; i += 1) {
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
-  }
+export async function settleWatchTasks(): Promise<void> {
+  await watchRuntimeDriver.drain();
 }
 
-export async function advanceAndFlush(ms: number): Promise<void> {
-  let remaining = ms;
-  while (remaining > 0) {
-    const step = Math.min(remaining, 250);
-    await vi.advanceTimersByTimeAsync(step);
-    await flushMicrotasks();
-    remaining -= step;
-  }
+export async function advanceWatchTimeAndSettle(ms: number): Promise<void> {
+  await watchRuntimeDriver.advanceByAndDrain(ms);
+}
+
+export function getWatchRuntimeTestDriver(): WatchRuntimeTestDriver {
+  return watchRuntimeDriver;
 }
 
 export function forcePollingBackend(): void {
@@ -395,6 +386,7 @@ export function resetFakeWatchImplementation(): void {
 }
 
 export function resetPackageWatchTestState(): void {
+  watchRuntimeDriver.reset();
   electronMock.handlers.clear();
   electronMock.ipcMain.handle.mockClear();
   fsMock.watchers.length = 0;
@@ -421,6 +413,7 @@ export async function cleanupPackageWatchTestResources(): Promise<void> {
   } else {
     activeRegistrations.length = 0;
   }
+  await watchRuntimeDriver.drain();
   await Promise.all(
     tempRoots.splice(0).map((rootPath) => rm(rootPath, { recursive: true, force: true }))
   );

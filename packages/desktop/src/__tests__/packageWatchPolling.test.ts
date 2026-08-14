@@ -3,19 +3,20 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { packageFileChangedChannel } from "../shared/ipcChannels";
 import {
-  advanceAndFlush,
+  advanceWatchTime,
+  advanceWatchTimeAndSettle,
   cleanupPackageWatchTestResources,
   createDeferred,
   createWebContents,
   createWorkspace,
   flushDebounce,
-  flushMicrotasks,
+  settleWatchTasks,
   forcePollingBackend,
   getPackageWatchMocks,
+  getWatchRuntimeTestDriver,
   registerAndWatch,
   resetPackageWatchTestState,
   unwatch,
-  wait,
   waitForPollAndDebounce
 } from "./support/packageWatchTestHarness";
 
@@ -24,19 +25,14 @@ const { fsMock, fsPromisesMock } = getPackageWatchMocks();
 describe("package file watcher: polling SLA and resources", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.useFakeTimers({
-      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"]
-    });
     resetPackageWatchTestState();
   });
 
   afterEach(async () => {
     await cleanupPackageWatchTestResources();
-    vi.useRealTimers();
   });
 
   it("detects size-changing prompt edits from polling snapshots without content hashing", async () => {
-    vi.useRealTimers();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     fsMock.watch.mockImplementationOnce(() => {
@@ -58,7 +54,6 @@ describe("package file watcher: polling SLA and resources", () => {
   });
 
   it("skips markdown content reads on unchanged polling ticks", async () => {
-    vi.useRealTimers();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     fsMock.watch.mockImplementationOnce(() => {
@@ -68,8 +63,8 @@ describe("package file watcher: polling SLA and resources", () => {
     await registerAndWatch(webContents, workspace);
     fsPromisesMock.reset();
 
-    await wait(1600);
-    await wait(1600);
+    await advanceWatchTimeAndSettle(1600);
+    await advanceWatchTimeAndSettle(1600);
 
     const markdownContentReads = fsPromisesMock.state.readFilePaths.filter((path) =>
       path.endsWith(".md")
@@ -91,13 +86,13 @@ describe("package file watcher: polling SLA and resources", () => {
           completed.resolve();
         }
       };
-      await advanceAndFlush(ms);
+      await advanceWatchTimeAndSettle(ms);
       await completed.promise;
       fsPromisesMock.state.readdirResultHook = null;
     };
 
     await registerAndWatch(webContents, workspace);
-    await flushMicrotasks();
+    await settleWatchTasks();
 
     // Wait for the inventory kickoff's final recursive readdir result. Fake timers cannot
     // prove that real filesystem I/O has settled, so use the mocked I/O boundary explicitly.
@@ -108,8 +103,8 @@ describe("package file watcher: polling SLA and resources", () => {
 
     // Several high-frequency probe intervals (~1s). Probe only stats known paths — no recursive walk.
     // Stay well under the 10s inventory interval so this window is probe-only.
-    await advanceAndFlush(4000);
-    await flushMicrotasks();
+    await advanceWatchTimeAndSettle(4000);
+    await settleWatchTasks();
     expect(fsPromisesMock.state.readdirPaths).toHaveLength(0);
 
     // Inventory interval at 10s performs recursive membership scan (readdir of nodes tree).
@@ -119,8 +114,8 @@ describe("package file watcher: polling SLA and resources", () => {
 
     fsPromisesMock.state.readdirPaths = [];
     // More probe ticks between inventory windows must still avoid readdir.
-    await advanceAndFlush(4000);
-    await flushMicrotasks();
+    await advanceWatchTimeAndSettle(4000);
+    await settleWatchTasks();
     expect(fsPromisesMock.state.readdirPaths).toHaveLength(0);
 
     // Content hash sweep is deferred (~25s kickoff); before that, md body reads stay zero on probe ticks.
@@ -132,7 +127,6 @@ describe("package file watcher: polling SLA and resources", () => {
   });
 
   it("reports added and deleted deep prompt files from polling snapshots", async () => {
-    vi.useRealTimers();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     fsMock.watch.mockImplementationOnce(() => {
@@ -164,7 +158,6 @@ describe("package file watcher: polling SLA and resources", () => {
   });
 
   it("known manifest edit detected via high-frequency (1s) probe under polling", async () => {
-    vi.useRealTimers();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     fsMock.watch.mockImplementationOnce(() => {
@@ -178,8 +171,8 @@ describe("package file watcher: polling SLA and resources", () => {
       JSON.stringify({ version: "plan-package/v1", t: Date.now() }),
       "utf8"
     );
-    await wait(1200);
-    await wait(100);
+    await advanceWatchTimeAndSettle(1200);
+    await advanceWatchTimeAndSettle(100);
 
     expect(webContents.send).toHaveBeenCalledWith(
       packageFileChangedChannel,
@@ -191,7 +184,6 @@ describe("package file watcher: polling SLA and resources", () => {
   });
 
   it("deep prompt add/delete detected within inventory SLA (~10s) under polling", async () => {
-    vi.useRealTimers();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     fsMock.watch.mockImplementationOnce(() => {
@@ -205,7 +197,7 @@ describe("package file watcher: polling SLA and resources", () => {
     await mkdir(dirname(deepNew), { recursive: true });
     await writeFile(deepNew, "deep new\n", "utf8");
 
-    await wait(1200);
+    await advanceWatchTimeAndSettle(1200);
 
     expect(webContents.send).toHaveBeenCalledWith(
       packageFileChangedChannel,
@@ -216,7 +208,7 @@ describe("package file watcher: polling SLA and resources", () => {
 
     webContents.send.mockClear();
     await rm(deepNew, { force: true });
-    await wait(1200);
+    await advanceWatchTimeAndSettle(1200);
 
     expect(webContents.send).toHaveBeenCalledWith(
       packageFileChangedChannel,
@@ -235,7 +227,7 @@ describe("package file watcher: polling SLA and resources", () => {
     await utimes(target, pinned, pinned);
 
     await registerAndWatch(webContents, workspace);
-    await advanceAndFlush(30_000);
+    await advanceWatchTimeAndSettle(30_000);
     await flushDebounce();
     webContents.send.mockClear();
 
@@ -249,11 +241,11 @@ describe("package file watcher: polling SLA and resources", () => {
     expect(after.size).toBe(pinnedBefore.size);
     expect(after.mtimeMs).toBe(pinnedBefore.mtimeMs);
 
-    await advanceAndFlush(9000);
+    await advanceWatchTimeAndSettle(9000);
     await flushDebounce();
     expect(webContents.send).not.toHaveBeenCalled();
 
-    await advanceAndFlush(21_000);
+    await advanceWatchTimeAndSettle(21_000);
     await flushDebounce();
 
     const had = webContents.send.mock.calls.some(
@@ -283,11 +275,11 @@ describe("package file watcher: polling SLA and resources", () => {
     await utimes(target, pinned, pinned);
 
     await registerAndWatch(webContents, workspace);
-    await advanceAndFlush(30_000);
+    await advanceWatchTimeAndSettle(30_000);
     await flushDebounce();
     webContents.send.mockClear();
 
-    await advanceAndFlush(10_000);
+    await advanceWatchTimeAndSettle(10_000);
     await flushDebounce();
     webContents.send.mockClear();
 
@@ -315,17 +307,17 @@ describe("package file watcher: polling SLA and resources", () => {
     };
 
     try {
-      await advanceAndFlush(19_000);
+      await advanceWatchTimeAndSettle(19_000);
       await flushDebounce();
       expect(webContents.send).not.toHaveBeenCalled();
 
-      await advanceAndFlush(1000);
+      advanceWatchTime(1000);
       await targetHashReadStarted.promise;
       expect(webContents.send).not.toHaveBeenCalled();
 
       delayedTargetHashRead.resolve(replacement);
       await hashSweepCompleted.promise;
-      await flushMicrotasks();
+      await settleWatchTasks();
       await flushDebounce();
 
       const had = webContents.send.mock.calls.some(
@@ -346,20 +338,20 @@ describe("package file watcher: polling SLA and resources", () => {
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     await registerAndWatch(webContents, workspace);
-    await flushMicrotasks();
+    await settleWatchTasks();
 
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBeGreaterThan(0);
     await unwatch(webContents, workspace);
-    await flushMicrotasks();
+    await settleWatchTasks();
 
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
 
     await writeFile(
       join(workspace.packageDir, "nodes", "T-001", "prompt.md"),
       "after unwatch\n",
       "utf8"
     );
-    await advanceAndFlush(30_000);
+    await advanceWatchTimeAndSettle(30_000);
     await flushDebounce();
     expect(webContents.send).not.toHaveBeenCalled();
   });
@@ -371,21 +363,21 @@ describe("package file watcher: polling SLA and resources", () => {
     const deferredStat = createDeferred<void>();
 
     await registerAndWatch(webContents, workspace);
-    await flushMicrotasks();
+    await settleWatchTasks();
     webContents.send.mockClear();
 
     fsPromisesMock.state.holdStatPromise = deferredStat.promise;
-    await advanceAndFlush(1000);
+    advanceWatchTime(1000);
     await unwatch(webContents, workspace);
 
     deferredStat.resolve();
     fsPromisesMock.state.holdStatPromise = null;
-    await flushMicrotasks();
-    await advanceAndFlush(5000);
+    await settleWatchTasks();
+    await advanceWatchTimeAndSettle(5000);
     await flushDebounce();
 
     expect(webContents.send).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
   });
 
   it("hash sweep single-flight: one read failure does not overlap the next sweep generation", async () => {
@@ -398,7 +390,7 @@ describe("package file watcher: polling SLA and resources", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await registerAndWatch(webContents, workspace);
-      await flushMicrotasks();
+      await settleWatchTasks();
       webContents.send.mockClear();
       fsPromisesMock.state.maxActiveReadFiles = 0;
 
@@ -412,16 +404,15 @@ describe("package file watcher: polling SLA and resources", () => {
         return deferred.promise;
       };
 
-      await advanceAndFlush(25_000);
-      await flushMicrotasks();
+      advanceWatchTime(25_000);
+      await vi.waitFor(() => expect(deferredReads.length).toBeGreaterThan(0));
 
       expect(fsPromisesMock.state.maxActiveReadFiles).toBeLessThanOrEqual(4);
       const held = deferredReads.length;
       expect(held).toBeGreaterThan(0);
       expect(fsPromisesMock.state.activeReadFiles).toBe(held);
 
-      await advanceAndFlush(30_000);
-      await flushMicrotasks();
+      advanceWatchTime(30_000);
       expect(fsPromisesMock.state.maxActiveReadFiles).toBeLessThanOrEqual(4);
       expect(fsPromisesMock.state.activeReadFiles).toBe(held);
 
@@ -431,7 +422,7 @@ describe("package file watcher: polling SLA and resources", () => {
       for (const deferred of deferredReads) {
         deferred.resolve(Buffer.from("stale"));
       }
-      await flushMicrotasks();
+      await settleWatchTasks();
       await flushDebounce();
       expect(warnSpy).toHaveBeenCalled();
       expect(webContents.send).not.toHaveBeenCalled();
@@ -441,94 +432,56 @@ describe("package file watcher: polling SLA and resources", () => {
     }
   });
 
-  it("a stale hash sweep cannot resurrect a path removed by probe and inventory", async () => {
+  it("serializes probe and inventory behind an in-flight hash sweep", async () => {
     forcePollingBackend();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     const target = join(workspace.packageDir, "nodes", "T-001", "blocks", "B-001.prompt.md");
+    const blocksDirectory = dirname(target);
     const releaseHashRead = createDeferred<Buffer>();
-    let targetReadStarted = false;
+    const targetReadStarted = createDeferred<void>();
+    let probeStarted = false;
+    let inventoryStarted = false;
 
     try {
       await registerAndWatch(webContents, workspace);
       fsPromisesMock.state.readFileHook = (path) => {
         if (path === target) {
-          targetReadStarted = true;
+          targetReadStarted.resolve();
           return releaseHashRead.promise;
         }
       };
 
-      await advanceAndFlush(25_000);
-      expect(targetReadStarted).toBe(true);
-
-      await unlink(target);
-      await advanceAndFlush(5000);
-      await flushDebounce();
+      advanceWatchTime(25_000);
+      await targetReadStarted.promise;
       webContents.send.mockClear();
 
-      fsPromisesMock.state.readFileHook = null;
-      releaseHashRead.resolve(Buffer.from("block prompt\n"));
-      await flushMicrotasks();
+      await unlink(target);
+      fsPromisesMock.state.statHook = (path) => {
+        if (path === workspace.manifestFile) {
+          probeStarted = true;
+        }
+      };
+      fsPromisesMock.state.readdirResultHook = (path) => {
+        if (path === blocksDirectory) {
+          inventoryStarted = true;
+        }
+      };
+      advanceWatchTime(5000);
+      await Promise.resolve();
 
-      await advanceAndFlush(10_000);
-      await flushDebounce();
+      expect(probeStarted).toBe(false);
+      expect(inventoryStarted).toBe(false);
       expect(webContents.send).not.toHaveBeenCalled();
-    } finally {
+
       fsPromisesMock.state.readFileHook = null;
       releaseHashRead.resolve(Buffer.from("block prompt\n"));
-    }
-  });
-
-  it("a stale hash sweep cannot overwrite a fingerprint just published by probe", async () => {
-    forcePollingBackend();
-    const workspace = await createWorkspace();
-    const webContents = createWebContents();
-    const target = join(workspace.packageDir, "nodes", "T-001", "blocks", "B-001.prompt.md");
-    const releaseHashRead = createDeferred<Buffer>();
-    const hashReadStarted = createDeferred<void>();
-    const releaseProbeStat = createDeferred<void>();
-    const probeStatStarted = createDeferred<void>();
-    const probeTailCompleted = createDeferred<void>();
-    let probeReleased = false;
-    let probeTailCallId: number | null = null;
-
-    try {
-      await registerAndWatch(webContents, workspace);
-      fsPromisesMock.state.readFileHook = (path) => {
-        if (path === target) {
-          hashReadStarted.resolve();
-          return releaseHashRead.promise;
-        }
-      };
-
-      await advanceAndFlush(25_000);
-      await hashReadStarted.promise;
-
-      fsPromisesMock.state.statHook = async (path, callId) => {
-        if (path === target && !probeReleased) {
-          probeStatStarted.resolve();
-          await releaseProbeStat.promise;
-          return;
-        }
-        if (path === workspace.projectPromptFile && probeReleased && probeTailCallId === null) {
-          probeTailCallId = callId;
-        }
-      };
-      fsPromisesMock.state.statResultHook = (_path, callId) => {
-        if (callId === probeTailCallId) {
-          probeTailCompleted.resolve();
-        }
-      };
-
-      await advanceAndFlush(1000);
-      await probeStatStarted.promise;
-
-      await writeFile(target, "changed while hash read is in flight\n", "utf8");
-      probeReleased = true;
-      releaseProbeStat.resolve();
-      await probeTailCompleted.promise;
-      await flushMicrotasks();
+      await settleWatchTasks();
+      expect(probeStarted).toBe(true);
+      expect(inventoryStarted).toBe(true);
       await flushDebounce();
+
+      expect(webContents.send).toHaveBeenCalledTimes(1);
       expect(webContents.send).toHaveBeenCalledWith(
         packageFileChangedChannel,
         expect.objectContaining({
@@ -537,20 +490,13 @@ describe("package file watcher: polling SLA and resources", () => {
       );
       webContents.send.mockClear();
 
-      fsPromisesMock.state.readFileHook = null;
-      releaseHashRead.resolve(Buffer.from("block prompt\n"));
-      await flushMicrotasks();
-      await flushDebounce();
-      webContents.send.mockClear();
-
-      await advanceAndFlush(1000);
+      await advanceWatchTimeAndSettle(10_000);
       await flushDebounce();
       expect(webContents.send).not.toHaveBeenCalled();
     } finally {
-      fsPromisesMock.state.statHook = null;
-      fsPromisesMock.state.statResultHook = null;
       fsPromisesMock.state.readFileHook = null;
-      releaseProbeStat.resolve();
+      fsPromisesMock.state.statHook = null;
+      fsPromisesMock.state.readdirResultHook = null;
       releaseHashRead.resolve(Buffer.from("block prompt\n"));
     }
   });
@@ -567,15 +513,15 @@ describe("package file watcher: polling SLA and resources", () => {
     });
     const advanceUntilProbeWarning = async (ms: number): Promise<void> => {
       awaitedProbeWarning = createDeferred<void>();
-      await advanceAndFlush(ms);
+      await advanceWatchTimeAndSettle(ms);
       await awaitedProbeWarning.promise;
       awaitedProbeWarning = null;
-      await flushMicrotasks();
+      await settleWatchTasks();
     };
 
     try {
       await registerAndWatch(webContents, workspace);
-      await advanceAndFlush(1200);
+      await advanceWatchTimeAndSettle(1200);
       await flushDebounce();
       webContents.send.mockClear();
       warnSpy.mockClear();
@@ -589,8 +535,8 @@ describe("package file watcher: polling SLA and resources", () => {
       expect(webContents.send).not.toHaveBeenCalled();
       const probeWarningsAfterFirstFailure = probeWarningCount();
 
-      await advanceAndFlush(500);
-      await flushMicrotasks();
+      await advanceWatchTimeAndSettle(500);
+      await settleWatchTasks();
       expect(probeWarningCount()).toBe(probeWarningsAfterFirstFailure);
       expect(webContents.send).not.toHaveBeenCalled();
 
@@ -599,8 +545,8 @@ describe("package file watcher: polling SLA and resources", () => {
       expect(webContents.send).not.toHaveBeenCalled();
 
       for (let i = 0; i < 6; i += 1) {
-        await advanceAndFlush(16_000);
-        await flushMicrotasks();
+        await advanceWatchTimeAndSettle(16_000);
+        await settleWatchTasks();
       }
       expect(webContents.send).not.toHaveBeenCalled();
 
@@ -616,9 +562,9 @@ describe("package file watcher: polling SLA and resources", () => {
         }
       };
       fsPromisesMock.state.failStat = false;
-      await advanceAndFlush(16_000);
+      await advanceWatchTimeAndSettle(16_000);
       await recoveredProbeFinalStat.promise;
-      await flushMicrotasks();
+      await settleWatchTasks();
       fsPromisesMock.state.statResultHook = null;
       webContents.send.mockClear();
       warnSpy.mockClear();
@@ -628,7 +574,7 @@ describe("package file watcher: polling SLA and resources", () => {
         JSON.stringify({ version: "plan-package/v1", recovered: true }),
         "utf8"
       );
-      await advanceAndFlush(1000);
+      await advanceWatchTimeAndSettle(1000);
       await flushDebounce();
 
       expect(webContents.send).toHaveBeenCalledWith(
@@ -645,34 +591,30 @@ describe("package file watcher: polling SLA and resources", () => {
     }
   });
 
-  it("inventory cannot consume a known-file edit before a concurrent probe publishes it", async () => {
+  it("serializes inventory behind a slow probe and publishes the edit once", async () => {
     forcePollingBackend();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     const releaseProbeStat = createDeferred<void>();
     const probeStatStarted = createDeferred<void>();
-    const inventoryCompleted = createDeferred<void>();
-    let probeReleased = false;
-    let manifestStatCalls = 0;
+    const blocksDirectory = join(workspace.packageDir, "nodes", "T-001", "blocks");
+    let inventoryStarted = false;
 
     try {
       await registerAndWatch(webContents, workspace);
-      await advanceAndFlush(1200);
+      await advanceWatchTimeAndSettle(1200);
       await flushDebounce();
       webContents.send.mockClear();
 
       fsPromisesMock.state.statHook = async (path) => {
         if (path === workspace.manifestFile) {
-          manifestStatCalls += 1;
-          if (manifestStatCalls === 1) {
-            probeStatStarted.resolve();
-            await releaseProbeStat.promise;
-          }
+          probeStatStarted.resolve();
+          await releaseProbeStat.promise;
         }
       };
-      fsPromisesMock.state.statResultHook = (path) => {
-        if (path === workspace.projectPromptFile && !probeReleased) {
-          inventoryCompleted.resolve();
+      fsPromisesMock.state.readdirResultHook = (path) => {
+        if (path === blocksDirectory) {
+          inventoryStarted = true;
         }
       };
 
@@ -682,29 +624,30 @@ describe("package file watcher: polling SLA and resources", () => {
         "utf8"
       );
 
-      await advanceAndFlush(800);
+      advanceWatchTime(800);
       await probeStatStarted.promise;
-      await advanceAndFlush(8000);
-      await inventoryCompleted.promise;
-      await flushMicrotasks();
-      expect(manifestStatCalls).toBeGreaterThanOrEqual(2);
+      advanceWatchTime(8000);
+      await Promise.resolve();
+
+      expect(inventoryStarted).toBe(false);
       expect(webContents.send).not.toHaveBeenCalled();
 
-      probeReleased = true;
       releaseProbeStat.resolve();
-      await vi.waitFor(async () => {
-        await flushDebounce();
-        expect(webContents.send).toHaveBeenCalledWith(
-          packageFileChangedChannel,
-          expect.objectContaining({
-            paths: expect.arrayContaining(["package/manifest.json"]),
-            backendKind: "polling"
-          })
-        );
-      });
+      await settleWatchTasks();
+      expect(inventoryStarted).toBe(true);
+      await flushDebounce();
+
+      expect(webContents.send).toHaveBeenCalledTimes(1);
+      expect(webContents.send).toHaveBeenCalledWith(
+        packageFileChangedChannel,
+        expect.objectContaining({
+          paths: expect.arrayContaining(["package/manifest.json"]),
+          backendKind: "polling"
+        })
+      );
     } finally {
       fsPromisesMock.state.statHook = null;
-      fsPromisesMock.state.statResultHook = null;
+      fsPromisesMock.state.readdirResultHook = null;
       releaseProbeStat.resolve();
     }
   });

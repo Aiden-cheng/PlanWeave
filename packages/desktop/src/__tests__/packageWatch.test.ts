@@ -2,18 +2,20 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { desktopBridgeInvokeChannels, packageFileChangedChannel } from "../shared/ipcChannels";
 import {
-  advanceAndFlush,
+  advanceWatchTime,
+  advanceWatchTimeAndSettle,
   cleanupPackageWatchTestResources,
   createDeferred,
   createWebContents,
   createWorkspace,
   emitNativeWatcherErrors,
   flushDebounce,
-  flushMicrotasks,
   forcePollingBackend,
   getPackageWatchMocks,
+  getWatchRuntimeTestDriver,
   registerAndWatch,
   resetPackageWatchTestState,
+  settleWatchTasks,
   unwatch,
   waitForPollAndDebounce
 } from "./support/packageWatchTestHarness";
@@ -23,15 +25,11 @@ const { electronMock, fsMock, fsPromisesMock, runtimeMock } = getPackageWatchMoc
 describe("package file watcher: controller lifecycle", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.useFakeTimers({
-      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"]
-    });
     resetPackageWatchTestState();
   });
 
   afterEach(async () => {
     await cleanupPackageWatchTestResources();
-    vi.useRealTimers();
   });
 
   it("uses native recursive fs.watch when it can be created", async () => {
@@ -82,7 +80,6 @@ describe("package file watcher: controller lifecycle", () => {
   });
 
   it("falls back to polling when recursive watch creation fails", async () => {
-    vi.useRealTimers();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
     fsMock.watch.mockImplementationOnce(() => {
@@ -117,9 +114,9 @@ describe("package file watcher: controller lifecycle", () => {
 
     packageWatcher?.callback("change", "manifest.json");
     packageWatcher?.callback("change", "nodes/T-001/prompt.md");
-    await vi.advanceTimersByTimeAsync(149);
+    await advanceWatchTimeAndSettle(149);
     expect(webContents.send).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
+    await advanceWatchTimeAndSettle(1);
 
     expect(webContents.send).toHaveBeenCalledTimes(1);
     expect(webContents.send).toHaveBeenCalledWith(
@@ -171,7 +168,6 @@ describe("package file watcher: controller lifecycle", () => {
     }
 
     vi.resetModules();
-    vi.useRealTimers();
     electronMock.handlers.clear();
     fsMock.watchers.length = 0;
     fsMock.watch.mockClear();
@@ -224,7 +220,7 @@ describe("package file watcher: controller lifecycle", () => {
     runtimeMock.state.workspace = workspace;
     runtimeMock.resolveTaskCanvasWorkspace.mockImplementationOnce(() => deferredWorkspace.promise);
     const { registerPackageWatchHandlers } = await import("../main/packageWatch");
-    registerPackageWatchHandlers();
+    registerPackageWatchHandlers({ scheduler: getWatchRuntimeTestDriver() });
     const handler = electronMock.handlers.get(desktopBridgeInvokeChannels.watchPackageFiles);
     expect(handler).toBeDefined();
 
@@ -266,7 +262,7 @@ describe("package file watcher: controller lifecycle", () => {
     runtimeMock.state.workspace = workspace;
     runtimeMock.resolveTaskCanvasWorkspace.mockImplementationOnce(() => deferredWorkspace.promise);
     const { registerPackageWatchHandlers } = await import("../main/packageWatch");
-    registerPackageWatchHandlers();
+    registerPackageWatchHandlers({ scheduler: getWatchRuntimeTestDriver() });
     const watchHandler = electronMock.handlers.get(desktopBridgeInvokeChannels.watchPackageFiles);
     expect(watchHandler).toBeDefined();
 
@@ -306,7 +302,7 @@ describe("package file watcher: controller lifecycle", () => {
     runtimeMock.state.workspace = workspace;
     runtimeMock.resolveTaskCanvasWorkspace.mockImplementationOnce(() => deferredWorkspace.promise);
     const { registerPackageWatchHandlers } = await import("../main/packageWatch");
-    registerPackageWatchHandlers();
+    registerPackageWatchHandlers({ scheduler: getWatchRuntimeTestDriver() });
     const watchHandler = electronMock.handlers.get(desktopBridgeInvokeChannels.watchPackageFiles);
     expect(watchHandler).toBeDefined();
 
@@ -336,8 +332,9 @@ describe("package file watcher: controller lifecycle", () => {
 
     emitNativeWatcherErrors(nativeWatchers, new Error("native watcher runtime failure"));
     // Drain polling baseline I/O (real fs) + kickoff timers under fake clock.
-    await flushMicrotasks();
-    await advanceAndFlush(700);
+    advanceWatchTime(0);
+    await settleWatchTasks();
+    await advanceWatchTimeAndSettle(700);
     await flushDebounce();
 
     const { writeFile } = await import("node:fs/promises");
@@ -346,7 +343,7 @@ describe("package file watcher: controller lifecycle", () => {
       "native errored then polling edit\n",
       "utf8"
     );
-    await advanceAndFlush(2200);
+    await advanceWatchTimeAndSettle(2200);
     await flushDebounce();
 
     const calls = webContents.send.mock.calls.filter((c) => c[0] === packageFileChangedChannel);
@@ -380,12 +377,12 @@ describe("package file watcher: controller lifecycle", () => {
     for (const handler of allErrorHandlers) {
       handler(new Error("err2"));
     }
-    await flushMicrotasks();
+    advanceWatchTime(0);
 
     // Late native generation change while failover is pending — must not publish.
     webContents.send.mockClear();
     nativeWs[0]?.callback("change", "nodes/T-001/prompt.md");
-    await flushDebounce();
+    advanceWatchTime(150);
     expect(webContents.send).not.toHaveBeenCalled();
 
     for (const w of nativeWs) {
@@ -397,7 +394,8 @@ describe("package file watcher: controller lifecycle", () => {
     deferredStat.resolve();
     fsPromisesMock.state.holdStatPromise = null;
     // Allow polling baseline + kickoff install to finish under fake timers + real fs.
-    await advanceAndFlush(700);
+    await settleWatchTasks();
+    await advanceWatchTimeAndSettle(700);
     await flushDebounce();
 
     webContents.send.mockClear();
@@ -412,7 +410,7 @@ describe("package file watcher: controller lifecycle", () => {
       JSON.stringify({ version: "plan-package/v1", bumped: true }),
       "utf8"
     );
-    await advanceAndFlush(2200);
+    await advanceWatchTimeAndSettle(2200);
     await flushDebounce();
 
     const pollingCalls = webContents.send.mock.calls.filter(
@@ -441,11 +439,11 @@ describe("package file watcher: controller lifecycle", () => {
     fsPromisesMock.state.holdStatPromise = deferredStat.promise;
 
     emitNativeWatcherErrors(nativeWs, new Error("native runtime failure during failover"));
-    await flushMicrotasks();
+    advanceWatchTime(0);
 
     // Last subscriber leaves while polling Promise is still pending.
     await unwatch(webContents, workspace);
-    await flushMicrotasks();
+    advanceWatchTime(0);
 
     for (const w of nativeWs) {
       expect(w.close).toHaveBeenCalledTimes(1);
@@ -454,12 +452,12 @@ describe("package file watcher: controller lifecycle", () => {
     webContents.send.mockClear();
     deferredStat.resolve();
     fsPromisesMock.state.holdStatPromise = null;
-    await flushMicrotasks();
-    await advanceAndFlush(30_000);
+    await settleWatchTasks();
+    await advanceWatchTimeAndSettle(30_000);
     await flushDebounce();
 
     expect(webContents.send).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
 
     // Native close remains exactly once even after delayed poller settle path runs.
     for (const w of nativeWs) {
@@ -476,7 +474,7 @@ describe("package file watcher: controller lifecycle", () => {
     for (const watcher of fsMock.watchers) {
       expect(watcher.close).toHaveBeenCalled();
     }
-    expect(vi.getTimerCount()).toBe(0);
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
 
     vi.resetModules();
     electronMock.handlers.clear();
@@ -487,16 +485,16 @@ describe("package file watcher: controller lifecycle", () => {
     const pollWs = await createWorkspace();
     const w2 = createWebContents(2);
     await registerAndWatch(w2, pollWs);
-    await flushMicrotasks();
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await settleWatchTasks();
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBeGreaterThan(0);
     await unwatch(w2, pollWs);
-    await flushMicrotasks();
-    expect(vi.getTimerCount()).toBe(0);
+    await settleWatchTasks();
+    expect(getWatchRuntimeTestDriver().pendingTimerCount()).toBe(0);
 
     const { writeFile } = await import("node:fs/promises");
     const afterPath = join(pollWs.packageDir, "nodes", "T-001", "prompt.md");
     await writeFile(afterPath, "after last unwatch\n", "utf8");
-    await advanceAndFlush(30_000);
+    await advanceWatchTimeAndSettle(30_000);
     await flushDebounce();
     expect(w2.send).not.toHaveBeenCalled();
   });

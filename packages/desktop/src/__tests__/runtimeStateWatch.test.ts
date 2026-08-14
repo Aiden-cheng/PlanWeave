@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { desktopBridgeInvokeChannels, runtimeStateChangedChannel } from "../shared/ipcChannels";
+import { WatchRuntimeTestDriver } from "./support/watchRuntimeTestDriver.js";
 
 type RegisteredHandler = (
   event: { sender: TestWebContents },
@@ -154,6 +155,7 @@ const activeWatches: Array<{
   webContents: TestWebContents;
   workspace: TestWorkspace;
 }> = [];
+const watchRuntimeDriver = new WatchRuntimeTestDriver();
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -193,7 +195,7 @@ async function registerAndWatch(
 ): Promise<void> {
   runtimeMock.state.workspace = workspace;
   const { registerRuntimeStateWatchHandlers } = await import("../main/runtimeStateWatch");
-  registerRuntimeStateWatchHandlers();
+  registerRuntimeStateWatchHandlers({ scheduler: watchRuntimeDriver });
   const handler = electronMock.handlers.get(desktopBridgeInvokeChannels.watchRuntimeState);
   expect(handler).toBeDefined();
   await handler?.(
@@ -219,16 +221,7 @@ async function unwatch(webContents: TestWebContents, workspace: TestWorkspace): 
 }
 
 async function flushDebounce(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(150);
-  for (let index = 0; index < 5; index += 1) {
-    await Promise.resolve();
-  }
-}
-
-async function flushMicrotasks(): Promise<void> {
-  for (let index = 0; index < 10; index += 1) {
-    await Promise.resolve();
-  }
+  await watchRuntimeDriver.advanceByAndDrain(150);
 }
 
 async function advanceUntilStateStat(ms: number, stateFile: string): Promise<void> {
@@ -238,10 +231,10 @@ async function advanceUntilStateStat(ms: number, stateFile: string): Promise<voi
       completed.resolve();
     }
   };
-  await vi.advanceTimersByTimeAsync(ms);
+  watchRuntimeDriver.advanceBy(ms);
   await completed.promise;
   fsPromisesMock.state.statResultHook = null;
-  await flushMicrotasks();
+  await watchRuntimeDriver.drain();
 }
 
 async function advanceUntilFingerprint(ms: number, stateFile: string): Promise<void> {
@@ -257,11 +250,11 @@ async function advanceUntilFingerprint(ms: number, stateFile: string): Promise<v
       completed.resolve();
     }
   };
-  await vi.advanceTimersByTimeAsync(ms);
+  watchRuntimeDriver.advanceBy(ms);
   await completed.promise;
   fsPromisesMock.state.readFileResultHook = null;
   fsPromisesMock.state.statResultHook = null;
-  await flushMicrotasks();
+  await watchRuntimeDriver.drain();
 }
 
 async function advanceUntilReadFileCall(
@@ -275,22 +268,16 @@ async function advanceUntilReadFileCall(
       started.resolve();
     }
   };
-  await vi.advanceTimersByTimeAsync(ms);
+  watchRuntimeDriver.advanceBy(ms);
   await started.promise;
   fsPromisesMock.state.readFileCallHook = null;
-  await flushMicrotasks();
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  await watchRuntimeDriver.drain();
 }
 
 describe("runtime state watcher", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.useFakeTimers();
+    watchRuntimeDriver.reset();
     electronMock.handlers.clear();
     electronMock.ipcMain.handle.mockClear();
     fsMock.watchers.length = 0;
@@ -304,14 +291,12 @@ describe("runtime state watcher", () => {
     for (const { webContents, workspace } of activeWatches.splice(0)) {
       await unwatch(webContents, workspace);
     }
-    vi.useRealTimers();
     await Promise.all(
       tempRoots.splice(0).map((rootPath) => rm(rootPath, { recursive: true, force: true }))
     );
   });
 
   it("notifies subscribers when the current canvas state file changes", async () => {
-    vi.useRealTimers();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
 
@@ -331,7 +316,7 @@ describe("runtime state watcher", () => {
       "utf8"
     );
     watcher?.callback("change", "state.json");
-    await wait(250);
+    await watchRuntimeDriver.advanceByAndDrain(250);
 
     expect(webContents.send).toHaveBeenCalledWith(
       runtimeStateChangedChannel,
@@ -420,11 +405,10 @@ describe("runtime state watcher", () => {
     await writeFile(workspace.stateFile, replacement);
     await utimes(workspace.stateFile, pinned, pinned);
 
-    await vi.advanceTimersByTimeAsync(29_000);
-    await flushMicrotasks();
+    await watchRuntimeDriver.advanceByAndDrain(29_000);
     expect(webContents.send).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(1000);
+    await watchRuntimeDriver.advanceByAndDrain(1000);
     await advanceUntilFingerprint(150, workspace.stateFile);
     expect(webContents.send).toHaveBeenCalledTimes(1);
   });
@@ -448,16 +432,15 @@ describe("runtime state watcher", () => {
       }
     };
 
-    await vi.advanceTimersByTimeAsync(30_150);
+    watchRuntimeDriver.advanceBy(30_150);
     await readStarted.promise;
-    await vi.advanceTimersByTimeAsync(60_000);
-    await flushMicrotasks();
+    watchRuntimeDriver.advanceBy(60_000);
 
     expect(fsPromisesMock.state.readFileCalls).toBe(1);
     expect(fsPromisesMock.state.maxActiveReadFiles).toBe(1);
     heldRead.resolve(Buffer.from("stale"));
     fsPromisesMock.state.readFileHook = null;
-    await flushMicrotasks();
+    await watchRuntimeDriver.drain();
   });
 
   it("does not publish an in-flight fingerprint after unwatch", async () => {
@@ -476,16 +459,16 @@ describe("runtime state watcher", () => {
       }
     };
     fsMock.watchers[0]?.callback("change", "state.json");
-    await vi.advanceTimersByTimeAsync(150);
+    watchRuntimeDriver.advanceBy(150);
     await readStarted.promise;
 
     await unwatch(webContents, workspace);
     heldRead.resolve(replacement);
     fsPromisesMock.state.readFileHook = null;
-    await flushMicrotasks();
+    await watchRuntimeDriver.drain();
 
     expect(webContents.send).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(watchRuntimeDriver.pendingTimerCount()).toBe(0);
   });
 
   it("keeps fingerprint retry deadlines under a native event storm and resets after recovery", async () => {
@@ -513,11 +496,9 @@ describe("runtime state watcher", () => {
 
       for (let index = 0; index < 9; index += 1) {
         fsMock.watchers[0]?.callback("change", "state.json");
-        await vi.advanceTimersByTimeAsync(100);
-        await flushMicrotasks();
+        await watchRuntimeDriver.advanceByAndDrain(100);
       }
-      await vi.advanceTimersByTimeAsync(99);
-      await flushMicrotasks();
+      await watchRuntimeDriver.advanceByAndDrain(99);
       expect(fsPromisesMock.state.readFileCalls).toBe(1);
 
       await advanceUntilReadFileCall(1, workspace.stateFile, 2);
@@ -526,11 +507,9 @@ describe("runtime state watcher", () => {
       fsPromisesMock.state.readFileHook = null;
       for (let index = 0; index < 19; index += 1) {
         fsMock.watchers[0]?.callback("change", "state.json");
-        await vi.advanceTimersByTimeAsync(100);
-        await flushMicrotasks();
+        await watchRuntimeDriver.advanceByAndDrain(100);
       }
-      await vi.advanceTimersByTimeAsync(99);
-      await flushMicrotasks();
+      await watchRuntimeDriver.advanceByAndDrain(99);
       expect(fsPromisesMock.state.readFileCalls).toBe(2);
 
       await advanceUntilFingerprint(1, workspace.stateFile);
@@ -553,11 +532,9 @@ describe("runtime state watcher", () => {
 
       for (let index = 0; index < 9; index += 1) {
         fsMock.watchers[0]?.callback("change", "state.json");
-        await vi.advanceTimersByTimeAsync(100);
-        await flushMicrotasks();
+        await watchRuntimeDriver.advanceByAndDrain(100);
       }
-      await vi.advanceTimersByTimeAsync(99);
-      await flushMicrotasks();
+      await watchRuntimeDriver.advanceByAndDrain(99);
       expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 1);
       await advanceUntilReadFileCall(1, workspace.stateFile, callsBeforeRecoveredFailure + 2);
       expect(fsPromisesMock.state.readFileCalls).toBe(callsBeforeRecoveredFailure + 2);
@@ -582,14 +559,11 @@ describe("runtime state watcher", () => {
       warnSpy.mockClear();
       fsPromisesMock.state.failStat = true;
 
-      await vi.advanceTimersByTimeAsync(1000);
-      await flushMicrotasks();
+      await watchRuntimeDriver.advanceByAndDrain(1000);
       expect(warnSpy).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(1000);
-      await flushMicrotasks();
+      await watchRuntimeDriver.advanceByAndDrain(1000);
       expect(warnSpy).toHaveBeenCalledTimes(2);
-      await vi.advanceTimersByTimeAsync(1000);
-      await flushMicrotasks();
+      await watchRuntimeDriver.advanceByAndDrain(1000);
       expect(warnSpy).toHaveBeenCalledTimes(2);
 
       fsPromisesMock.state.failStat = false;
