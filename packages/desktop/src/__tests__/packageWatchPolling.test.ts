@@ -559,7 +559,19 @@ describe("package file watcher: polling SLA and resources", () => {
     forcePollingBackend();
     const workspace = await createWorkspace();
     const webContents = createWebContents();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let awaitedProbeWarning: ReturnType<typeof createDeferred<void>> | null = null;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation((message) => {
+      if (String(message).includes("[probe]")) {
+        awaitedProbeWarning?.resolve();
+      }
+    });
+    const advanceUntilProbeWarning = async (ms: number): Promise<void> => {
+      awaitedProbeWarning = createDeferred<void>();
+      await advanceAndFlush(ms);
+      await awaitedProbeWarning.promise;
+      awaitedProbeWarning = null;
+      await flushMicrotasks();
+    };
 
     try {
       await registerAndWatch(webContents, workspace);
@@ -570,8 +582,7 @@ describe("package file watcher: polling SLA and resources", () => {
 
       fsPromisesMock.state.failStat = true;
 
-      await advanceAndFlush(1000);
-      await flushMicrotasks();
+      await advanceUntilProbeWarning(1000);
       const probeWarningCount = () =>
         warnSpy.mock.calls.filter(([message]) => String(message).includes("[probe]")).length;
       expect(probeWarningCount()).toBeGreaterThan(0);
@@ -583,8 +594,7 @@ describe("package file watcher: polling SLA and resources", () => {
       expect(probeWarningCount()).toBe(probeWarningsAfterFirstFailure);
       expect(webContents.send).not.toHaveBeenCalled();
 
-      await advanceAndFlush(1000);
-      await flushMicrotasks();
+      await advanceUntilProbeWarning(1000);
       expect(probeWarningCount()).toBeGreaterThan(probeWarningsAfterFirstFailure);
       expect(webContents.send).not.toHaveBeenCalled();
 
