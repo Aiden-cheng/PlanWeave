@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { packageFileChangedChannel } from "../shared/ipcChannels";
 import {
   advanceAndFlush,
-  cleanupPackageWatchTempRoots,
+  cleanupPackageWatchTestResources,
   createDeferred,
   createWebContents,
   createWorkspace,
@@ -31,8 +31,8 @@ describe("package file watcher: polling SLA and resources", () => {
   });
 
   afterEach(async () => {
+    await cleanupPackageWatchTestResources();
     vi.useRealTimers();
-    await cleanupPackageWatchTempRoots();
   });
 
   it("detects size-changing prompt edits from polling snapshots without content hashing", async () => {

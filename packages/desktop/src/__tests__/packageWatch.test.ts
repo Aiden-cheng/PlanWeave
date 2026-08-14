@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { desktopBridgeInvokeChannels, packageFileChangedChannel } from "../shared/ipcChannels";
 import {
   advanceAndFlush,
-  cleanupPackageWatchTempRoots,
+  cleanupPackageWatchTestResources,
   createDeferred,
   createWebContents,
   createWorkspace,
@@ -30,8 +30,8 @@ describe("package file watcher: controller lifecycle", () => {
   });
 
   afterEach(async () => {
+    await cleanupPackageWatchTestResources();
     vi.useRealTimers();
-    await cleanupPackageWatchTempRoots();
   });
 
   it("uses native recursive fs.watch when it can be created", async () => {

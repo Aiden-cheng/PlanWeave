@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { packageFileChangedChannel } from "../shared/ipcChannels";
 import {
   advanceAndFlush,
-  cleanupPackageWatchTempRoots,
+  cleanupPackageWatchTestResources,
   createDeferred,
   createWebContents,
   createWorkspace,
@@ -29,8 +29,8 @@ describe("package file watcher: controller identity", () => {
   });
 
   afterEach(async () => {
+    await cleanupPackageWatchTestResources();
     vi.useRealTimers();
-    await cleanupPackageWatchTempRoots();
   });
 
   it("does not let a closed controller publish or install its pending poller into a replacement", async () => {

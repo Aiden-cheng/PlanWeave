@@ -113,6 +113,10 @@ const runtimeMock = vi.hoisted(() => {
 });
 
 const tempRoots: string[] = [];
+const activeRegistrations: Array<{
+  webContents: TestWebContents;
+  workspace: TestWorkspace;
+}> = [];
 
 function createFakeWatcher(
   watchers: FakeFsWatcher[],
@@ -311,6 +315,14 @@ export async function registerAndWatch(
     { sender: webContents },
     { projectRoot: workspace.rootPath, canvasId: "canvas-a" }
   );
+  if (
+    !activeRegistrations.some(
+      (registration) =>
+        registration.webContents === webContents && registration.workspace === workspace
+    )
+  ) {
+    activeRegistrations.push({ webContents, workspace });
+  }
 }
 
 export async function unwatch(
@@ -323,6 +335,13 @@ export async function unwatch(
     { sender: webContents },
     { projectRoot: workspace.rootPath, canvasId: "canvas-a" }
   );
+  const registrationIndex = activeRegistrations.findIndex(
+    (registration) =>
+      registration.webContents === webContents && registration.workspace === workspace
+  );
+  if (registrationIndex >= 0) {
+    activeRegistrations.splice(registrationIndex, 1);
+  }
 }
 
 export async function flushDebounce(): Promise<void> {
@@ -386,7 +405,22 @@ export function resetPackageWatchTestState(): void {
   runtimeMock.resolveTaskCanvasWorkspace.mockClear();
 }
 
-export async function cleanupPackageWatchTempRoots(): Promise<void> {
+export async function cleanupPackageWatchTestResources(): Promise<void> {
+  const handler = electronMock.handlers.get(desktopBridgeInvokeChannels.unwatchPackageFiles);
+  if (handler) {
+    await Promise.all(
+      activeRegistrations
+        .splice(0)
+        .map(({ webContents, workspace }) =>
+          handler(
+            { sender: webContents },
+            { projectRoot: workspace.rootPath, canvasId: "canvas-a" }
+          )
+        )
+    );
+  } else {
+    activeRegistrations.length = 0;
+  }
   await Promise.all(
     tempRoots.splice(0).map((rootPath) => rm(rootPath, { recursive: true, force: true }))
   );
