@@ -639,18 +639,6 @@ process.exit(2);
     expect(occurrenceCount(workflow, "node scripts/report-slowest-tests.mjs")).toBe(4);
     expect(occurrenceCount(workflow, "node scripts/redact-ci-test-artifacts.mjs reports")).toBe(5);
     expect(occurrenceCount(workflow, "actions/upload-artifact@v4")).toBe(5);
-    expect(workflow).toContain(
-      "if: steps.unit-tests.outcome == 'failure' && steps.redact-unit.outcome == 'success'"
-    );
-    expect(workflow).toContain(
-      "if: steps.integration-tests.outcome == 'failure' && steps.redact-integration.outcome == 'success'"
-    );
-    expect(workflow).toContain(
-      "if: steps.performance-tests.outcome == 'failure' && steps.redact-performance.outcome == 'success'"
-    );
-    expect(workflow).toContain(
-      "if: steps.platform-tests.outcome == 'failure' && steps.redact-platform.outcome == 'success'"
-    );
     expect(workflow).toContain("if: failure() && steps.redact-packaged-smoke.outcome == 'success'");
     expect(desktopSmokeWorkflow).not.toContain("windows-latest");
     expect(desktopSmokeWorkflow).toContain("push:");

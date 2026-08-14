@@ -258,6 +258,7 @@
         "canvasCommandTwoClientE2E.test.ts",
         "canvasMapLayoutIpcContract.test.ts",
         "canvasReplicaTwoClientLiveE2E.test.ts",
+        "ciWorkflowConfig.test.ts",
         "collaborationBridge.test.ts",
         "collaborationClient.test.ts",
         "collaborationConnectForm.test.tsx",

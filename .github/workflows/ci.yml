@@ -150,11 +150,11 @@ jobs:
 
       - name: Redact failed Ubuntu test reports
         id: redact-unit
-        if: steps.unit-tests.outcome == 'failure'
+        if: always() && steps.unit-tests.outcome == 'failure'
         run: node scripts/redact-ci-test-artifacts.mjs reports
 
       - name: Upload failed Ubuntu test reports
-        if: steps.unit-tests.outcome == 'failure' && steps.redact-unit.outcome == 'success'
+        if: always() && steps.unit-tests.outcome == 'failure' && steps.redact-unit.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: test-reports-ubuntu
@@ -226,11 +226,11 @@ jobs:
 
       - name: Redact failed integration test report
         id: redact-integration
-        if: steps.integration-tests.outcome == 'failure'
+        if: always() && steps.integration-tests.outcome == 'failure'
         run: node scripts/redact-ci-test-artifacts.mjs reports
 
       - name: Upload failed integration test report
-        if: steps.integration-tests.outcome == 'failure' && steps.redact-integration.outcome == 'success'
+        if: always() && steps.integration-tests.outcome == 'failure' && steps.redact-integration.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-report-${{ matrix.shard }}
@@ -280,11 +280,11 @@ jobs:
 
       - name: Redact failed performance test report
         id: redact-performance
-        if: steps.performance-tests.outcome == 'failure'
+        if: always() && steps.performance-tests.outcome == 'failure'
         run: node scripts/redact-ci-test-artifacts.mjs reports
 
       - name: Upload failed performance test report
-        if: steps.performance-tests.outcome == 'failure' && steps.redact-performance.outcome == 'success'
+        if: always() && steps.performance-tests.outcome == 'failure' && steps.redact-performance.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: performance-test-report
@@ -340,11 +340,11 @@ jobs:
 
       - name: Redact failed platform test report
         id: redact-platform
-        if: steps.platform-tests.outcome == 'failure'
+        if: always() && steps.platform-tests.outcome == 'failure'
         run: node scripts/redact-ci-test-artifacts.mjs reports
 
       - name: Upload failed platform test report
-        if: steps.platform-tests.outcome == 'failure' && steps.redact-platform.outcome == 'success'
+        if: always() && steps.platform-tests.outcome == 'failure' && steps.redact-platform.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: platform-test-report-${{ matrix.os }}
