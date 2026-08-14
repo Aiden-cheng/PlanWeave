@@ -176,8 +176,7 @@ export function createLocalCollaborationActivationCommand({
             await coordinator.setCurrentSelection(registrationInput.selection);
             transitionStarted = true;
           }
-          const profileIdToActivate =
-            registrationInput.profileId ?? previousStatus.activeProfileId;
+          const profileIdToActivate = registrationInput.profileId ?? previousStatus.activeProfileId;
           if (
             profileIdToActivate &&
             coordinator.recognizesLocalProfile(profileIdToActivate) &&
@@ -212,8 +211,7 @@ export function createLocalCollaborationActivationCommand({
                 service,
                 registerProject: (actor) =>
                   coordinator.registerLocalProfile(activeProfile.profileId, actor),
-                ownerDisplayName:
-                  registrationInput.ownerDisplayName ?? defaultLocalOwnerDisplayName
+                ownerDisplayName: registrationInput.ownerDisplayName ?? defaultLocalOwnerDisplayName
               });
             }
             return await activateLocalCollaborationSelection({

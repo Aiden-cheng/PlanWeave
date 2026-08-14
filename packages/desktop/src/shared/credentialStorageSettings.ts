@@ -14,9 +14,7 @@ export type CredentialStoragePreference = z.infer<typeof credentialStoragePrefer
 export const credentialStorageConfigureInputSchema = z
   .object({ mode: credentialStorageModeSchema })
   .strict();
-export type CredentialStorageConfigureInput = z.infer<
-  typeof credentialStorageConfigureInputSchema
->;
+export type CredentialStorageConfigureInput = z.infer<typeof credentialStorageConfigureInputSchema>;
 
 export type CredentialStorageSettingsStatus = {
   activeMode: CredentialStorageMode;

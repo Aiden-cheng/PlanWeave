@@ -17,9 +17,7 @@ export const collaborationInvitationDocumentSchema = z
     invitations: z.record(opaqueIdentifierSchema, z.record(opaqueIdentifierSchema, recordSchema))
   })
   .strict();
-export type CollaborationInvitationDocument = z.infer<
-  typeof collaborationInvitationDocumentSchema
->;
+export type CollaborationInvitationDocument = z.infer<typeof collaborationInvitationDocumentSchema>;
 type InvitationDocument = CollaborationInvitationDocument;
 
 function isMissingFileError(error: unknown): boolean {

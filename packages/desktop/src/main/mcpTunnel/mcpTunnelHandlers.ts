@@ -117,11 +117,7 @@ async function loadTunnelClientConfig(): Promise<void> {
     encryptedRuntimeApiKeys[credentialStorageMode] ??
     (credentialStorageMode === "system" ? config.encryptedRuntimeApiKey : null);
   runtimeApiKey = decryptRuntimeApiKey(encryptedRuntimeApiKey);
-  if (
-    runtimeApiKey &&
-    encryptedRuntimeApiKey &&
-    !encryptedRuntimeApiKeys[credentialStorageMode]
-  ) {
+  if (runtimeApiKey && encryptedRuntimeApiKey && !encryptedRuntimeApiKeys[credentialStorageMode]) {
     encryptedRuntimeApiKeys[credentialStorageMode] = encryptedRuntimeApiKey;
   }
   tunnelAutoStart = config.autoStart;
@@ -161,7 +157,7 @@ async function persistTunnelClientConfig(): Promise<void> {
       encryptedRuntimeApiKey:
         credentialStorageMode === "system"
           ? encryptedRuntimeApiKey
-          : encryptedRuntimeApiKeys.system ?? persisted.encryptedRuntimeApiKey,
+          : (encryptedRuntimeApiKeys.system ?? persisted.encryptedRuntimeApiKey),
       encryptedRuntimeApiKeys,
       autoStart: tunnelAutoStart
     },
@@ -354,10 +350,12 @@ export async function stopMcpTunnelProcesses(): Promise<void> {
   await publishStatus();
 }
 
-export function registerMcpTunnelHandlers(options: {
-  credentialStorage?: DesktopCredentialStorage;
-  credentialStorageMode?: CredentialStorageMode;
-} = {}): void {
+export function registerMcpTunnelHandlers(
+  options: {
+    credentialStorage?: DesktopCredentialStorage;
+    credentialStorageMode?: CredentialStorageMode;
+  } = {}
+): void {
   if (options.credentialStorage) credentialStorage = options.credentialStorage;
   if (options.credentialStorageMode) credentialStorageMode = options.credentialStorageMode;
   ipcMain.handle(mcpTunnelInvokeChannels.getMcpTunnelStatus, () => getMcpTunnelStatus());

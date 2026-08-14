@@ -1,16 +1,6 @@
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync
-} from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  type CipherGCMTypes
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes, type CipherGCMTypes } from "node:crypto";
 import type { CredentialStorageMode } from "../../shared/credentialStorageSettings.js";
 
 export type DesktopCredentialStorage = {

@@ -282,13 +282,7 @@ export function LocalCollaborationServerPanel({
       )}
 
       {showInvitationControls && invitationPreparationAvailable ? (
-        <div
-          className={
-            appearance === "settings"
-              ? "pb-5"
-              : "px-1 py-5"
-          }
-        >
+        <div className={appearance === "settings" ? "pb-5" : "px-1 py-5"}>
           {" "}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -403,11 +397,7 @@ export function LocalCollaborationServerPanel({
         {!scopeLayout.collapsed ? (
           <div
             id="local-collaboration-scope-catalog"
-            className={
-              appearance === "settings"
-                ? "mt-4"
-                : "mt-5"
-            }
+            className={appearance === "settings" ? "mt-4" : "mt-5"}
             data-testid="local-collaboration-scope-catalog"
           >
             {catalog?.projects.map((project, projectIndex) => {
@@ -417,7 +407,7 @@ export function LocalCollaborationServerPanel({
                 <div key={project.projectId} className="mb-2 rounded-xl bg-surface-subtle">
                   <button
                     type="button"
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-4 text-left outline-none transition-colors hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-4 text-left outline-none transition-colors hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     aria-expanded={!projectCollapsed}
                     aria-controls={projectContentId}
                     aria-label={t(
@@ -451,10 +441,7 @@ export function LocalCollaborationServerPanel({
                     </span>
                   </button>
                   {!projectCollapsed ? (
-                    <div
-                      id={projectContentId}
-                      className="flex flex-col gap-1 px-2 pb-2"
-                    >
+                    <div id={projectContentId} className="flex flex-col gap-1 px-2 pb-2">
                       {project.canvases.map((canvas) => {
                         const scope = { projectId: project.projectId, canvasId: canvas.canvasId };
                         const checked = draftScopeKeys.has(scopeKey(scope));

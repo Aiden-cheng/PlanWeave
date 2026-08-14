@@ -137,8 +137,7 @@ export function useHostAdministrationController(): HostAdministrationController 
   const [status, setStatus] = useState<OperatorControlStatus | null>(null);
   const [hosts, setHosts] = useState<OperatorHostView[]>([]);
   const [loadState, setLoadState] = useState<HostAdministrationLoadState>("loading");
-  const [hostInventoryState, setHostInventoryState] =
-    useState<HostInventoryState>("loading");
+  const [hostInventoryState, setHostInventoryState] = useState<HostInventoryState>("loading");
   const [hostsLoading, setHostsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

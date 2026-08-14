@@ -556,7 +556,8 @@ export function CollaborationConnectForm({
             data-testid="people-workspace-credential-missing"
             role="status"
           >
-            {t("peopleMissingCredential")} {t(
+            {t("peopleMissingCredential")}{" "}
+            {t(
               localOwnerCredentialMissing
                 ? "peopleMissingLocalOwnerCredentialHint"
                 : "peopleMissingRemoteCredentialHint"
@@ -827,10 +828,7 @@ export function CollaborationConnectForm({
                   <div data-testid="people-connect-no-profile">{t("peopleNoProfileToConnect")}</div>
                 )}
                 {diagnosticReport ? (
-                  <details
-                    className="mt-4"
-                    data-testid="people-connection-diagnostics"
-                  >
+                  <details className="mt-4" data-testid="people-connection-diagnostics">
                     <summary className="cursor-pointer select-none font-medium text-text-strong">
                       {t("peopleConnectionDiagnostics")}
                     </summary>

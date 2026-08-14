@@ -2,9 +2,7 @@ import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promise
 import { dirname } from "node:path";
 import { operatorTokenSchema } from "@planweave-ai/agent-host-protocol";
 import { humanDeviceTokenSchema } from "@planweave-ai/collaboration-protocol/core/primitives";
-import {
-  humanCreateInvitationResponseSchema
-} from "@planweave-ai/collaboration-protocol/identity/workspace";
+import { humanCreateInvitationResponseSchema } from "@planweave-ai/collaboration-protocol/identity/workspace";
 import {
   collaborationCredentialsDocumentSchema,
   type CollaborationCredentialsDocument,
@@ -152,7 +150,11 @@ async function migrateInvitations(options: {
       if (target.invitations[profileId]?.[invitationId]) continue;
       const sourceInvitation = humanCreateInvitationResponseSchema.parse(
         JSON.parse(
-          decrypt(options.sourceStorage, sourceRecord.encryptedInvitation, "collaboration invitation")
+          decrypt(
+            options.sourceStorage,
+            sourceRecord.encryptedInvitation,
+            "collaboration invitation"
+          )
         )
       );
       target.invitations[profileId]![invitationId] = {
@@ -247,34 +249,22 @@ async function migrateMcpRuntimeApiKey(options: {
   const keys = { ...(config.encryptedRuntimeApiKeys ?? {}) };
   const legacySystemCiphertext = config.encryptedRuntimeApiKey;
   const sourceCiphertext =
-    keys[options.sourceMode] ??
-    (options.sourceMode === "system" ? legacySystemCiphertext : null);
+    keys[options.sourceMode] ?? (options.sourceMode === "system" ? legacySystemCiphertext : null);
   if (!sourceCiphertext) return 0;
   const targetCiphertext =
-    keys[options.targetMode] ??
-    (options.targetMode === "system" ? legacySystemCiphertext : null);
+    keys[options.targetMode] ?? (options.targetMode === "system" ? legacySystemCiphertext : null);
   if (targetCiphertext) {
     if (!keys[options.targetMode]) {
       keys[options.targetMode] = targetCiphertext;
-      await writeTunnelClientConfig(
-        { ...config, encryptedRuntimeApiKeys: keys },
-        options.paths
-      );
+      await writeTunnelClientConfig({ ...config, encryptedRuntimeApiKeys: keys }, options.paths);
     }
     return 0;
   }
-  const sourceKey = decrypt(
-    options.sourceStorage,
-    sourceCiphertext,
-    "MCP runtime API key"
-  ).trim();
+  const sourceKey = decrypt(options.sourceStorage, sourceCiphertext, "MCP runtime API key").trim();
   if (!sourceKey) throw new Error("credential_storage_migration_mcp_runtime_api_key_invalid");
   if (!keys[options.sourceMode]) keys[options.sourceMode] = sourceCiphertext;
   keys[options.targetMode] = encrypt(options.targetStorage, sourceKey);
-  await writeTunnelClientConfig(
-    { ...config, encryptedRuntimeApiKeys: keys },
-    options.paths
-  );
+  await writeTunnelClientConfig({ ...config, encryptedRuntimeApiKeys: keys }, options.paths);
   return 1;
 }
 

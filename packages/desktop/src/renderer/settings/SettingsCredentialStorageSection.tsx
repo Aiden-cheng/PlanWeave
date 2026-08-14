@@ -11,9 +11,7 @@ type SettingsCredentialStorageSectionProps = {
   t: ReturnType<typeof createTranslator>;
 };
 
-export function SettingsCredentialStorageSection({
-  t
-}: SettingsCredentialStorageSectionProps) {
+export function SettingsCredentialStorageSection({ t }: SettingsCredentialStorageSectionProps) {
   const [status, setStatus] = useState<CredentialStorageSettingsStatus | null>(null);
   const [savingMode, setSavingMode] = useState<CredentialStorageMode | null>(null);
   const [confirmationMode, setConfirmationMode] = useState<CredentialStorageMode | null>(null);

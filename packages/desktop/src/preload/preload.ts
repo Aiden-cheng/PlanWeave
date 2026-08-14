@@ -185,10 +185,7 @@ const credentialStorageSettingsApi: PlanWeaveCredentialStorageSettingsApi = {
     ipcRenderer.invoke(credentialStorageSettingsInvokeChannels.configure, input)
 };
 
-contextBridge.exposeInMainWorld(
-  "planweaveCredentialStorageSettings",
-  credentialStorageSettingsApi
-);
+contextBridge.exposeInMainWorld("planweaveCredentialStorageSettings", credentialStorageSettingsApi);
 
 const windowApi: PlanWeaveWindowApi = {
   getWindowMaterialCapabilities: async () =>

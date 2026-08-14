@@ -337,9 +337,9 @@ describe("credential storage migration", () => {
       paths: { credentialsPath: applicationPaths.collaborationCredentialsFile },
       safeStorage: applicationStorage
     });
-    await expect(
-      restoredCollaboration.getDeviceToken("planweave-local-project-1")
-    ).resolves.toBe(exampleHumanDeviceToken);
+    await expect(restoredCollaboration.getDeviceToken("planweave-local-project-1")).resolves.toBe(
+      exampleHumanDeviceToken
+    );
     const restoredOperator = new OperatorCredentialVault({
       paths: { credentialsPath: applicationPaths.operatorCredentialsFile },
       safeStorage: applicationStorage
@@ -358,9 +358,9 @@ describe("credential storage migration", () => {
       paths: { credentialsPath: applicationPaths.coordinatorCredentialsFile },
       safeStorage: applicationStorage
     });
-    await expect(
-      restoredCoordinator.getOperatorToken("coordinator-profile-1")
-    ).resolves.toBe(operatorToken);
+    await expect(restoredCoordinator.getOperatorToken("coordinator-profile-1")).resolves.toBe(
+      operatorToken
+    );
     const mcpConfig = await readTunnelClientConfig(mcpTunnelPaths);
     expect(Object.keys(mcpConfig.encryptedRuntimeApiKeys ?? {}).sort()).toEqual([
       "application",
