@@ -308,28 +308,19 @@ describe("runner event redaction and UTF-8 limits", () => {
     });
   });
 
-  it("preserves ordinary Bearer prose while redacting Bearer credentials", () => {
+  it("keeps standalone Bearer credentials fail-closed", () => {
     for (const content of [
-      "Bearer responsibilities overview",
-      "Bearer abcdefgh overview",
-      "Bearer plan-weave overview"
+      "Bearer abcdefgh",
+      "Bearer AbCdEfGhIjKlMnOp",
+      "Bearer abc.def.ghi",
+      "Bearer abcdefghijklmnopqrstuvwx"
     ]) {
       expect(redactRunnerEventText(content)).toEqual({
-        text: content,
-        classes: [],
-        replaced: 0
+        text: "[REDACTED:CREDENTIAL]",
+        classes: ["credential"],
+        replaced: 1
       });
     }
-    expect(redactRunnerEventText("Bearer abc.def.ghi")).toEqual({
-      text: "[REDACTED:CREDENTIAL]",
-      classes: ["credential"],
-      replaced: 1
-    });
-    expect(redactRunnerEventText("Bearer abcdefghijklmnopqrstuvwx")).toEqual({
-      text: "[REDACTED:CREDENTIAL]",
-      classes: ["credential"],
-      replaced: 1
-    });
   });
 
   it("derives the encoded JSONL record limit from the shared line contract", () => {

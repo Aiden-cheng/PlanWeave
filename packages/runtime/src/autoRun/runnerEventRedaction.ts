@@ -17,8 +17,6 @@ const sensitiveLabelPattern =
   /\b(?:client[_-]?secret|session[_-]?cookie|set-cookie|cookie)\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n,;]+)/gi;
 const standaloneBasicAuthorizationPattern = /\bbasic\s+[A-Za-z0-9+/]+={0,2}/gi;
 const standaloneBearerAuthorizationPattern = /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
-const minimumOpaqueBearerTokenLength = 24;
-const minimumBearerTokenSeparators = 2;
 const privateKeyPattern =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 const privateKeyMarkerPattern = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i;
@@ -45,16 +43,6 @@ function isBasicCredential(match: string): boolean {
   } catch {
     return false;
   }
-}
-
-function isBearerCredential(match: string): boolean {
-  const token = standaloneAuthorizationToken(match);
-  const separators = token.match(/[._~+/=-]/g)?.length ?? 0;
-  return (
-    token.length >= minimumOpaqueBearerTokenLength ||
-    /[0-9]/.test(token) ||
-    separators >= minimumBearerTokenSeparators
-  );
 }
 
 const redactionRules: readonly RedactionRule[] = [
@@ -102,8 +90,7 @@ const redactionRules: readonly RedactionRule[] = [
   {
     pattern: standaloneBearerAuthorizationPattern,
     classification: "credential",
-    replacement: "[REDACTED:CREDENTIAL]",
-    shouldRedact: isBearerCredential
+    replacement: "[REDACTED:CREDENTIAL]"
   }
 ];
 
